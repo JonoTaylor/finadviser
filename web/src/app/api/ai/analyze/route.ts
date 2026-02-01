@@ -54,14 +54,11 @@ export async function POST(request: NextRequest) {
           await addAssistantMessage(conversationId, fullResponse);
           controller.close();
         } catch (error) {
-          console.error('Agent error:', error);
-          // Send a readable error message before closing so the client
-          // doesn't just show a generic failure.
+          const detail = error instanceof Error ? error.message : String(error);
+          console.error('Agent error:', detail, error);
           try {
-            const errMsg = '\n\nSorry, something went wrong processing your request. Please try again.';
-            fullResponse += errMsg;
+            const errMsg = `\n\nSorry, something went wrong: ${detail}`;
             controller.enqueue(encoder.encode(errMsg));
-            await addAssistantMessage(conversationId, fullResponse);
             controller.close();
           } catch {
             controller.error(error);

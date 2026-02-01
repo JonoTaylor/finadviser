@@ -83,10 +83,7 @@ export async function categorizeBatch(
  * Run the agentic loop: Claude can call tools, we execute them and loop
  * until Claude produces a final text response.
  *
- * Uses streaming API connections (.stream() + finalMessage()) so the
- * Anthropic connection stays alive during long-running tool loops,
- * preventing idle-connection timeouts. Text is yielded per-block once
- * each API call completes.
+ * Yields AgentEvents so the caller can stream status updates + text to the client.
  */
 export async function* runAgent(
   userMessage: string,
@@ -106,15 +103,13 @@ export async function* runAgent(
   let fullResponse = '';
 
   for (let i = 0; i < MAX_ITERATIONS; i++) {
-    // Use .stream() + .finalMessage() so the HTTP connection to Anthropic
-    // stays alive (data flowing) even for slow responses; avoids timeouts.
-    const response = await client.messages.stream({
+    const response = await client.messages.create({
       model: MODEL,
       max_tokens: 4096,
       system: AGENT_SYSTEM_PROMPT,
       tools: TOOL_DEFINITIONS,
       messages,
-    }).finalMessage();
+    });
 
     // If Claude wants to use tools, execute them and continue the loop
     if (response.stop_reason === 'tool_use') {

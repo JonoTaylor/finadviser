@@ -1,0 +1,12 @@
+name: "test-bank"
+description: "Test Bank Format"
+date_format: "%d/%m/%Y"
+columns:
+  date: "Date"
+  description: "Description"
+  amount: "Amount"
+skip_rows: 0
+encoding: "utf-8"
+delimiter: ","
+sign_convention: "standard"
+amount_multiplier: 1.0

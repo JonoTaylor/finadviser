@@ -1,0 +1,38 @@
+# Bank CSV import configuration template
+# Copy this file and modify for your bank's CSV format.
+
+name: "my-bank"
+description: "My Bank - Everyday Account"
+
+# Date format using Python strftime codes
+# %d = day, %m = month, %Y = 4-digit year, %y = 2-digit year
+date_format: "%d/%m/%Y"
+
+# Column name mappings from your bank's CSV headers
+columns:
+  date: "Date"
+  description: "Description"
+  # Use 'amount' if your bank has a single amount column:
+  amount: "Amount"
+  # Or use 'debit' and 'credit' if split into two columns:
+  # debit: "Debit"
+  # credit: "Credit"
+  # Optional reference/check number column:
+  # reference: "Reference"
+
+# Number of header rows to skip (usually 0 if CSV has a header row)
+skip_rows: 0
+
+# File encoding (usually utf-8)
+encoding: "utf-8"
+
+# CSV delimiter
+delimiter: ","
+
+# Sign convention:
+# "standard" - positive = money in (credit), negative = money out (debit)
+# "inverted" - positive = money out (debit), negative = money in (credit)
+sign_convention: "standard"
+
+# Multiply all amounts by this value (use -1 to flip signs)
+amount_multiplier: 1.0

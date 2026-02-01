@@ -1,0 +1,228 @@
+/* Global Textual CSS for finadviser */
+
+Screen {
+    background: $surface;
+}
+
+/* Dashboard */
+
+#dashboard-grid {
+    layout: grid;
+    grid-size: 2 2;
+    grid-gutter: 1;
+    padding: 1;
+}
+
+.summary-card {
+    border: solid $primary;
+    padding: 1 2;
+    height: auto;
+    min-height: 5;
+}
+
+.summary-card .card-title {
+    text-style: bold;
+    color: $text;
+}
+
+.summary-card .card-value {
+    text-style: bold;
+    color: $success;
+}
+
+.card-value-negative {
+    color: $error;
+}
+
+#recent-transactions {
+    height: 1fr;
+    border: solid $primary;
+    padding: 1;
+}
+
+/* Transactions Screen */
+
+#transactions-container {
+    layout: vertical;
+    padding: 1;
+}
+
+#search-bar {
+    dock: top;
+    height: 3;
+    padding: 0 1;
+}
+
+#filter-bar {
+    dock: top;
+    height: 3;
+    layout: horizontal;
+    padding: 0 1;
+}
+
+#filter-bar Select {
+    width: 1fr;
+    margin-right: 1;
+}
+
+/* Import Wizard */
+
+#import-wizard {
+    layout: vertical;
+    padding: 1 2;
+}
+
+.wizard-step {
+    height: auto;
+    padding: 1;
+    border: solid $accent;
+    margin-bottom: 1;
+}
+
+.wizard-step-title {
+    text-style: bold;
+    margin-bottom: 1;
+}
+
+#preview-table {
+    height: 1fr;
+}
+
+.duplicate-row {
+    color: $text-muted;
+    text-style: italic;
+}
+
+/* Properties Screen */
+
+#properties-container {
+    layout: horizontal;
+    padding: 1;
+}
+
+#property-list {
+    width: 30;
+    border: solid $primary;
+    padding: 1;
+}
+
+#property-detail {
+    width: 1fr;
+    border: solid $primary;
+    padding: 1;
+    margin-left: 1;
+}
+
+.equity-section {
+    padding: 1;
+}
+
+/* Chat Screen */
+
+#chat-container {
+    layout: horizontal;
+    padding: 0;
+}
+
+#chat-sidebar {
+    width: 30;
+    border: solid $primary;
+    padding: 1;
+}
+
+#chat-main {
+    width: 1fr;
+    layout: vertical;
+}
+
+#chat-messages {
+    height: 1fr;
+    overflow-y: auto;
+    padding: 1;
+}
+
+#chat-input-area {
+    dock: bottom;
+    height: 5;
+    padding: 0 1;
+}
+
+.chat-message {
+    margin-bottom: 1;
+    padding: 1;
+}
+
+.chat-message-user {
+    background: $primary 20%;
+    border: solid $primary;
+}
+
+.chat-message-assistant {
+    background: $surface;
+    border: solid $accent;
+}
+
+/* Settings Screen */
+
+#settings-container {
+    layout: vertical;
+    padding: 1 2;
+    overflow-y: auto;
+}
+
+.settings-group {
+    border: solid $primary;
+    padding: 1 2;
+    margin-bottom: 1;
+    height: auto;
+}
+
+.settings-group-title {
+    text-style: bold;
+    margin-bottom: 1;
+}
+
+/* Equity bar widget */
+
+.equity-bar {
+    height: 3;
+    padding: 0 1;
+    margin: 1 0;
+}
+
+/* Net worth card */
+
+.net-worth-card {
+    border: double $success;
+    padding: 1 2;
+    height: auto;
+    text-align: center;
+}
+
+.net-worth-value {
+    text-style: bold;
+    color: $success;
+}
+
+/* Common utilities */
+
+.section-title {
+    text-style: bold;
+    padding: 0 0 1 0;
+}
+
+.muted {
+    color: $text-muted;
+}
+
+.error-text {
+    color: $error;
+}
+
+.success-text {
+    color: $success;
+}
+
+Button {
+    margin: 0 1;
+}

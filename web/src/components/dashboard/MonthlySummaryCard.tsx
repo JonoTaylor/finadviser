@@ -58,7 +58,7 @@ export default function MonthlySummaryCard({
       <Box
         sx={{
           position: 'absolute', top: 0, left: 0, right: 0, height: 3,
-          background: 'linear-gradient(90deg, #818CF8, #F472B6)',
+          background: 'linear-gradient(90deg, #E8C547, #B8A9E8)',
         }}
       />
       <CardContent>
@@ -68,7 +68,7 @@ export default function MonthlySummaryCard({
               sx={{
                 width: 36, height: 36, borderRadius: 2.5,
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
-                bgcolor: alpha('#818CF8', 0.12),
+                bgcolor: alpha('#E8C547', 0.12),
               }}
             >
               <CalendarMonthRoundedIcon sx={{ fontSize: 20, color: 'primary.main' }} />
@@ -102,7 +102,7 @@ export default function MonthlySummaryCard({
           <Box
             sx={{
               height: '1px',
-              background: `linear-gradient(90deg, transparent, ${alpha('#818CF8', 0.3)}, transparent)`,
+              background: `linear-gradient(90deg, transparent, ${alpha('#E8C547', 0.3)}, transparent)`,
             }}
           />
           <Row

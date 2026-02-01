@@ -80,10 +80,11 @@ export async function categorizeBatch(
 }
 
 /**
- * Run the agentic loop: Claude can call tools, we execute them and loop
- * until Claude produces a final text response.
+ * Run the agentic loop with streaming: Claude can call tools, we execute
+ * them and loop until Claude produces a final text response.
  *
- * Yields AgentEvents so the caller can stream status updates + text to the client.
+ * Uses streaming API calls so text is delivered incrementally and
+ * long-running tool loops don't cause idle-connection timeouts.
  */
 export async function* runAgent(
   userMessage: string,
@@ -103,7 +104,7 @@ export async function* runAgent(
   let fullResponse = '';
 
   for (let i = 0; i < MAX_ITERATIONS; i++) {
-    const response = await client.messages.create({
+    const stream = client.messages.stream({
       model: MODEL,
       max_tokens: 4096,
       system: AGENT_SYSTEM_PROMPT,
@@ -111,12 +112,23 @@ export async function* runAgent(
       messages,
     });
 
+    // Stream text deltas for real-time display
+    for await (const event of stream) {
+      if (
+        event.type === 'content_block_delta' &&
+        event.delta.type === 'text_delta'
+      ) {
+        fullResponse += event.delta.text;
+        yield { type: 'text', content: event.delta.text };
+      }
+    }
+
+    const response = await stream.finalMessage();
+
     // If Claude wants to use tools, execute them and continue the loop
     if (response.stop_reason === 'tool_use') {
-      // Add the assistant's response (which contains tool_use blocks) to messages
       messages.push({ role: 'assistant', content: response.content });
 
-      // Execute each tool call
       const toolResults: Anthropic.Messages.ToolResultBlockParam[] = [];
       for (const block of response.content) {
         if (block.type === 'tool_use') {
@@ -133,14 +145,14 @@ export async function* runAgent(
       continue;
     }
 
-    // No tool use — extract text blocks as the final response
-    for (const block of response.content) {
-      if (block.type === 'text') {
-        fullResponse += block.text;
-        yield { type: 'text', content: block.text };
-      }
-    }
+    // Final text response — text was already streamed above
     break;
+  }
+
+  if (!fullResponse) {
+    const fallback = 'I had trouble processing your request. Please try again or rephrase your question.';
+    yield { type: 'text', content: fallback };
+    fullResponse = fallback;
   }
 
   return fullResponse;

@@ -20,7 +20,7 @@ interface Tip {
 }
 
 const TYPE_CONFIG: Record<string, { icon: React.ReactNode; color: string }> = {
-  tip:     { icon: <LightbulbRoundedIcon sx={{ fontSize: 18 }} />,     color: '#FBBF24' },
+  tip:     { icon: <LightbulbRoundedIcon sx={{ fontSize: 18 }} />,     color: '#E8C547' },
   warning: { icon: <WarningAmberRoundedIcon sx={{ fontSize: 18 }} />,  color: '#FB7185' },
   insight: { icon: <InsightsRoundedIcon sx={{ fontSize: 18 }} />,      color: '#60A5FA' },
 };
@@ -47,7 +47,7 @@ export default function AiInsightsCard() {
           inset: 0,
           borderRadius: 'inherit',
           padding: '1px',
-          background: 'linear-gradient(135deg, #818CF8, #F472B6, #FB923C)',
+          background: 'linear-gradient(135deg, #E8C547, #B8A9E8, #F472B6)',
           WebkitMask: 'linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0)',
           WebkitMaskComposite: 'xor',
           maskComposite: 'exclude',
@@ -61,10 +61,10 @@ export default function AiInsightsCard() {
             sx={{
               width: 36, height: 36, borderRadius: 2.5,
               display: 'flex', alignItems: 'center', justifyContent: 'center',
-              bgcolor: alpha('#FBBF24', 0.12),
+              bgcolor: alpha('#E8C547', 0.12),
             }}
           >
-            <LightbulbRoundedIcon sx={{ fontSize: 20, color: '#FBBF24' }} />
+            <LightbulbRoundedIcon sx={{ fontSize: 20, color: '#E8C547' }} />
           </Box>
           <Typography variant="h6">AI Insights</Typography>
           <Chip label={tips.length} size="small" sx={{ ml: 'auto', fontWeight: 600 }} />

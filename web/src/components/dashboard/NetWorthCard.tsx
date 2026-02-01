@@ -59,7 +59,7 @@ export default function NetWorthCard({ balances }: { balances: Balance[] }) {
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              bgcolor: alpha('#818CF8', 0.12),
+              bgcolor: alpha('#E8C547', 0.12),
             }}
           >
             <AccountBalanceWalletRoundedIcon sx={{ fontSize: 20, color: 'primary.main' }} />

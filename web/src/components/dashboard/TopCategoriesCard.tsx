@@ -33,7 +33,7 @@ export default function TopCategoriesCard({ spending }: { spending: SpendingRow[
       <Box
         sx={{
           position: 'absolute', top: 0, left: 0, right: 0, height: 3,
-          background: 'linear-gradient(90deg, #FB923C, #F97316)',
+          background: 'linear-gradient(90deg, #E8C547, #C9A82E)',
         }}
       />
       <CardContent>
@@ -42,10 +42,10 @@ export default function TopCategoriesCard({ spending }: { spending: SpendingRow[
             sx={{
               width: 36, height: 36, borderRadius: 2.5,
               display: 'flex', alignItems: 'center', justifyContent: 'center',
-              bgcolor: alpha('#FB923C', 0.12),
+              bgcolor: alpha('#E8C547', 0.12),
             }}
           >
-            <DonutSmallRoundedIcon sx={{ fontSize: 20, color: '#FB923C' }} />
+            <DonutSmallRoundedIcon sx={{ fontSize: 20, color: '#E8C547' }} />
           </Box>
           <Typography variant="subtitle2" color="text.secondary">Top Categories</Typography>
         </Box>

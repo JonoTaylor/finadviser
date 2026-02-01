@@ -2,6 +2,9 @@ import { NextRequest } from 'next/server';
 import { runAgent } from '@/lib/ai/claude-client';
 import { getHistory, addUserMessage, addAssistantMessage, getOrCreateConversation } from '@/lib/ai/conversation-manager';
 
+// Allow up to 120s for agentic tool-use loops
+export const maxDuration = 120;
+
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
@@ -21,6 +24,9 @@ export async function POST(request: NextRequest) {
 
     const encoder = new TextEncoder();
     let fullResponse = '';
+    // Track whether the last chunk sent was text without a trailing newline,
+    // so we can inject a separator before JSON metadata lines.
+    let textNeedsSeparator = false;
 
     const stream = new ReadableStream({
       async start(controller) {
@@ -30,13 +36,18 @@ export async function POST(request: NextRequest) {
 
           for await (const event of runAgent(userMessage, historyWithoutLast)) {
             if (event.type === 'tool') {
-              // Send tool status as a JSON line the frontend can parse
+              // Ensure JSON metadata starts on its own line
+              if (textNeedsSeparator) {
+                controller.enqueue(encoder.encode('\n'));
+                textNeedsSeparator = false;
+              }
               controller.enqueue(
                 encoder.encode(JSON.stringify({ tool: event.name, label: event.label }) + '\n'),
               );
             } else if (event.type === 'text') {
               fullResponse += event.content;
               controller.enqueue(encoder.encode(event.content));
+              textNeedsSeparator = event.content.length > 0 && !event.content.endsWith('\n');
             }
           }
 
@@ -44,7 +55,17 @@ export async function POST(request: NextRequest) {
           controller.close();
         } catch (error) {
           console.error('Agent error:', error);
-          controller.error(error);
+          // Send a readable error message before closing so the client
+          // doesn't just show a generic failure.
+          try {
+            const errMsg = '\n\nSorry, something went wrong processing your request. Please try again.';
+            fullResponse += errMsg;
+            controller.enqueue(encoder.encode(errMsg));
+            await addAssistantMessage(conversationId, fullResponse);
+            controller.close();
+          } catch {
+            controller.error(error);
+          }
         }
       },
     });

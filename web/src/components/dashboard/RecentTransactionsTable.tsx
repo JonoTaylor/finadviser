@@ -40,7 +40,7 @@ export default function RecentTransactionsTable({ entries }: { entries: Entry[] 
             sx={{
               width: 36, height: 36, borderRadius: 2.5,
               display: 'flex', alignItems: 'center', justifyContent: 'center',
-              bgcolor: alpha('#F472B6', 0.12),
+              bgcolor: alpha('#B8A9E8', 0.12),
             }}
           >
             <ReceiptLongRoundedIcon sx={{ fontSize: 20, color: 'secondary.main' }} />
@@ -60,7 +60,7 @@ export default function RecentTransactionsTable({ entries }: { entries: Entry[] 
           <Table size="small">
             <TableHead>
               <TableRow
-                sx={{ bgcolor: alpha('#818CF8', 0.04) }}
+                sx={{ bgcolor: alpha('#E8C547', 0.04) }}
               >
                 <TableCell>Date</TableCell>
                 <TableCell>Description</TableCell>

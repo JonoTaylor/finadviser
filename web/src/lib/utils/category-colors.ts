@@ -1,7 +1,7 @@
 // Warm premium palette for category identification
 const CATEGORY_COLORS = [
-  '#818CF8', // indigo (primary)
-  '#F472B6', // pink
+  '#E8C547', // gold (primary)
+  '#B8A9E8', // lavender
   '#FB923C', // orange
   '#60A5FA', // blue
   '#4ADE80', // emerald

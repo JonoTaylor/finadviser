@@ -222,7 +222,7 @@ export default function ChatPage() {
                 sx={{
                   width: 64, height: 64, borderRadius: 4, mx: 'auto', mb: 2,
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  background: 'linear-gradient(135deg, rgba(129,140,248,0.15), rgba(244,114,182,0.15))',
+                  background: 'linear-gradient(135deg, rgba(232,197,71,0.15), rgba(184,169,232,0.15))',
                 }}
               >
                 <AutoAwesomeRoundedIcon sx={{ fontSize: 32, color: 'primary.main' }} />
@@ -259,11 +259,11 @@ export default function ChatPage() {
                     maxWidth: '80%',
                     alignSelf: msg.role === 'user' ? 'flex-end' : 'flex-start',
                     bgcolor: msg.role === 'user'
-                      ? alpha('#818CF8', 0.1)
-                      : alpha('#F472B6', 0.06),
+                      ? alpha('#E8C547', 0.1)
+                      : alpha('#B8A9E8', 0.06),
                     ml: msg.role === 'user' ? 'auto' : 0,
                     borderLeft: msg.role === 'assistant' ? '3px solid' : 'none',
-                    borderColor: msg.role === 'assistant' ? 'secondary.main' : 'transparent',
+                    borderColor: msg.role === 'assistant' ? alpha('#B8A9E8', 0.3) : 'transparent',
                     borderRadius: 4,
                   }}
                 >
@@ -299,7 +299,7 @@ export default function ChatPage() {
                   elevation={0}
                   sx={{
                     p: 2, maxWidth: '80%',
-                    bgcolor: alpha('#F472B6', 0.06),
+                    bgcolor: alpha('#B8A9E8', 0.06),
                     borderLeft: '3px solid',
                     borderColor: 'secondary.main',
                     borderRadius: 4,
@@ -352,8 +352,8 @@ export default function ChatPage() {
             onClick={() => sendMessage(input)}
             disabled={loading || !input.trim()}
             sx={{
-              bgcolor: loading || !input.trim() ? 'transparent' : alpha('#818CF8', 0.12),
-              '&:hover': { bgcolor: alpha('#818CF8', 0.2) },
+              bgcolor: loading || !input.trim() ? 'transparent' : alpha('#E8C547', 0.12),
+              '&:hover': { bgcolor: alpha('#E8C547', 0.2) },
             }}
           >
             <SendRoundedIcon />

@@ -146,7 +146,7 @@ export default function Sidebar({ children }: { children: React.ReactNode }) {
           '& .MuiDrawer-paper': {
             width: DRAWER_WIDTH,
             boxSizing: 'border-box',
-            borderRight: `1px solid ${alpha('#fff', 0.04)}`,
+            borderRight: `1px solid rgba(184,169,232,0.04)`,
             ...(isMobile && glassCard),
           },
         }}

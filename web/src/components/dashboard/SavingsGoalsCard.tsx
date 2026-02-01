@@ -6,6 +6,7 @@ import SavingsRoundedIcon from '@mui/icons-material/SavingsRounded';
 import ChatRoundedIcon from '@mui/icons-material/ChatRounded';
 import useSWR from 'swr';
 import Link from 'next/link';
+import { lightCard } from '@/theme/theme';
 
 const fetcher = (url: string) => fetch(url).then(r => r.json());
 
@@ -21,7 +22,7 @@ interface SavingsGoal {
 function getColor(pct: number): string {
   if (pct >= 75) return '#4ADE80';
   if (pct >= 40) return '#FBBF24';
-  return '#818CF8';
+  return '#8E7DC0';
 }
 
 export default function SavingsGoalsCard() {
@@ -31,21 +32,21 @@ export default function SavingsGoalsCard() {
 
   if (activeGoals.length === 0) {
     return (
-      <Card sx={{ height: '100%' }}>
+      <Card sx={{ height: '100%', ...lightCard }}>
         <CardContent>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
             <Box
               sx={{
                 width: 36, height: 36, borderRadius: 2.5,
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
-                bgcolor: alpha('#F472B6', 0.12),
+                bgcolor: alpha('#8E7DC0', 0.15),
               }}
             >
-              <SavingsRoundedIcon sx={{ fontSize: 20, color: '#F472B6' }} />
+              <SavingsRoundedIcon sx={{ fontSize: 20, color: '#8E7DC0' }} />
             </Box>
-            <Typography variant="subtitle2" color="text.secondary">Savings Goals</Typography>
+            <Typography variant="subtitle2" sx={{ color: '#1A1730' }}>Savings Goals</Typography>
           </Box>
-          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+          <Typography variant="body2" sx={{ color: alpha('#1A1730', 0.7), mb: 2 }}>
             No savings goals yet. Use the AI chat to set targets and track your progress.
           </Typography>
           <Button
@@ -63,11 +64,11 @@ export default function SavingsGoalsCard() {
   }
 
   return (
-    <Card sx={{ height: '100%', position: 'relative', overflow: 'hidden' }}>
+    <Card sx={{ height: '100%', position: 'relative', overflow: 'hidden', ...lightCard }}>
       <Box
         sx={{
           position: 'absolute', top: 0, left: 0, right: 0, height: 3,
-          background: 'linear-gradient(90deg, #F472B6, #FB923C)',
+          background: 'linear-gradient(90deg, #E8C547, #F472B6)',
         }}
       />
       <CardContent>
@@ -76,12 +77,12 @@ export default function SavingsGoalsCard() {
             sx={{
               width: 36, height: 36, borderRadius: 2.5,
               display: 'flex', alignItems: 'center', justifyContent: 'center',
-              bgcolor: alpha('#F472B6', 0.12),
+              bgcolor: alpha('#8E7DC0', 0.15),
             }}
           >
-            <SavingsRoundedIcon sx={{ fontSize: 20, color: '#F472B6' }} />
+            <SavingsRoundedIcon sx={{ fontSize: 20, color: '#8E7DC0' }} />
           </Box>
-          <Typography variant="subtitle2" color="text.secondary">Savings Goals</Typography>
+          <Typography variant="subtitle2" sx={{ color: '#1A1730' }}>Savings Goals</Typography>
         </Box>
 
         <Stack spacing={2}>
@@ -105,7 +106,7 @@ export default function SavingsGoalsCard() {
                   <svg width={size} height={size} style={{ transform: 'rotate(-90deg)' }}>
                     <circle
                       cx={size / 2} cy={size / 2} r={radius}
-                      fill="none" stroke={alpha(color, 0.12)} strokeWidth={stroke}
+                      fill="none" stroke={alpha(color, 0.2)} strokeWidth={stroke}
                     />
                     <circle
                       cx={size / 2} cy={size / 2} r={radius}
@@ -128,10 +129,10 @@ export default function SavingsGoalsCard() {
                   </Box>
                 </Box>
                 <Box sx={{ flex: 1, minWidth: 0 }}>
-                  <Typography variant="body2" sx={{ fontWeight: 500 }} noWrap>
+                  <Typography variant="body2" sx={{ fontWeight: 500, color: '#1A1730' }} noWrap>
                     {goal.name}
                   </Typography>
-                  <Typography variant="caption" color="text.secondary">
+                  <Typography variant="caption" sx={{ color: alpha('#1A1730', 0.6) }}>
                     £{remaining.toFixed(0)} remaining
                     {goal.targetDate ? ` · by ${goal.targetDate}` : ''}
                   </Typography>

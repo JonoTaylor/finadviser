@@ -2,42 +2,42 @@
 
 import { createTheme, alpha } from '@mui/material/styles';
 
-// ── Warm Premium Dark Palette ──────────────────────────────────────
-// Primary:   indigo — warm, premium fintech feel
-// Secondary: pink   — playful warmth, contrast
-// Tertiary:  orange — personality, highlights
-// Surfaces:  warm charcoal tonal scale
+// ── Deep Navy-Purple + Gold/Yellow Palette ──────────────────────────
+// Primary:   gold — warm, premium accent
+// Secondary: lavender — soft, modern contrast
+// Tertiary:  pink — supporting accent
+// Surfaces:  deep navy tonal scale
 // ─────────────────────────────────────────────────────────────────────
 
 const palette = {
-  primary:   { main: '#818CF8', light: '#A5B4FC', dark: '#6366F1', contrastText: '#1E1B4B' },
-  secondary: { main: '#F472B6', light: '#F9A8D4', dark: '#EC4899', contrastText: '#4A0D2B' },
-  tertiary:  { main: '#FB923C', light: '#FDBA74', dark: '#F97316' },
+  primary:   { main: '#E8C547', light: '#F2DA7A', dark: '#C9A82E', contrastText: '#1A1730' },
+  secondary: { main: '#B8A9E8', light: '#D4C9F5', dark: '#8E7DC0', contrastText: '#1A1730' },
+  tertiary:  { main: '#F472B6', light: '#F9A8D4', dark: '#EC4899' },
 
   success: { main: '#4ADE80', dark: '#16A34A' },
   error:   { main: '#FB7185', dark: '#E11D48' },
   warning: { main: '#FBBF24', dark: '#D97706' },
   info:    { main: '#60A5FA', dark: '#2563EB' },
 
-  // Warm tonal surface scale
-  bg:      '#0E0E12',
-  surface: '#141418',
-  surfaceContainerLow:     '#18181F',
-  surfaceContainer:        '#1E1E28',
-  surfaceContainerHigh:    '#282833',
-  surfaceContainerHighest: '#323242',
+  // Deep navy tonal surface scale
+  bg:      '#12101F',
+  surface: '#1A1730',
+  surfaceContainerLow:     '#1F1C35',
+  surfaceContainer:        '#262340',
+  surfaceContainerHigh:    '#302D4A',
+  surfaceContainerHighest: '#3A3655',
 
-  outline:        'rgba(255,255,255,0.10)',
-  outlineVariant: 'rgba(255,255,255,0.06)',
-  textPrimary:    '#F0F0F8',
-  textSecondary:  '#9694A8',
+  outline:        'rgba(184,169,232,0.12)',
+  outlineVariant: 'rgba(184,169,232,0.06)',
+  textPrimary:    '#F0EDF8',
+  textSecondary:  '#8E8AAE',
 };
 
 // ── Visual Effect Utilities ──────────────────────────────────────────
 export const glassCard = {
-  backgroundColor: alpha(palette.surfaceContainer, 0.55),
+  backgroundColor: 'rgba(26,23,48,0.55)',
   backdropFilter: 'blur(20px) saturate(180%)',
-  border: `1px solid ${alpha('#fff', 0.08)}`,
+  border: `1px solid rgba(184,169,232,0.08)`,
 };
 
 export const glowShadow = {
@@ -53,6 +53,12 @@ export const gradientText = (from: string, to: string) => ({
   WebkitTextFillColor: 'transparent',
   backgroundClip: 'text',
 });
+
+export const lightCard = {
+  backgroundColor: '#F0EDF8',
+  border: '1px solid rgba(184,169,232,0.2)',
+  backdropFilter: 'none',
+};
 
 const theme = createTheme({
   palette: {
@@ -88,14 +94,14 @@ const theme = createTheme({
         body: {
           backgroundColor: palette.bg,
           backgroundImage: `
-            radial-gradient(ellipse 80% 60% at 10% 90%, ${alpha(palette.primary.main, 0.06)} 0%, transparent 60%),
-            radial-gradient(ellipse 60% 50% at 90% 10%, ${alpha(palette.secondary.main, 0.05)} 0%, transparent 60%)
+            radial-gradient(ellipse 80% 60% at 10% 90%, ${alpha(palette.secondary.main, 0.06)} 0%, transparent 60%),
+            radial-gradient(ellipse 60% 50% at 90% 10%, ${alpha(palette.primary.main, 0.05)} 0%, transparent 60%)
           `,
           backgroundAttachment: 'fixed',
         },
         '::-webkit-scrollbar': { width: 6 },
         '::-webkit-scrollbar-track': { background: 'transparent' },
-        '::-webkit-scrollbar-thumb': { background: 'rgba(255,255,255,0.10)', borderRadius: 3 },
+        '::-webkit-scrollbar-thumb': { background: 'rgba(184,169,232,0.12)', borderRadius: 3 },
       },
     },
     MuiPaper: {
@@ -140,7 +146,7 @@ const theme = createTheme({
           },
         },
         outlined: {
-          borderColor: palette.outline,
+          borderColor: alpha(palette.secondary.main, 0.2),
           '&:hover': { borderColor: palette.primary.main, backgroundColor: alpha(palette.primary.main, 0.08) },
         },
       },

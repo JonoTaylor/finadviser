@@ -198,3 +198,26 @@ export const aiMessages = pgTable('ai_messages', {
   content: text('content').notNull(),
   createdAt: timestamp('created_at').notNull().defaultNow(),
 });
+
+export const budgets = pgTable('budgets', {
+  id: serial('id').primaryKey(),
+  categoryId: integer('category_id').notNull().references(() => categories.id).unique(),
+  monthlyLimit: text('monthly_limit').notNull(),
+  effectiveFrom: text('effective_from').notNull(),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+});
+
+export const savingsGoalStatusEnum = pgEnum('savings_goal_status', ['active', 'completed', 'cancelled']);
+
+export const savingsGoals = pgTable('savings_goals', {
+  id: serial('id').primaryKey(),
+  name: text('name').notNull(),
+  targetAmount: text('target_amount').notNull(),
+  currentAmount: text('current_amount').notNull().default('0'),
+  targetDate: text('target_date'),
+  accountId: integer('account_id').references(() => accounts.id),
+  status: savingsGoalStatusEnum('status').notNull().default('active'),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+});

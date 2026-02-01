@@ -137,6 +137,15 @@ export const propertyRepo = {
       .orderBy(mortgages.startDate);
   },
 
+  async getMortgageRates(mortgageId: number) {
+    const db = getDb();
+    return db
+      .select()
+      .from(mortgageRateHistory)
+      .where(eq(mortgageRateHistory.mortgageId, mortgageId))
+      .orderBy(sql`effective_date DESC`);
+  },
+
   async addMortgageRate(mortgageId: number, rate: string, effectiveDate: string) {
     const db = getDb();
     const [row] = await db

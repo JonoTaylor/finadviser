@@ -10,11 +10,13 @@ import { alpha } from '@mui/material/styles';
 import SendRoundedIcon from '@mui/icons-material/SendRounded';
 import AddRoundedIcon from '@mui/icons-material/AddRounded';
 import AutoAwesomeRoundedIcon from '@mui/icons-material/AutoAwesomeRounded';
-import BarChartRoundedIcon from '@mui/icons-material/BarChartRounded';
-import AccountBalanceRoundedIcon from '@mui/icons-material/AccountBalanceRounded';
-import HomeWorkRoundedIcon from '@mui/icons-material/HomeWorkRounded';
 import TrendingUpRoundedIcon from '@mui/icons-material/TrendingUpRounded';
 import CategoryRoundedIcon from '@mui/icons-material/CategoryRounded';
+import AccountBalanceWalletRoundedIcon from '@mui/icons-material/AccountBalanceWalletRounded';
+import SavingsRoundedIcon from '@mui/icons-material/SavingsRounded';
+import ShoppingCartRoundedIcon from '@mui/icons-material/ShoppingCartRounded';
+import CreditCardRoundedIcon from '@mui/icons-material/CreditCardRounded';
+import HealthAndSafetyRoundedIcon from '@mui/icons-material/HealthAndSafetyRounded';
 import WarningAmberRoundedIcon from '@mui/icons-material/WarningAmberRounded';
 import MemoryRoundedIcon from '@mui/icons-material/MemoryRounded';
 import HistoryRoundedIcon from '@mui/icons-material/HistoryRounded';
@@ -54,12 +56,14 @@ const markdownSx = {
 } as const;
 
 const QUICK_PROMPTS = [
-  { label: 'Spending Summary', prompt: 'Give me a spending summary for the last few months', icon: <BarChartRoundedIcon sx={{ fontSize: 18 }} /> },
-  { label: 'Budget Check', prompt: 'Analyze my budget and suggest improvements', icon: <AccountBalanceRoundedIcon sx={{ fontSize: 18 }} /> },
-  { label: 'Categorize Spending', prompt: 'Review my uncategorized transactions and categorize them', icon: <CategoryRoundedIcon sx={{ fontSize: 18 }} /> },
-  { label: 'Property Report', prompt: 'Generate a property equity report', icon: <HomeWorkRoundedIcon sx={{ fontSize: 18 }} /> },
-  { label: 'Net Worth', prompt: 'Analyze my net worth and financial health', icon: <TrendingUpRoundedIcon sx={{ fontSize: 18 }} /> },
-  { label: 'What to Watch', prompt: 'What should I watch out for in my finances? Flag any concerns or unusual patterns.', icon: <WarningAmberRoundedIcon sx={{ fontSize: 18 }} /> },
+  { label: 'Spending Analysis', prompt: 'Break down my spending for the last month', icon: <TrendingUpRoundedIcon sx={{ fontSize: 18 }} /> },
+  { label: 'Categorize', prompt: 'Review my uncategorized transactions and categorize them', icon: <CategoryRoundedIcon sx={{ fontSize: 18 }} /> },
+  { label: 'Budget Review', prompt: 'How am I tracking against my budgets this month?', icon: <AccountBalanceWalletRoundedIcon sx={{ fontSize: 18 }} /> },
+  { label: 'Savings Goals', prompt: 'What\'s my progress on savings goals?', icon: <SavingsRoundedIcon sx={{ fontSize: 18 }} /> },
+  { label: 'Can I Afford...', prompt: 'Can I afford a big purchase? Help me figure out if it\'s feasible', icon: <ShoppingCartRoundedIcon sx={{ fontSize: 18 }} /> },
+  { label: 'Debt Strategy', prompt: 'Analyze my debts and suggest an optimal repayment strategy', icon: <CreditCardRoundedIcon sx={{ fontSize: 18 }} /> },
+  { label: 'Health Check', prompt: 'Run a full financial health check on my finances', icon: <HealthAndSafetyRoundedIcon sx={{ fontSize: 18 }} /> },
+  { label: 'What to Watch', prompt: 'What should I watch out for in my finances?', icon: <WarningAmberRoundedIcon sx={{ fontSize: 18 }} /> },
 ];
 
 interface Message {
@@ -227,7 +231,7 @@ export default function ChatPage() {
                 Ask me anything
               </Typography>
               <Typography variant="body2" color="text.secondary" sx={{ mb: 4, maxWidth: 420, mx: 'auto' }}>
-                I can analyze your spending, categorize transactions, check your budget, track property equity, and flag things you should watch out for.
+                I can analyze spending, manage budgets, track savings goals, assess affordability, optimize debt, review property investments, and flag financial concerns.
               </Typography>
               <Stack direction="row" spacing={1} justifyContent="center" flexWrap="wrap" useFlexGap>
                 {QUICK_PROMPTS.map((qp) => (

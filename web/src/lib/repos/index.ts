@@ -6,3 +6,5 @@ export { conversationRepo } from './conversation.repo';
 export { fingerprintRepo } from './fingerprint.repo';
 export { importBatchRepo } from './import-batch.repo';
 export { tipRepo } from './tip.repo';
+export { budgetRepo } from './budget.repo';
+export { savingsGoalRepo } from './savings-goal.repo';

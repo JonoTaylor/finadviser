@@ -1,10 +1,6 @@
-import { PDFParse } from 'pdf-parse';
 import Anthropic from '@anthropic-ai/sdk';
 import type { RawTransaction } from '@/lib/types';
 import crypto from 'crypto';
-
-// Disable worker for server-side usage (Node.js handles it in-process)
-PDFParse.setWorker('');
 
 const PDF_EXTRACTION_PROMPT = `You are a financial data extraction assistant. Extract all transactions from this bank statement text.
 
@@ -27,17 +23,23 @@ If you cannot find any transactions, return an empty array [].
 Bank statement text:
 `;
 
-export async function parsePDF(fileBuffer: Buffer): Promise<RawTransaction[]> {
-  // Extract text from PDF using pdf-parse v4 class API
-  const pdf = new PDFParse({ data: new Uint8Array(fileBuffer) });
+async function extractTextFromPDF(fileBuffer: Buffer): Promise<string> {
+  // Dynamic import to avoid loading pdfjs-dist at module init time
+  // (breaks Vercel serverless if loaded statically)
+  const { PDFParse } = await import('pdf-parse');
+  PDFParse.setWorker('');
 
-  let text: string;
+  const pdf = new PDFParse({ data: new Uint8Array(fileBuffer) });
   try {
     const textResult = await pdf.getText();
-    text = textResult.text;
+    return textResult.text;
   } finally {
     await pdf.destroy().catch(() => {});
   }
+}
+
+export async function parsePDF(fileBuffer: Buffer): Promise<RawTransaction[]> {
+  const text = await extractTextFromPDF(fileBuffer);
 
   if (!text || text.trim().length < 50) {
     throw new Error('Scanned/image-only PDFs are not supported. Please use a text-based PDF or CSV export.');
@@ -57,7 +59,7 @@ export async function parsePDF(fileBuffer: Buffer): Promise<RawTransaction[]> {
     messages: [
       {
         role: 'user',
-        content: PDF_EXTRACTION_PROMPT + text.slice(0, 15000), // Cap text length
+        content: PDF_EXTRACTION_PROMPT + text.slice(0, 15000),
       },
     ],
   });

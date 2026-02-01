@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { previewImport } from '@/lib/import/import-pipeline';
-import { parsePDF } from '@/lib/import/pdf-parser';
 import { categorizeTransactions } from '@/lib/import/categorizer';
 
 export async function POST(request: NextRequest) {
@@ -15,7 +14,8 @@ export async function POST(request: NextRequest) {
     const isPdf = file.name.toLowerCase().endsWith('.pdf') || bankConfig === 'pdf';
 
     if (isPdf) {
-      // PDF flow: use AI extraction
+      // Dynamic import — pdf-parse + pdfjs-dist crash Vercel if loaded at module init
+      const { parsePDF } = await import('@/lib/import/pdf-parser');
       const arrayBuffer = await file.arrayBuffer();
       const buffer = Buffer.from(arrayBuffer);
       let transactions = await parsePDF(buffer);

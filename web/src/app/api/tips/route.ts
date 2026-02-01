@@ -5,8 +5,9 @@ export async function GET() {
   try {
     const tips = await tipRepo.listActive();
     return NextResponse.json(tips);
-  } catch (error) {
-    return NextResponse.json({ error: 'Failed to fetch tips' }, { status: 500 });
+  } catch {
+    // Table may not exist yet — return empty array gracefully
+    return NextResponse.json([]);
   }
 }
 

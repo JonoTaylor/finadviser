@@ -14,7 +14,7 @@ export async function categorizeTransactions(
   return transactions;
 }
 
-function matchRule(
+export function matchRule(
   description: string,
   rules: Array<{ pattern: string; categoryId: number; matchType: string | null }>,
 ): number | null {

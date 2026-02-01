@@ -2,6 +2,7 @@
 
 import { Box, Typography, Card, CardContent, Button, Stack, Chip, Divider } from '@mui/material';
 import DownloadIcon from '@mui/icons-material/Download';
+import RulesManager from '@/components/settings/RulesManager';
 
 export default function SettingsPage() {
   const handleExportCSV = () => {
@@ -43,6 +44,8 @@ export default function SettingsPage() {
             </Typography>
           </CardContent>
         </Card>
+
+        <RulesManager />
 
         <Card>
           <CardContent>

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import {
   Dialog,
   DialogTitle,
@@ -9,6 +9,8 @@ import {
   Button,
   Autocomplete,
   TextField,
+  FormControlLabel,
+  Checkbox,
 } from '@mui/material';
 
 interface Category {
@@ -19,29 +21,35 @@ interface Category {
 export default function CategoryEditDialog({
   open,
   currentCategoryId,
+  description,
   categories,
   onClose,
   onSave,
 }: {
   open: boolean;
   currentCategoryId: number | null;
+  description?: string;
   categories: Category[];
   onClose: () => void;
-  onSave: (categoryId: number) => void;
+  onSave: (categoryId: number, createRule: boolean) => void;
 }) {
   const [selected, setSelected] = useState<Category | null>(null);
+  const [createRule, setCreateRule] = useState(true);
 
-  useEffect(() => {
-    if (open && currentCategoryId) {
-      const cat = categories.find(c => c.id === currentCategoryId);
-      setSelected(cat ?? null);
-    } else {
-      setSelected(null);
-    }
-  }, [open, currentCategoryId, categories]);
+  const handleEnter = () => {
+    const cat = currentCategoryId ? categories.find(c => c.id === currentCategoryId) ?? null : null;
+    setSelected(cat);
+    setCreateRule(true);
+  };
 
   return (
-    <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
+    <Dialog
+      open={open}
+      onClose={onClose}
+      maxWidth="sm"
+      fullWidth
+      TransitionProps={{ onEnter: handleEnter }}
+    >
       <DialogTitle>Change Category</DialogTitle>
       <DialogContent>
         <Autocomplete
@@ -52,12 +60,25 @@ export default function CategoryEditDialog({
           onChange={(_, val) => setSelected(val)}
           renderInput={(params) => <TextField {...params} label="Category" />}
         />
+        {description && (
+          <FormControlLabel
+            sx={{ mt: 1 }}
+            control={
+              <Checkbox
+                checked={createRule}
+                onChange={(e) => setCreateRule(e.target.checked)}
+                size="small"
+              />
+            }
+            label="Create rule for future transactions"
+          />
+        )}
       </DialogContent>
       <DialogActions>
         <Button onClick={onClose}>Cancel</Button>
         <Button
           variant="contained"
-          onClick={() => selected && onSave(selected.id)}
+          onClick={() => selected && onSave(selected.id, createRule)}
           disabled={!selected}
         >
           Save

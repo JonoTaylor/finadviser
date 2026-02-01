@@ -148,6 +148,18 @@ export const journalRepo = {
     }>;
   },
 
+  async listUncategorized(limit = 500) {
+    const db = getDb();
+    const rows = await db.execute(sql`
+      SELECT id, description
+      FROM journal_entries
+      WHERE category_id IS NULL
+      ORDER BY date DESC
+      LIMIT ${limit}
+    `);
+    return rows.rows as Array<{ id: number; description: string }>;
+  },
+
   async search(query: string, limit = 50) {
     const db = getDb();
     const rows = await db.execute(sql`

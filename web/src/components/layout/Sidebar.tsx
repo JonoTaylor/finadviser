@@ -4,6 +4,7 @@ import { usePathname } from 'next/navigation';
 import Link from 'next/link';
 import Box from '@mui/material/Box';
 import Drawer from '@mui/material/Drawer';
+import Divider from '@mui/material/Divider';
 import List from '@mui/material/List';
 import ListItem from '@mui/material/ListItem';
 import ListItemButton from '@mui/material/ListItemButton';
@@ -18,6 +19,7 @@ import HomeWorkIcon from '@mui/icons-material/HomeWork';
 import ChatIcon from '@mui/icons-material/Chat';
 import SettingsIcon from '@mui/icons-material/Settings';
 import MenuIcon from '@mui/icons-material/Menu';
+import ShowChartIcon from '@mui/icons-material/ShowChart';
 import { useState } from 'react';
 import useMediaQuery from '@mui/material/useMediaQuery';
 import { useTheme } from '@mui/material/styles';
@@ -42,11 +44,13 @@ export default function Sidebar({ children }: { children: React.ReactNode }) {
   const drawerContent = (
     <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       <Box sx={{ p: 2, display: 'flex', alignItems: 'center', gap: 1 }}>
+        <ShowChartIcon sx={{ color: 'primary.main', fontSize: 24 }} />
         <Typography variant="h6" sx={{ color: 'primary.main', fontWeight: 700 }}>
           FinAdviser
         </Typography>
       </Box>
-      <List sx={{ flex: 1, px: 1 }}>
+      <Divider sx={{ borderColor: 'rgba(255,255,255,0.06)' }} />
+      <List sx={{ flex: 1, px: 1, pt: 1.5 }}>
         {navItems.map((item) => {
           const isActive = item.href === '/'
             ? pathname === '/'
@@ -82,6 +86,7 @@ export default function Sidebar({ children }: { children: React.ReactNode }) {
           );
         })}
       </List>
+      <Divider sx={{ borderColor: 'rgba(255,255,255,0.06)' }} />
       <Box sx={{ p: 2 }}>
         <Typography variant="caption" color="text.secondary">
           v0.1.0
@@ -95,7 +100,15 @@ export default function Sidebar({ children }: { children: React.ReactNode }) {
       {isMobile && (
         <IconButton
           onClick={() => setMobileOpen(true)}
-          sx={{ position: 'fixed', top: 12, left: 12, zIndex: 1300 }}
+          sx={{
+            position: 'fixed',
+            top: 12,
+            left: 12,
+            zIndex: 1300,
+            bgcolor: 'rgba(19, 25, 32, 0.8)',
+            backdropFilter: 'blur(8px)',
+            '&:hover': { bgcolor: 'rgba(19, 25, 32, 0.95)' },
+          }}
         >
           <MenuIcon />
         </IconButton>
@@ -117,6 +130,7 @@ export default function Sidebar({ children }: { children: React.ReactNode }) {
         sx={{
           flexGrow: 1,
           p: 3,
+          pt: isMobile ? 7 : 3,
           ml: isMobile ? 0 : undefined,
           width: isMobile ? '100%' : `calc(100% - ${DRAWER_WIDTH}px)`,
         }}

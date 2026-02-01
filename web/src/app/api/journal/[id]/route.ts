@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { journalRepo } from '@/lib/repos';
+import { journalRepo, categoryRepo } from '@/lib/repos';
 
 export async function GET(
   request: NextRequest,
@@ -25,6 +25,24 @@ export async function PATCH(
     const body = await request.json();
     if (body.categoryId !== undefined) {
       await journalRepo.updateCategory(parseInt(id), body.categoryId);
+
+      // Learn a rule from manual categorization
+      if (body.createRule && body.description) {
+        const existingRules = await categoryRepo.getRules();
+        const alreadyExists = existingRules.some(
+          (r) =>
+            r.pattern.toLowerCase() === body.description.toLowerCase() &&
+            r.categoryId === body.categoryId,
+        );
+        if (!alreadyExists) {
+          await categoryRepo.addRule({
+            pattern: body.description,
+            categoryId: body.categoryId,
+            matchType: 'contains',
+            source: 'user',
+          });
+        }
+      }
     }
     return NextResponse.json({ success: true });
   } catch (error) {

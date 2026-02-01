@@ -10,8 +10,11 @@ import {
   TableRow,
   TableCell,
   Chip,
+  Box,
 } from '@mui/material';
+import ReceiptLongIcon from '@mui/icons-material/ReceiptLong';
 import { formatCurrency } from '@/lib/utils/formatting';
+import { getCategoryColor } from '@/lib/utils/category-colors';
 
 interface Entry {
   id: number;
@@ -23,13 +26,11 @@ interface Entry {
 
 function parseAmount(summary: string | null): string {
   if (!summary) return '0';
-  // entries_summary format: "AccountName:amount|AccountName:amount"
   const parts = summary.split('|');
   for (const part of parts) {
     const [name, amt] = part.split(':');
     if (name && amt) {
       const num = parseFloat(amt);
-      // Return the first non-zero amount that's from an asset account perspective
       if (num !== 0) return amt;
     }
   }
@@ -44,7 +45,13 @@ export default function RecentTransactionsTable({ entries }: { entries: Entry[] 
           Recent Transactions
         </Typography>
         {entries.length === 0 ? (
-          <Typography color="text.secondary">No transactions yet. Import a CSV to get started.</Typography>
+          <Box sx={{ textAlign: 'center', py: 4 }}>
+            <ReceiptLongIcon sx={{ fontSize: 40, color: 'text.secondary', opacity: 0.5, mb: 1 }} />
+            <Typography color="text.secondary">No transactions yet</Typography>
+            <Typography variant="caption" color="text.secondary">
+              Import a CSV to get started
+            </Typography>
+          </Box>
         ) : (
           <Table size="small">
             <TableHead>
@@ -59,16 +66,23 @@ export default function RecentTransactionsTable({ entries }: { entries: Entry[] 
               {entries.map((entry) => {
                 const amount = parseAmount(entry.entries_summary);
                 const numAmount = parseFloat(amount);
+                const catName = entry.category_name || 'Uncategorized';
+                const catColor = getCategoryColor(catName);
                 return (
                   <TableRow key={entry.id} hover>
                     <TableCell sx={{ whiteSpace: 'nowrap' }}>{entry.date}</TableCell>
                     <TableCell>{entry.description}</TableCell>
                     <TableCell>
                       <Chip
-                        label={entry.category_name || 'Uncategorized'}
+                        label={catName}
                         size="small"
-                        variant="outlined"
-                        sx={{ fontSize: '0.75rem' }}
+                        sx={{
+                          fontSize: '0.75rem',
+                          bgcolor: `${catColor}18`,
+                          color: catColor,
+                          borderColor: `${catColor}40`,
+                          border: '1px solid',
+                        }}
                       />
                     </TableCell>
                     <TableCell

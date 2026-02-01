@@ -1,6 +1,7 @@
 'use client';
 
 import { Card, CardContent, Typography, LinearProgress, Box } from '@mui/material';
+import SavingsIcon from '@mui/icons-material/Savings';
 import Decimal from 'decimal.js';
 
 interface SpendingRow {
@@ -37,12 +38,30 @@ export default function SavingsRateCard({
 
   const clampedRate = Math.max(0, Math.min(100, savingsRate));
 
+  const barColor =
+    savingsRate < 10 ? 'error.main' : savingsRate < 20 ? 'warning.main' : 'success.main';
+
   return (
-    <Card sx={{ height: '100%' }}>
+    <Card sx={{ height: '100%', borderLeft: '3px solid', borderColor: 'success.main' }}>
       <CardContent>
-        <Typography variant="body2" color="text.secondary" gutterBottom>
-          Savings Rate
-        </Typography>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+          <Box
+            sx={{
+              width: 32,
+              height: 32,
+              borderRadius: 1.5,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              bgcolor: 'rgba(78, 205, 196, 0.12)',
+            }}
+          >
+            <SavingsIcon sx={{ fontSize: 18, color: 'success.main' }} />
+          </Box>
+          <Typography variant="body2" color="text.secondary">
+            Savings Rate
+          </Typography>
+        </Box>
         <Typography variant="h5" sx={{ fontWeight: 700 }}>
           {savingsRate.toFixed(1)}%
         </Typography>
@@ -56,10 +75,13 @@ export default function SavingsRateCard({
               bgcolor: 'rgba(255,255,255,0.08)',
               '& .MuiLinearProgress-bar': {
                 borderRadius: 4,
-                bgcolor: savingsRate >= 20 ? 'success.main' : 'warning.main',
+                bgcolor: barColor,
               },
             }}
           />
+          <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: 'block' }}>
+            Target: 20%
+          </Typography>
         </Box>
       </CardContent>
     </Card>

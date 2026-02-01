@@ -15,3 +15,5 @@ venv/
 .pytest_cache/
 .mypy_cache/
 .textual/
+.vercel
+.env*.local

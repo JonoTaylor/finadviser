@@ -8,16 +8,21 @@ import {
 } from '@mui/material';
 import SendIcon from '@mui/icons-material/Send';
 import AddIcon from '@mui/icons-material/Add';
+import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
+import BarChartIcon from '@mui/icons-material/BarChart';
+import AccountBalanceIcon from '@mui/icons-material/AccountBalance';
+import HomeWorkIcon from '@mui/icons-material/HomeWork';
+import TrendingUpIcon from '@mui/icons-material/TrendingUp';
 import useSWR from 'swr';
 import ReactMarkdown from 'react-markdown';
 
 const fetcher = (url: string) => fetch(url).then(r => r.json());
 
 const QUICK_PROMPTS = [
-  { label: 'Spending Summary', prompt: 'Give me a spending summary for the last few months' },
-  { label: 'Budget Check', prompt: 'Analyze my budget and suggest improvements' },
-  { label: 'Property Report', prompt: 'Generate a property equity report' },
-  { label: 'Net Worth', prompt: 'Analyze my net worth and financial health' },
+  { label: 'Spending Summary', prompt: 'Give me a spending summary for the last few months', icon: <BarChartIcon sx={{ fontSize: 18 }} /> },
+  { label: 'Budget Check', prompt: 'Analyze my budget and suggest improvements', icon: <AccountBalanceIcon sx={{ fontSize: 18 }} /> },
+  { label: 'Property Report', prompt: 'Generate a property equity report', icon: <HomeWorkIcon sx={{ fontSize: 18 }} /> },
+  { label: 'Net Worth', prompt: 'Analyze my net worth and financial health', icon: <TrendingUpIcon sx={{ fontSize: 18 }} /> },
 ];
 
 interface Message {
@@ -85,7 +90,6 @@ export default function ChatPage() {
         const chunk = decoder.decode(value, { stream: true });
 
         if (firstChunk) {
-          // First chunk might contain conversation ID JSON
           const newlineIdx = chunk.indexOf('\n');
           if (newlineIdx > -1) {
             try {
@@ -171,9 +175,13 @@ export default function ChatPage() {
         {/* Messages */}
         <Box sx={{ flex: 1, overflow: 'auto', mb: 2 }}>
           {messages.length === 0 && !streamingContent ? (
-            <Box sx={{ textAlign: 'center', py: 6 }}>
+            <Box sx={{ textAlign: 'center', py: 8 }}>
+              <AutoAwesomeIcon sx={{ fontSize: 48, color: 'primary.main', opacity: 0.7, mb: 2 }} />
               <Typography variant="h6" color="text.secondary" gutterBottom>
                 Ask me about your finances
+              </Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 3, maxWidth: 400, mx: 'auto' }}>
+                I can analyze your spending, review your budget, generate reports, and help you make better financial decisions.
               </Typography>
               <Stack direction="row" spacing={1} justifyContent="center" flexWrap="wrap" useFlexGap>
                 {QUICK_PROMPTS.map((qp) => (
@@ -181,8 +189,15 @@ export default function ChatPage() {
                     key={qp.label}
                     variant="outlined"
                     size="small"
+                    startIcon={qp.icon}
                     onClick={() => sendMessage(qp.prompt)}
-                    sx={{ mb: 1 }}
+                    sx={{
+                      mb: 1,
+                      '&:hover': {
+                        bgcolor: 'rgba(78, 205, 196, 0.08)',
+                        borderColor: 'primary.main',
+                      },
+                    }}
                   >
                     {qp.label}
                   </Button>
@@ -200,6 +215,8 @@ export default function ChatPage() {
                     alignSelf: msg.role === 'user' ? 'flex-end' : 'flex-start',
                     bgcolor: msg.role === 'user' ? 'primary.dark' : 'background.paper',
                     ml: msg.role === 'user' ? 'auto' : 0,
+                    borderLeft: msg.role === 'assistant' ? '3px solid' : 'none',
+                    borderColor: msg.role === 'assistant' ? 'primary.main' : 'transparent',
                   }}
                 >
                   {msg.role === 'assistant' ? (
@@ -212,7 +229,7 @@ export default function ChatPage() {
                 </Paper>
               ))}
               {streamingContent && (
-                <Paper sx={{ p: 2, maxWidth: '80%', bgcolor: 'background.paper' }}>
+                <Paper sx={{ p: 2, maxWidth: '80%', bgcolor: 'background.paper', borderLeft: '3px solid', borderColor: 'primary.main' }}>
                   <Box sx={{ '& p': { m: 0 }, '& ul': { pl: 2 } }}>
                     <ReactMarkdown>{streamingContent}</ReactMarkdown>
                   </Box>
@@ -235,7 +252,7 @@ export default function ChatPage() {
         </Typography>
 
         {/* Input */}
-        <Box sx={{ display: 'flex', gap: 1 }}>
+        <Paper variant="outlined" sx={{ display: 'flex', gap: 1, p: 1 }}>
           <TextField
             fullWidth
             size="small"
@@ -244,11 +261,12 @@ export default function ChatPage() {
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(input); } }}
             disabled={loading}
+            sx={{ '& .MuiOutlinedInput-notchedOutline': { border: 'none' } }}
           />
           <IconButton color="primary" onClick={() => sendMessage(input)} disabled={loading || !input.trim()}>
             <SendIcon />
           </IconButton>
-        </Box>
+        </Paper>
       </Box>
     </Box>
   );

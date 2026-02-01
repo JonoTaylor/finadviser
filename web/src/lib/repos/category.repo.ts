@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import { getDb, schema } from '@/lib/db';
 
 const { categories, categorizationRules } = schema;
@@ -61,5 +61,49 @@ export const categoryRepo = {
       .select()
       .from(categorizationRules)
       .orderBy(categorizationRules.priority, categorizationRules.id);
+  },
+
+  async deleteRule(id: number) {
+    const db = getDb();
+    await db.delete(categorizationRules).where(eq(categorizationRules.id, id));
+  },
+
+  async updateRule(
+    id: number,
+    data: {
+      pattern?: string;
+      matchType?: 'contains' | 'startswith' | 'exact' | 'regex';
+      categoryId?: number;
+      priority?: number;
+    },
+  ) {
+    const db = getDb();
+    const [row] = await db
+      .update(categorizationRules)
+      .set(data)
+      .where(eq(categorizationRules.id, id))
+      .returning();
+    return row;
+  },
+
+  async listRulesWithCategory() {
+    const db = getDb();
+    const rows = await db.execute(sql`
+      SELECT cr.id, cr.pattern, cr.match_type, cr.category_id, cr.priority, cr.source, cr.created_at,
+             c.name AS category_name
+      FROM categorization_rules cr
+      LEFT JOIN categories c ON c.id = cr.category_id
+      ORDER BY cr.priority DESC, cr.id
+    `);
+    return rows.rows as Array<{
+      id: number;
+      pattern: string;
+      match_type: string;
+      category_id: number;
+      priority: number;
+      source: string;
+      created_at: string;
+      category_name: string | null;
+    }>;
   },
 };

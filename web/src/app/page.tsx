@@ -1,6 +1,7 @@
 'use client';
 
 import { Box, Grid, Typography, Skeleton } from '@mui/material';
+import { format } from 'date-fns';
 import useSWR from 'swr';
 import NetWorthCard from '@/components/dashboard/NetWorthCard';
 import MonthlySummaryCard from '@/components/dashboard/MonthlySummaryCard';
@@ -19,7 +20,10 @@ export default function DashboardPage() {
 
   return (
     <Box>
-      <Typography variant="h4" sx={{ mb: 3 }}>Dashboard</Typography>
+      <Typography variant="h4" sx={{ mb: 0.5 }}>Dashboard</Typography>
+      <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
+        {format(new Date(), 'EEEE, d MMMM yyyy')}
+      </Typography>
       <Grid container spacing={3}>
         <Grid size={{ xs: 12, sm: 6, md: 3 }}>
           {loadingBalances ? <Skeleton variant="rounded" height={140} /> : (

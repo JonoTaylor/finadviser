@@ -13,7 +13,9 @@ import {
   CircularProgress,
   Typography,
 } from '@mui/material';
+import SearchOffIcon from '@mui/icons-material/SearchOff';
 import { formatCurrency } from '@/lib/utils/formatting';
+import { getCategoryColor } from '@/lib/utils/category-colors';
 
 interface Entry {
   id: number;
@@ -69,7 +71,11 @@ export default function TransactionTable({
     <Card>
       {entries.length === 0 ? (
         <Box sx={{ p: 4, textAlign: 'center' }}>
-          <Typography color="text.secondary">No transactions found.</Typography>
+          <SearchOffIcon sx={{ fontSize: 40, color: 'text.secondary', opacity: 0.5, mb: 1 }} />
+          <Typography color="text.secondary">No transactions found</Typography>
+          <Typography variant="caption" color="text.secondary">
+            Try adjusting your filters or import some data
+          </Typography>
         </Box>
       ) : (
         <>
@@ -87,6 +93,8 @@ export default function TransactionTable({
               {entries.map((entry) => {
                 const amount = parseAmount(entry.entries_summary);
                 const numAmount = parseFloat(amount);
+                const catName = entry.category_name || 'Uncategorized';
+                const catColor = getCategoryColor(catName);
                 return (
                   <TableRow
                     key={entry.id}
@@ -98,10 +106,15 @@ export default function TransactionTable({
                     <TableCell>{entry.description}</TableCell>
                     <TableCell>
                       <Chip
-                        label={entry.category_name || 'Uncategorized'}
+                        label={catName}
                         size="small"
-                        variant="outlined"
-                        sx={{ fontSize: '0.75rem' }}
+                        sx={{
+                          fontSize: '0.75rem',
+                          bgcolor: `${catColor}18`,
+                          color: catColor,
+                          borderColor: `${catColor}40`,
+                          border: '1px solid',
+                        }}
                       />
                     </TableCell>
                     <TableCell sx={{ color: 'text.secondary' }}>{entry.reference || ''}</TableCell>

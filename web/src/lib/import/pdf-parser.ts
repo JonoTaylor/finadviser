@@ -24,18 +24,10 @@ Bank statement text:
 `;
 
 async function extractTextFromPDF(fileBuffer: Buffer): Promise<string> {
-  // Dynamic import to avoid loading pdfjs-dist at module init time
-  // (breaks Vercel serverless if loaded statically)
-  const { PDFParse } = await import('pdf-parse');
-  PDFParse.setWorker('');
-
-  const pdf = new PDFParse({ data: new Uint8Array(fileBuffer) });
-  try {
-    const textResult = await pdf.getText();
-    return textResult.text;
-  } finally {
-    await pdf.destroy().catch(() => {});
-  }
+  // Dynamic import — pdf-parse v1.x is a simple function(buffer) => { text }
+  const pdfParse = (await import('pdf-parse')).default;
+  const result = await pdfParse(fileBuffer);
+  return result.text;
 }
 
 export async function parsePDF(fileBuffer: Buffer): Promise<RawTransaction[]> {

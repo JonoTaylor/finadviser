@@ -21,6 +21,36 @@ import ReactMarkdown from 'react-markdown';
 
 const fetcher = (url: string) => fetch(url).then(r => r.json());
 
+const markdownSx = {
+  '& p': { m: 0, mb: 1.5, lineHeight: 1.7, '&:last-child': { mb: 0 } },
+  '& h1': { fontSize: '1.4rem', fontWeight: 700, mt: 2.5, mb: 1, '&:first-of-type': { mt: 0 } },
+  '& h2': { fontSize: '1.2rem', fontWeight: 700, mt: 2.5, mb: 1, '&:first-of-type': { mt: 0 } },
+  '& h3': { fontSize: '1.05rem', fontWeight: 600, mt: 2, mb: 0.75, '&:first-of-type': { mt: 0 } },
+  '& h4, & h5, & h6': { fontSize: '0.95rem', fontWeight: 600, mt: 1.5, mb: 0.5 },
+  '& ul, & ol': { pl: 2.5, mb: 1.5, '& li': { mb: 0.5, lineHeight: 1.6 } },
+  '& hr': { border: 'none', borderTop: '1px solid', borderColor: 'divider', my: 2 },
+  '& table': {
+    width: '100%', borderCollapse: 'collapse', mb: 1.5, fontSize: '0.875rem',
+    '& th': { textAlign: 'left', fontWeight: 600, p: '8px 12px', borderBottom: '2px solid', borderColor: 'divider' },
+    '& td': { p: '6px 12px', borderBottom: '1px solid', borderColor: 'divider' },
+    '& tr:last-child td': { borderBottom: 'none' },
+  },
+  '& code': {
+    fontFamily: 'monospace', fontSize: '0.85em',
+    bgcolor: 'rgba(255,255,255,0.06)', px: 0.75, py: 0.25, borderRadius: 1,
+  },
+  '& pre': {
+    bgcolor: 'rgba(0,0,0,0.3)', borderRadius: 2, p: 2, mb: 1.5, overflow: 'auto',
+    '& code': { bgcolor: 'transparent', p: 0, fontSize: '0.85rem' },
+  },
+  '& blockquote': {
+    borderLeft: '3px solid', borderColor: 'primary.main', pl: 2, ml: 0, my: 1.5,
+    color: 'text.secondary', fontStyle: 'italic',
+  },
+  '& strong': { fontWeight: 600 },
+  '& a': { color: 'primary.main', textDecoration: 'none', '&:hover': { textDecoration: 'underline' } },
+} as const;
+
 const QUICK_PROMPTS = [
   { label: 'Spending Summary', prompt: 'Give me a spending summary for the last few months', icon: <BarChartRoundedIcon sx={{ fontSize: 18 }} /> },
   { label: 'Budget Check', prompt: 'Analyze my budget and suggest improvements', icon: <AccountBalanceRoundedIcon sx={{ fontSize: 18 }} /> },
@@ -94,13 +124,14 @@ export default function ChatPage() {
         buffer = lines.pop() ?? '';
 
         for (const line of lines) {
-          if (!line) continue;
-          try {
-            const parsed = JSON.parse(line);
-            if (parsed.conversationId) { setConversationId(parsed.conversationId); continue; }
-            if (parsed.tool) { setActiveTools(prev => [...prev, parsed.label]); continue; }
-          } catch { /* text content */ }
-          fullContent += line;
+          if (line) {
+            try {
+              const parsed = JSON.parse(line);
+              if (parsed.conversationId) { setConversationId(parsed.conversationId); continue; }
+              if (parsed.tool) { setActiveTools(prev => [...prev, parsed.label]); continue; }
+            } catch { /* text content */ }
+          }
+          fullContent += line + '\n';
           setStreamingContent(fullContent);
         }
 
@@ -112,7 +143,7 @@ export default function ChatPage() {
         setStreamingContent(fullContent);
       }
 
-      setMessages(prev => [...prev, { role: 'assistant', content: fullContent }]);
+      setMessages(prev => [...prev, { role: 'assistant', content: fullContent.trim() }]);
       setStreamingContent('');
       setActiveTools([]);
       mutateConversations();
@@ -229,7 +260,7 @@ export default function ChatPage() {
                   }}
                 >
                   {msg.role === 'assistant' ? (
-                    <Box sx={{ '& p': { m: 0 }, '& ul': { pl: 2 }, '& h1,& h2,& h3': { mt: 1, mb: 0.5 } }}>
+                    <Box sx={markdownSx}>
                       <ReactMarkdown>{msg.content}</ReactMarkdown>
                     </Box>
                   ) : (
@@ -266,7 +297,7 @@ export default function ChatPage() {
                     borderRadius: 4,
                   }}
                 >
-                  <Box sx={{ '& p': { m: 0 }, '& ul': { pl: 2 } }}>
+                  <Box sx={markdownSx}>
                     <ReactMarkdown>{streamingContent}</ReactMarkdown>
                   </Box>
                 </Paper>

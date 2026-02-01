@@ -3,6 +3,9 @@ import Anthropic from '@anthropic-ai/sdk';
 import type { RawTransaction } from '@/lib/types';
 import crypto from 'crypto';
 
+// Disable worker for server-side usage (Node.js handles it in-process)
+PDFParse.setWorker('');
+
 const PDF_EXTRACTION_PROMPT = `You are a financial data extraction assistant. Extract all transactions from this bank statement text.
 
 For each transaction, extract:
@@ -27,10 +30,14 @@ Bank statement text:
 export async function parsePDF(fileBuffer: Buffer): Promise<RawTransaction[]> {
   // Extract text from PDF using pdf-parse v4 class API
   const pdf = new PDFParse({ data: new Uint8Array(fileBuffer) });
-  const textResult = await pdf.getText();
-  const text = textResult.text;
 
-  await pdf.destroy();
+  let text: string;
+  try {
+    const textResult = await pdf.getText();
+    text = textResult.text;
+  } finally {
+    await pdf.destroy().catch(() => {});
+  }
 
   if (!text || text.trim().length < 50) {
     throw new Error('Scanned/image-only PDFs are not supported. Please use a text-based PDF or CSV export.');

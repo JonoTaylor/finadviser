@@ -31,6 +31,7 @@ export async function POST(request: NextRequest) {
     const transactions = await previewImport(csvContent, bankConfig, accountName);
     return NextResponse.json(transactions);
   } catch (error) {
+    console.error('[import/preview]', error);
     const message = error instanceof Error ? error.message : 'Failed to preview import';
     return NextResponse.json({ error: message }, { status: 500 });
   }

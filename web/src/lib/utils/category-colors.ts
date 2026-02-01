@@ -1,12 +1,15 @@
+// Vibrant, balanced palette for category identification
 const CATEGORY_COLORS = [
-  '#4ecdc4', // teal
-  '#ff6b6b', // coral
-  '#feca57', // yellow
-  '#45b7d1', // blue
-  '#a29bfe', // purple
-  '#6ab04c', // green
-  '#f0932b', // orange
-  '#e056a0', // pink
+  '#5EEAD4', // teal (primary)
+  '#A78BFA', // violet
+  '#FBBF24', // amber
+  '#60A5FA', // blue
+  '#FB7185', // rose
+  '#34D399', // emerald
+  '#F97316', // orange
+  '#E879F9', // fuchsia
+  '#38BDF8', // sky
+  '#A3E635', // lime
 ];
 
 function hashString(str: string): number {

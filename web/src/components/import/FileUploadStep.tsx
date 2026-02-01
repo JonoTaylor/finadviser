@@ -2,7 +2,8 @@
 
 import { useCallback, useState } from 'react';
 import { Box, Typography, Card, CardContent } from '@mui/material';
-import CloudUploadIcon from '@mui/icons-material/CloudUpload';
+import { alpha } from '@mui/material/styles';
+import CloudUploadRoundedIcon from '@mui/icons-material/CloudUploadRounded';
 
 export default function FileUploadStep({ onFileSelect }: { onFileSelect: (file: File) => void }) {
   const [dragOver, setDragOver] = useState(false);
@@ -28,17 +29,26 @@ export default function FileUploadStep({ onFileSelect }: { onFileSelect: (file: 
           onDrop={handleDrop}
           sx={{
             border: '2px dashed',
-            borderColor: dragOver ? 'primary.main' : 'rgba(255,255,255,0.2)',
-            borderRadius: 2,
-            p: 6,
+            borderColor: dragOver ? 'primary.main' : 'divider',
+            borderRadius: 4,
+            p: 8,
             textAlign: 'center',
             cursor: 'pointer',
-            transition: 'border-color 0.2s',
-            '&:hover': { borderColor: 'primary.main' },
+            transition: 'all 0.2s',
+            bgcolor: dragOver ? alpha('#5EEAD4', 0.04) : 'transparent',
+            '&:hover': { borderColor: 'primary.main', bgcolor: alpha('#5EEAD4', 0.04) },
           }}
           onClick={() => document.getElementById('csv-upload')?.click()}
         >
-          <CloudUploadIcon sx={{ fontSize: 48, color: 'text.secondary', mb: 2 }} />
+          <Box
+            sx={{
+              width: 64, height: 64, borderRadius: 4, mx: 'auto', mb: 2,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              bgcolor: alpha('#5EEAD4', 0.1),
+            }}
+          >
+            <CloudUploadRoundedIcon sx={{ fontSize: 32, color: 'primary.main' }} />
+          </Box>
           <Typography variant="h6">Drop CSV file here or click to upload</Typography>
           <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
             Supports CSV files from your bank

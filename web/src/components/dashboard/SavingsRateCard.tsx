@@ -1,7 +1,8 @@
 'use client';
 
-import { Card, CardContent, Typography, LinearProgress, Box } from '@mui/material';
-import SavingsIcon from '@mui/icons-material/Savings';
+import { Card, CardContent, Typography, Box } from '@mui/material';
+import { alpha } from '@mui/material/styles';
+import SavingsRoundedIcon from '@mui/icons-material/SavingsRounded';
 import Decimal from 'decimal.js';
 
 interface SpendingRow {
@@ -37,51 +38,79 @@ export default function SavingsRateCard({
     : 0;
 
   const clampedRate = Math.max(0, Math.min(100, savingsRate));
+  const target = 20;
 
-  const barColor =
-    savingsRate < 10 ? 'error.main' : savingsRate < 20 ? 'warning.main' : 'success.main';
+  const color =
+    savingsRate < 10 ? '#FB7185' : savingsRate < 20 ? '#FBBF24' : '#34D399';
+
+  // Ring SVG params
+  const size = 80;
+  const stroke = 7;
+  const radius = (size - stroke) / 2;
+  const circumference = 2 * Math.PI * radius;
+  const offset = circumference - (clampedRate / 100) * circumference;
 
   return (
-    <Card sx={{ height: '100%', borderLeft: '3px solid', borderColor: 'success.main' }}>
+    <Card sx={{ height: '100%', position: 'relative', overflow: 'hidden' }}>
+      <Box
+        sx={{
+          position: 'absolute', top: 0, left: 0, right: 0, height: 3,
+          background: `linear-gradient(90deg, ${color}, ${alpha(color, 0.4)})`,
+        }}
+      />
       <CardContent>
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
           <Box
             sx={{
-              width: 32,
-              height: 32,
-              borderRadius: 1.5,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              bgcolor: 'rgba(78, 205, 196, 0.12)',
+              width: 36, height: 36, borderRadius: 2.5,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              bgcolor: alpha(color, 0.12),
             }}
           >
-            <SavingsIcon sx={{ fontSize: 18, color: 'success.main' }} />
+            <SavingsRoundedIcon sx={{ fontSize: 20, color }} />
           </Box>
-          <Typography variant="body2" color="text.secondary">
-            Savings Rate
-          </Typography>
+          <Typography variant="subtitle2" color="text.secondary">Savings Rate</Typography>
         </Box>
-        <Typography variant="h5" sx={{ fontWeight: 700 }}>
-          {savingsRate.toFixed(1)}%
-        </Typography>
-        <Box sx={{ mt: 1 }}>
-          <LinearProgress
-            variant="determinate"
-            value={clampedRate}
-            sx={{
-              height: 8,
-              borderRadius: 4,
-              bgcolor: 'rgba(255,255,255,0.08)',
-              '& .MuiLinearProgress-bar': {
-                borderRadius: 4,
-                bgcolor: barColor,
-              },
-            }}
-          />
-          <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: 'block' }}>
-            Target: 20%
-          </Typography>
+
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2.5 }}>
+          {/* Ring gauge */}
+          <Box sx={{ position: 'relative', width: size, height: size, flexShrink: 0 }}>
+            <svg width={size} height={size} style={{ transform: 'rotate(-90deg)' }}>
+              <circle
+                cx={size / 2} cy={size / 2} r={radius}
+                fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth={stroke}
+              />
+              <circle
+                cx={size / 2} cy={size / 2} r={radius}
+                fill="none" stroke={color} strokeWidth={stroke}
+                strokeLinecap="round"
+                strokeDasharray={circumference}
+                strokeDashoffset={offset}
+                style={{ transition: 'stroke-dashoffset 0.6s ease' }}
+              />
+            </svg>
+            <Box
+              sx={{
+                position: 'absolute', inset: 0,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+              }}
+            >
+              <Typography variant="h6" sx={{ fontWeight: 800, fontSize: '1.1rem', color }}>
+                {savingsRate.toFixed(0)}%
+              </Typography>
+            </Box>
+          </Box>
+
+          <Box>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 0.5 }}>
+              Target: {target}%
+            </Typography>
+            <Typography variant="caption" color="text.secondary">
+              {savingsRate >= target
+                ? 'You\'re on track!'
+                : `${(target - savingsRate).toFixed(0)}% to go`}
+            </Typography>
+          </Box>
         </Box>
       </CardContent>
     </Card>

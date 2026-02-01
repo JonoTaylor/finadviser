@@ -1,18 +1,11 @@
 'use client';
 
 import {
-  Card,
-  CardContent,
-  Typography,
-  Table,
-  TableHead,
-  TableBody,
-  TableRow,
-  TableCell,
-  Chip,
-  Box,
+  Card, CardContent, Typography, Table, TableHead, TableBody,
+  TableRow, TableCell, Chip, Box,
 } from '@mui/material';
-import ReceiptLongIcon from '@mui/icons-material/ReceiptLong';
+import { alpha } from '@mui/material/styles';
+import ReceiptLongRoundedIcon from '@mui/icons-material/ReceiptLongRounded';
 import { formatCurrency } from '@/lib/utils/formatting';
 import { getCategoryColor } from '@/lib/utils/category-colors';
 
@@ -41,12 +34,22 @@ export default function RecentTransactionsTable({ entries }: { entries: Entry[] 
   return (
     <Card>
       <CardContent>
-        <Typography variant="h6" gutterBottom>
-          Recent Transactions
-        </Typography>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
+          <Box
+            sx={{
+              width: 36, height: 36, borderRadius: 2.5,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              bgcolor: alpha('#A78BFA', 0.12),
+            }}
+          >
+            <ReceiptLongRoundedIcon sx={{ fontSize: 20, color: 'secondary.main' }} />
+          </Box>
+          <Typography variant="h6">Recent Transactions</Typography>
+        </Box>
+
         {entries.length === 0 ? (
-          <Box sx={{ textAlign: 'center', py: 4 }}>
-            <ReceiptLongIcon sx={{ fontSize: 40, color: 'text.secondary', opacity: 0.5, mb: 1 }} />
+          <Box sx={{ textAlign: 'center', py: 6 }}>
+            <ReceiptLongRoundedIcon sx={{ fontSize: 48, color: 'text.secondary', opacity: 0.3, mb: 1 }} />
             <Typography color="text.secondary">No transactions yet</Typography>
             <Typography variant="caption" color="text.secondary">
               Import a CSV to get started
@@ -69,19 +72,17 @@ export default function RecentTransactionsTable({ entries }: { entries: Entry[] 
                 const catName = entry.category_name || 'Uncategorized';
                 const catColor = getCategoryColor(catName);
                 return (
-                  <TableRow key={entry.id} hover>
-                    <TableCell sx={{ whiteSpace: 'nowrap' }}>{entry.date}</TableCell>
+                  <TableRow key={entry.id}>
+                    <TableCell sx={{ whiteSpace: 'nowrap', color: 'text.secondary' }}>{entry.date}</TableCell>
                     <TableCell>{entry.description}</TableCell>
                     <TableCell>
                       <Chip
                         label={catName}
                         size="small"
                         sx={{
-                          fontSize: '0.75rem',
-                          bgcolor: `${catColor}18`,
+                          bgcolor: alpha(catColor, 0.1),
                           color: catColor,
-                          borderColor: `${catColor}40`,
-                          border: '1px solid',
+                          fontWeight: 500,
                         }}
                       />
                     </TableCell>
@@ -90,6 +91,7 @@ export default function RecentTransactionsTable({ entries }: { entries: Entry[] 
                       sx={{
                         color: numAmount >= 0 ? 'success.main' : 'error.main',
                         fontWeight: 600,
+                        fontFeatureSettings: '"tnum"',
                         whiteSpace: 'nowrap',
                       }}
                     >

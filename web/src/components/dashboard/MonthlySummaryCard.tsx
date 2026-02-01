@@ -1,9 +1,10 @@
 'use client';
 
-import { Card, CardContent, Typography, Box } from '@mui/material';
-import CalendarMonthIcon from '@mui/icons-material/CalendarMonth';
-import TrendingUpIcon from '@mui/icons-material/TrendingUp';
-import TrendingDownIcon from '@mui/icons-material/TrendingDown';
+import { Card, CardContent, Typography, Box, Chip } from '@mui/material';
+import { alpha } from '@mui/material/styles';
+import CalendarMonthRoundedIcon from '@mui/icons-material/CalendarMonthRounded';
+import TrendingUpRoundedIcon from '@mui/icons-material/TrendingUpRounded';
+import TrendingDownRoundedIcon from '@mui/icons-material/TrendingDownRounded';
 import { formatCurrency } from '@/lib/utils/formatting';
 import { format, subMonths } from 'date-fns';
 import Decimal from 'decimal.js';
@@ -47,75 +48,74 @@ export default function MonthlySummaryCard({
 
   const net = incomeTotal.minus(monthExpenses);
 
-  // Month-over-month expense trend
   const trendPct = prevMonthExpenses.gt(0)
     ? monthExpenses.minus(prevMonthExpenses).div(prevMonthExpenses).mul(100).toNumber()
     : 0;
   const trendUp = trendPct > 0;
 
   return (
-    <Card sx={{ height: '100%', borderLeft: '3px solid', borderColor: 'info.main' }}>
+    <Card sx={{ height: '100%', position: 'relative', overflow: 'hidden' }}>
+      <Box
+        sx={{
+          position: 'absolute', top: 0, left: 0, right: 0, height: 3,
+          background: 'linear-gradient(90deg, #60A5FA, #A78BFA)',
+        }}
+      />
       <CardContent>
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
-          <Box
-            sx={{
-              width: 32,
-              height: 32,
-              borderRadius: 1.5,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              bgcolor: 'rgba(69, 183, 209, 0.12)',
-            }}
-          >
-            <CalendarMonthIcon sx={{ fontSize: 18, color: 'info.main' }} />
-          </Box>
-          <Typography variant="body2" color="text.secondary">
-            This Month
-          </Typography>
-        </Box>
-        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
-          <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
-            <Typography variant="body2">Income</Typography>
-            <Typography variant="body2" color="success.main" fontWeight={600}>
-              {formatCurrency(incomeTotal.toString())}
-            </Typography>
-          </Box>
-          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-              <Typography variant="body2">Expenses</Typography>
-              {prevMonthExpenses.gt(0) && (
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.25 }}>
-                  {trendUp ? (
-                    <TrendingUpIcon sx={{ fontSize: 14, color: 'error.main' }} />
-                  ) : (
-                    <TrendingDownIcon sx={{ fontSize: 14, color: 'success.main' }} />
-                  )}
-                  <Typography
-                    variant="caption"
-                    sx={{ color: trendUp ? 'error.main' : 'success.main', fontSize: '0.65rem' }}
-                  >
-                    {Math.abs(trendPct).toFixed(0)}%
-                  </Typography>
-                </Box>
-              )}
-            </Box>
-            <Typography variant="body2" color="error.main" fontWeight={600}>
-              {formatCurrency(monthExpenses.toString())}
-            </Typography>
-          </Box>
-          <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
-            <Typography variant="body2">Net</Typography>
-            <Typography
-              variant="body2"
-              fontWeight={600}
-              color={net.gte(0) ? 'success.main' : 'error.main'}
+        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 2 }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <Box
+              sx={{
+                width: 36, height: 36, borderRadius: 2.5,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                bgcolor: alpha('#60A5FA', 0.12),
+              }}
             >
-              {formatCurrency(net.toString())}
-            </Typography>
+              <CalendarMonthRoundedIcon sx={{ fontSize: 20, color: 'info.main' }} />
+            </Box>
+            <Typography variant="subtitle2" color="text.secondary">This Month</Typography>
           </Box>
+          {prevMonthExpenses.gt(0) && (
+            <Chip
+              icon={trendUp
+                ? <TrendingUpRoundedIcon sx={{ fontSize: '14px !important' }} />
+                : <TrendingDownRoundedIcon sx={{ fontSize: '14px !important' }} />
+              }
+              label={`${Math.abs(trendPct).toFixed(0)}%`}
+              size="small"
+              sx={{
+                height: 24,
+                bgcolor: alpha(trendUp ? '#FB7185' : '#34D399', 0.12),
+                color: trendUp ? 'error.main' : 'success.main',
+                fontWeight: 600,
+                fontSize: '0.75rem',
+                '& .MuiChip-icon': { color: 'inherit' },
+              }}
+            />
+          )}
+        </Box>
+
+        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.25 }}>
+          <Row label="Income" value={formatCurrency(incomeTotal.toString())} color="success.main" />
+          <Row label="Expenses" value={formatCurrency(monthExpenses.toString())} color="error.main" />
+          <Box sx={{ height: '1px', bgcolor: 'divider' }} />
+          <Row
+            label="Net"
+            value={formatCurrency(net.toString())}
+            color={net.gte(0) ? 'success.main' : 'error.main'}
+            bold
+          />
         </Box>
       </CardContent>
     </Card>
+  );
+}
+
+function Row({ label, value, color, bold }: { label: string; value: string; color: string; bold?: boolean }) {
+  return (
+    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+      <Typography variant="body2" color="text.secondary">{label}</Typography>
+      <Typography variant="body2" sx={{ color, fontWeight: bold ? 700 : 600 }}>{value}</Typography>
+    </Box>
   );
 }

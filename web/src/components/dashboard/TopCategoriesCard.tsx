@@ -1,7 +1,8 @@
 'use client';
 
 import { Card, CardContent, Typography, Box } from '@mui/material';
-import CategoryIcon from '@mui/icons-material/Category';
+import { alpha } from '@mui/material/styles';
+import DonutSmallRoundedIcon from '@mui/icons-material/DonutSmallRounded';
 import { formatCurrency } from '@/lib/utils/formatting';
 import { getCategoryColor } from '@/lib/utils/category-colors';
 import Decimal from 'decimal.js';
@@ -28,55 +29,60 @@ export default function TopCategoriesCard({ spending }: { spending: SpendingRow[
   const topAmount = sorted.length > 0 ? sorted[0][1] : new Decimal(1);
 
   return (
-    <Card sx={{ height: '100%', borderLeft: '3px solid', borderColor: 'warning.main' }}>
+    <Card sx={{ height: '100%', position: 'relative', overflow: 'hidden' }}>
+      <Box
+        sx={{
+          position: 'absolute', top: 0, left: 0, right: 0, height: 3,
+          background: 'linear-gradient(90deg, #FBBF24, #F97316)',
+        }}
+      />
       <CardContent>
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
           <Box
             sx={{
-              width: 32,
-              height: 32,
-              borderRadius: 1.5,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              bgcolor: 'rgba(254, 202, 87, 0.12)',
+              width: 36, height: 36, borderRadius: 2.5,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              bgcolor: alpha('#FBBF24', 0.12),
             }}
           >
-            <CategoryIcon sx={{ fontSize: 18, color: 'warning.main' }} />
+            <DonutSmallRoundedIcon sx={{ fontSize: 20, color: 'warning.main' }} />
           </Box>
-          <Typography variant="body2" color="text.secondary">
-            Top Categories
-          </Typography>
+          <Typography variant="subtitle2" color="text.secondary">Top Categories</Typography>
         </Box>
+
         {sorted.length === 0 ? (
-          <Typography variant="body2" color="text.secondary">No data</Typography>
+          <Typography variant="body2" color="text.secondary">No spending data yet</Typography>
         ) : (
-          sorted.map(([cat, amount]) => {
-            const pct = amount.div(topAmount).mul(100).toNumber();
-            const color = getCategoryColor(cat);
-            return (
-              <Box key={cat} sx={{ mb: 0.75, position: 'relative' }}>
-                <Box
-                  sx={{
-                    position: 'absolute',
-                    top: 0,
-                    left: 0,
-                    bottom: 0,
-                    width: `${pct}%`,
-                    bgcolor: color,
-                    opacity: 0.1,
-                    borderRadius: 1,
-                  }}
-                />
-                <Box sx={{ display: 'flex', justifyContent: 'space-between', position: 'relative', py: 0.25, px: 0.5 }}>
-                  <Typography variant="body2" noWrap sx={{ maxWidth: '60%' }}>{cat}</Typography>
-                  <Typography variant="body2" fontWeight={600}>
-                    {formatCurrency(amount.toString())}
-                  </Typography>
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.75 }}>
+            {sorted.map(([cat, amount]) => {
+              const pct = amount.div(topAmount).mul(100).toNumber();
+              const color = getCategoryColor(cat);
+              return (
+                <Box key={cat}>
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.25 }}>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <Box sx={{ width: 8, height: 8, borderRadius: '50%', bgcolor: color, flexShrink: 0 }} />
+                      <Typography variant="body2" noWrap sx={{ maxWidth: 120 }}>{cat}</Typography>
+                    </Box>
+                    <Typography variant="body2" fontWeight={600}>
+                      {formatCurrency(amount.toString())}
+                    </Typography>
+                  </Box>
+                  <Box sx={{ ml: 2.5, height: 4, borderRadius: 2, bgcolor: alpha(color, 0.12) }}>
+                    <Box
+                      sx={{
+                        width: `${pct}%`,
+                        height: '100%',
+                        borderRadius: 2,
+                        bgcolor: color,
+                        transition: 'width 0.4s ease',
+                      }}
+                    />
+                  </Box>
                 </Box>
-              </Box>
-            );
-          })
+              );
+            })}
+          </Box>
         )}
       </CardContent>
     </Card>

@@ -19,38 +19,53 @@ export default function DashboardPage() {
 
   const recentEntries = journalData?.entries ?? [];
 
+  const greeting = (() => {
+    const h = new Date().getHours();
+    if (h < 12) return 'Good morning';
+    if (h < 18) return 'Good afternoon';
+    return 'Good evening';
+  })();
+
   return (
     <Box>
-      <Typography variant="h4" sx={{ mb: 0.5 }}>Dashboard</Typography>
-      <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-        {format(new Date(), 'EEEE, d MMMM yyyy')}
-      </Typography>
-      <Grid container spacing={3}>
-        <Grid size={{ xs: 12, sm: 6, md: 3 }}>
-          {loadingBalances ? <Skeleton variant="rounded" height={140} /> : (
+      <Box sx={{ mb: 4 }}>
+        <Typography variant="h4">{greeting}</Typography>
+        <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+          {format(new Date(), 'EEEE, d MMMM yyyy')}
+        </Typography>
+      </Box>
+
+      <Grid container spacing={2.5}>
+        {/* Metric cards row */}
+        <Grid size={{ xs: 12, sm: 6, lg: 3 }}>
+          {loadingBalances ? <Skeleton variant="rounded" height={180} sx={{ borderRadius: 5 }} /> : (
             <NetWorthCard balances={balances ?? []} />
           )}
         </Grid>
-        <Grid size={{ xs: 12, sm: 6, md: 3 }}>
-          {loadingSpending ? <Skeleton variant="rounded" height={140} /> : (
+        <Grid size={{ xs: 12, sm: 6, lg: 3 }}>
+          {loadingSpending ? <Skeleton variant="rounded" height={180} sx={{ borderRadius: 5 }} /> : (
             <MonthlySummaryCard spending={spending ?? []} balances={balances ?? []} />
           )}
         </Grid>
-        <Grid size={{ xs: 12, sm: 6, md: 3 }}>
-          {loadingSpending ? <Skeleton variant="rounded" height={140} /> : (
+        <Grid size={{ xs: 12, sm: 6, lg: 3 }}>
+          {loadingSpending ? <Skeleton variant="rounded" height={180} sx={{ borderRadius: 5 }} /> : (
             <SavingsRateCard spending={spending ?? []} balances={balances ?? []} />
           )}
         </Grid>
-        <Grid size={{ xs: 12, sm: 6, md: 3 }}>
-          {loadingSpending ? <Skeleton variant="rounded" height={140} /> : (
+        <Grid size={{ xs: 12, sm: 6, lg: 3 }}>
+          {loadingSpending ? <Skeleton variant="rounded" height={180} sx={{ borderRadius: 5 }} /> : (
             <TopCategoriesCard spending={spending ?? []} />
           )}
         </Grid>
+
+        {/* AI Insights */}
         <Grid size={{ xs: 12 }}>
           <AiInsightsCard />
         </Grid>
+
+        {/* Recent transactions */}
         <Grid size={{ xs: 12 }}>
-          {loadingJournal ? <Skeleton variant="rounded" height={400} /> : (
+          {loadingJournal ? <Skeleton variant="rounded" height={400} sx={{ borderRadius: 5 }} /> : (
             <RecentTransactionsTable entries={recentEntries} />
           )}
         </Grid>

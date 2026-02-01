@@ -25,9 +25,11 @@ import {
   Box,
   Tooltip,
 } from '@mui/material';
-import EditIcon from '@mui/icons-material/Edit';
-import DeleteIcon from '@mui/icons-material/Delete';
-import AddIcon from '@mui/icons-material/Add';
+import { alpha } from '@mui/material/styles';
+import EditRoundedIcon from '@mui/icons-material/EditRounded';
+import DeleteRoundedIcon from '@mui/icons-material/DeleteRounded';
+import AddRoundedIcon from '@mui/icons-material/AddRounded';
+import RuleRoundedIcon from '@mui/icons-material/RuleRounded';
 import useSWR from 'swr';
 
 const fetcher = (url: string) => fetch(url).then(r => r.json());
@@ -142,13 +144,22 @@ export default function RulesManager() {
       <Card>
         <CardContent>
           <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 2 }}>
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+              <Box
+                sx={{
+                  width: 36, height: 36, borderRadius: 2.5,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  bgcolor: alpha('#F97316', 0.12),
+                }}
+              >
+                <RuleRoundedIcon sx={{ fontSize: 20, color: '#F97316' }} />
+              </Box>
               <Typography variant="h6">Categorization Rules</Typography>
               {rules && (
                 <Chip label={rules.length} size="small" variant="outlined" />
               )}
             </Box>
-            <Button size="small" startIcon={<AddIcon />} onClick={openAddDialog}>
+            <Button size="small" startIcon={<AddRoundedIcon />} onClick={openAddDialog}>
               Add Rule
             </Button>
           </Box>
@@ -187,10 +198,10 @@ export default function RulesManager() {
                       </TableCell>
                       <TableCell align="right">
                         <IconButton size="small" onClick={() => openEditDialog(rule)}>
-                          <EditIcon fontSize="small" />
+                          <EditRoundedIcon fontSize="small" />
                         </IconButton>
                         <IconButton size="small" color="error" onClick={() => setDeleteConfirm(rule.id)}>
-                          <DeleteIcon fontSize="small" />
+                          <DeleteRoundedIcon fontSize="small" />
                         </IconButton>
                       </TableCell>
                     </TableRow>

@@ -1,7 +1,10 @@
 'use client';
 
 import { Card, CardContent, Typography, Box } from '@mui/material';
-import AccountBalanceWalletIcon from '@mui/icons-material/AccountBalanceWallet';
+import { alpha } from '@mui/material/styles';
+import AccountBalanceWalletRoundedIcon from '@mui/icons-material/AccountBalanceWalletRounded';
+import ArrowUpwardRoundedIcon from '@mui/icons-material/ArrowUpwardRounded';
+import ArrowDownwardRoundedIcon from '@mui/icons-material/ArrowDownwardRounded';
 import { formatCurrency } from '@/lib/utils/formatting';
 import Decimal from 'decimal.js';
 
@@ -25,43 +28,68 @@ export default function NetWorthCard({ balances }: { balances: Balance[] }) {
   const isPositive = netWorth.gte(0);
 
   return (
-    <Card sx={{ height: '100%', borderLeft: '3px solid', borderColor: 'primary.main' }}>
+    <Card sx={{ height: '100%', position: 'relative', overflow: 'hidden' }}>
+      {/* Gradient accent bar */}
+      <Box
+        sx={{
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          right: 0,
+          height: 3,
+          background: 'linear-gradient(90deg, #5EEAD4, #34D399)',
+        }}
+      />
       <CardContent>
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
           <Box
             sx={{
-              width: 32,
-              height: 32,
-              borderRadius: 1.5,
+              width: 36,
+              height: 36,
+              borderRadius: 2.5,
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              bgcolor: 'rgba(78, 205, 196, 0.12)',
+              bgcolor: alpha('#5EEAD4', 0.12),
             }}
           >
-            <AccountBalanceWalletIcon sx={{ fontSize: 18, color: 'primary.main' }} />
+            <AccountBalanceWalletRoundedIcon sx={{ fontSize: 20, color: 'primary.main' }} />
           </Box>
-          <Typography variant="body2" color="text.secondary">
+          <Typography variant="subtitle2" color="text.secondary">
             Net Worth
           </Typography>
         </Box>
+
         <Typography
-          variant="h5"
-          sx={{ color: isPositive ? 'success.main' : 'error.main', fontWeight: 700 }}
+          variant="h4"
+          sx={{
+            color: isPositive ? 'success.main' : 'error.main',
+            fontWeight: 800,
+            fontSize: '1.75rem',
+            letterSpacing: '-0.03em',
+            mb: 2,
+          }}
         >
           {formatCurrency(netWorth.toString())}
         </Typography>
-        <Box sx={{ mt: 1.5, display: 'flex', flexDirection: 'column', gap: 0.5 }}>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-            <Box sx={{ width: 8, height: 8, borderRadius: '50%', bgcolor: 'success.main' }} />
-            <Typography variant="caption" color="text.secondary">
-              Assets: {formatCurrency(assets.toString())}
+
+        <Box sx={{ display: 'flex', gap: 2 }}>
+          <Box sx={{ flex: 1, p: 1.25, borderRadius: 2, bgcolor: alpha('#34D399', 0.08) }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mb: 0.5 }}>
+              <ArrowUpwardRoundedIcon sx={{ fontSize: 14, color: 'success.main' }} />
+              <Typography variant="caption" color="success.main" fontWeight={600}>Assets</Typography>
+            </Box>
+            <Typography variant="body2" fontWeight={600} color="text.primary">
+              {formatCurrency(assets.toString())}
             </Typography>
           </Box>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-            <Box sx={{ width: 8, height: 8, borderRadius: '50%', bgcolor: 'error.main' }} />
-            <Typography variant="caption" color="text.secondary">
-              Liabilities: {formatCurrency(liabilities.toString())}
+          <Box sx={{ flex: 1, p: 1.25, borderRadius: 2, bgcolor: alpha('#FB7185', 0.08) }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mb: 0.5 }}>
+              <ArrowDownwardRoundedIcon sx={{ fontSize: 14, color: 'error.main' }} />
+              <Typography variant="caption" color="error.main" fontWeight={600}>Liabilities</Typography>
+            </Box>
+            <Typography variant="body2" fontWeight={600} color="text.primary">
+              {formatCurrency(liabilities.toString())}
             </Typography>
           </Box>
         </Box>

@@ -2,6 +2,8 @@
 
 import { useState, useEffect } from 'react';
 import { Box, TextField, Autocomplete, Stack, Chip } from '@mui/material';
+import { alpha } from '@mui/material/styles';
+import SearchRoundedIcon from '@mui/icons-material/SearchRounded';
 import { format, subMonths, startOfMonth, endOfMonth, subDays, startOfYear } from 'date-fns';
 
 interface Filters {
@@ -12,16 +14,8 @@ interface Filters {
   endDate: string;
 }
 
-interface Category {
-  id: number;
-  name: string;
-}
-
-interface Account {
-  id: number;
-  name: string;
-  accountType: string;
-}
+interface Category { id: number; name: string }
+interface Account { id: number; name: string; accountType: string }
 
 const DATE_FORMAT = 'yyyy-MM-dd';
 
@@ -64,30 +58,16 @@ export default function TransactionFilters({
   const now = new Date();
 
   const presets = [
-    {
-      label: 'This Month',
-      action: () => setDateRange(startOfMonth(now), endOfMonth(now)),
-    },
-    {
-      label: 'Last Month',
-      action: () => {
-        const prev = subMonths(now, 1);
-        setDateRange(startOfMonth(prev), endOfMonth(prev));
-      },
-    },
-    {
-      label: 'Last 90 Days',
-      action: () => setDateRange(subDays(now, 90), now),
-    },
-    {
-      label: 'This Year',
-      action: () => setDateRange(startOfYear(now), now),
-    },
+    { label: 'This Month', action: () => setDateRange(startOfMonth(now), endOfMonth(now)) },
+    { label: 'Last Month', action: () => { const p = subMonths(now, 1); setDateRange(startOfMonth(p), endOfMonth(p)); } },
+    { label: 'Last 90 Days', action: () => setDateRange(subDays(now, 90), now) },
+    { label: 'This Year', action: () => setDateRange(startOfYear(now), now) },
   ];
 
   return (
     <Box sx={{ mb: 3 }}>
-      <Stack direction="row" spacing={1} sx={{ mb: 1.5 }} flexWrap="wrap" useFlexGap>
+      {/* Quick date presets */}
+      <Stack direction="row" spacing={0.75} sx={{ mb: 2 }} flexWrap="wrap" useFlexGap>
         {presets.map((preset) => (
           <Chip
             key={preset.label}
@@ -95,7 +75,10 @@ export default function TransactionFilters({
             size="small"
             variant="outlined"
             onClick={preset.action}
-            sx={{ cursor: 'pointer' }}
+            sx={{
+              cursor: 'pointer',
+              '&:hover': { bgcolor: alpha('#5EEAD4', 0.08), borderColor: 'primary.main' },
+            }}
           />
         ))}
         {hasActiveDates && (
@@ -103,21 +86,27 @@ export default function TransactionFilters({
             label="Clear dates"
             size="small"
             color="secondary"
+            variant="outlined"
             onDelete={clearDates}
             onClick={clearDates}
           />
         )}
       </Stack>
-      <Stack direction={{ xs: 'column', md: 'row' }} spacing={2}>
+
+      {/* Filters row */}
+      <Stack direction={{ xs: 'column', md: 'row' }} spacing={1.5}>
         <TextField
-          size="small"
           placeholder="Search transactions..."
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          sx={{ minWidth: 200 }}
+          slotProps={{
+            input: {
+              startAdornment: <SearchRoundedIcon sx={{ color: 'text.secondary', mr: 1, fontSize: 20 }} />,
+            },
+          }}
+          sx={{ minWidth: 220, flex: 1 }}
         />
         <Autocomplete
-          size="small"
           options={categories}
           getOptionLabel={(o) => o.name}
           value={categories.find(c => c.id === filters.categoryId) ?? null}
@@ -126,7 +115,6 @@ export default function TransactionFilters({
           sx={{ minWidth: 180 }}
         />
         <Autocomplete
-          size="small"
           options={accounts}
           getOptionLabel={(o) => `${o.name} (${o.accountType})`}
           value={accounts.find(a => a.id === filters.accountId) ?? null}
@@ -135,7 +123,6 @@ export default function TransactionFilters({
           sx={{ minWidth: 200 }}
         />
         <TextField
-          size="small"
           type="date"
           label="From"
           slotProps={{ inputLabel: { shrink: true } }}
@@ -144,7 +131,6 @@ export default function TransactionFilters({
           sx={{ minWidth: 150 }}
         />
         <TextField
-          size="small"
           type="date"
           label="To"
           slotProps={{ inputLabel: { shrink: true } }}

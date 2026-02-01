@@ -2,8 +2,8 @@
 
 import { useState } from 'react';
 import { Box, Typography, Grid, Card, CardContent, CardActionArea, Button, Chip, Stack } from '@mui/material';
-import AddIcon from '@mui/icons-material/Add';
-import HomeWorkIcon from '@mui/icons-material/HomeWork';
+import AddRoundedIcon from '@mui/icons-material/AddRounded';
+import HomeWorkRoundedIcon from '@mui/icons-material/HomeWorkRounded';
 import useSWR from 'swr';
 import Link from 'next/link';
 import { formatCurrency } from '@/lib/utils/formatting';
@@ -27,9 +27,14 @@ export default function PropertiesPage() {
 
   return (
     <Box>
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
-        <Typography variant="h4">Properties</Typography>
-        <Button variant="contained" startIcon={<AddIcon />} onClick={() => setAddOpen(true)}>
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 4 }}>
+        <Box>
+          <Typography variant="h4">Properties</Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+            Track property values, mortgages, and equity
+          </Typography>
+        </Box>
+        <Button variant="contained" startIcon={<AddRoundedIcon />} onClick={() => setAddOpen(true)}>
           Add Property
         </Button>
       </Box>
@@ -38,7 +43,7 @@ export default function PropertiesPage() {
         <Typography color="text.secondary">Loading...</Typography>
       ) : !properties || properties.length === 0 ? (
         <Card sx={{ p: 4, textAlign: 'center' }}>
-          <HomeWorkIcon sx={{ fontSize: 48, color: 'text.secondary', mb: 1 }} />
+          <HomeWorkRoundedIcon sx={{ fontSize: 48, color: 'text.secondary', opacity: 0.3, mb: 1 }} />
           <Typography color="text.secondary">No properties yet. Add your first property to track equity.</Typography>
         </Card>
       ) : (

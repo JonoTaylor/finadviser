@@ -90,7 +90,12 @@ export default function ImportPage() {
 
   return (
     <Box>
-      <Typography variant="h4" sx={{ mb: 3 }}>Import Transactions</Typography>
+      <Box sx={{ mb: 4 }}>
+        <Typography variant="h4">Import Transactions</Typography>
+        <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+          Upload CSV files from your bank to import transactions
+        </Typography>
+      </Box>
 
       <Stepper activeStep={activeStep} sx={{ mb: 4 }}>
         {steps.map(label => (

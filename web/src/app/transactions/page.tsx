@@ -2,7 +2,7 @@
 
 import { useState, useCallback } from 'react';
 import { Box, Typography, Button, Snackbar, Alert } from '@mui/material';
-import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh';
+import AutoFixHighRoundedIcon from '@mui/icons-material/AutoFixHighRounded';
 import useSWR from 'swr';
 import TransactionFilters from '@/components/transactions/TransactionFilters';
 import TransactionTable from '@/components/transactions/TransactionTable';
@@ -86,11 +86,16 @@ export default function TransactionsPage() {
 
   return (
     <Box>
-      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 3 }}>
-        <Typography variant="h4">Transactions</Typography>
+      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 4 }}>
+        <Box>
+          <Typography variant="h4">Transactions</Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+            {data?.total ? `${data.total} total` : 'Loading...'}
+          </Typography>
+        </Box>
         <Button
           variant="outlined"
-          startIcon={<AutoFixHighIcon />}
+          startIcon={<AutoFixHighRoundedIcon />}
           onClick={handleAutoCategorize}
           disabled={autoCategorizing}
         >

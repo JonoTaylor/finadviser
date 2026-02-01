@@ -1,19 +1,11 @@
 'use client';
 
 import {
-  Card,
-  Table,
-  TableHead,
-  TableBody,
-  TableRow,
-  TableCell,
-  TablePagination,
-  Chip,
-  Box,
-  CircularProgress,
-  Typography,
+  Card, Table, TableHead, TableBody, TableRow, TableCell,
+  TablePagination, Chip, Box, CircularProgress, Typography,
 } from '@mui/material';
-import SearchOffIcon from '@mui/icons-material/SearchOff';
+import { alpha } from '@mui/material/styles';
+import SearchOffRoundedIcon from '@mui/icons-material/SearchOffRounded';
 import { formatCurrency } from '@/lib/utils/formatting';
 import { getCategoryColor } from '@/lib/utils/category-colors';
 
@@ -61,8 +53,8 @@ export default function TransactionTable({
 }) {
   if (loading) {
     return (
-      <Box sx={{ display: 'flex', justifyContent: 'center', py: 6 }}>
-        <CircularProgress />
+      <Box sx={{ display: 'flex', justifyContent: 'center', py: 8 }}>
+        <CircularProgress size={32} />
       </Box>
     );
   }
@@ -70,8 +62,8 @@ export default function TransactionTable({
   return (
     <Card>
       {entries.length === 0 ? (
-        <Box sx={{ p: 4, textAlign: 'center' }}>
-          <SearchOffIcon sx={{ fontSize: 40, color: 'text.secondary', opacity: 0.5, mb: 1 }} />
+        <Box sx={{ p: 6, textAlign: 'center' }}>
+          <SearchOffRoundedIcon sx={{ fontSize: 48, color: 'text.secondary', opacity: 0.3, mb: 1 }} />
           <Typography color="text.secondary">No transactions found</Typography>
           <Typography variant="caption" color="text.secondary">
             Try adjusting your filters or import some data
@@ -102,18 +94,18 @@ export default function TransactionTable({
                     sx={{ cursor: 'pointer' }}
                     onClick={() => onRowClick(entry)}
                   >
-                    <TableCell sx={{ whiteSpace: 'nowrap' }}>{entry.date}</TableCell>
-                    <TableCell>{entry.description}</TableCell>
+                    <TableCell sx={{ whiteSpace: 'nowrap', color: 'text.secondary' }}>
+                      {entry.date}
+                    </TableCell>
+                    <TableCell sx={{ fontWeight: 500 }}>{entry.description}</TableCell>
                     <TableCell>
                       <Chip
                         label={catName}
                         size="small"
                         sx={{
-                          fontSize: '0.75rem',
-                          bgcolor: `${catColor}18`,
+                          bgcolor: alpha(catColor, 0.1),
                           color: catColor,
-                          borderColor: `${catColor}40`,
-                          border: '1px solid',
+                          fontWeight: 500,
                         }}
                       />
                     </TableCell>
@@ -123,6 +115,7 @@ export default function TransactionTable({
                       sx={{
                         color: numAmount >= 0 ? 'success.main' : 'error.main',
                         fontWeight: 600,
+                        fontFeatureSettings: '"tnum"',
                         whiteSpace: 'nowrap',
                       }}
                     >

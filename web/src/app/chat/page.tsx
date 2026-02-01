@@ -6,24 +6,26 @@ import {
   List, ListItemButton, ListItemText, Paper, Divider, Drawer,
   CircularProgress, Chip,
 } from '@mui/material';
-import SendIcon from '@mui/icons-material/Send';
-import AddIcon from '@mui/icons-material/Add';
-import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
-import BarChartIcon from '@mui/icons-material/BarChart';
-import AccountBalanceIcon from '@mui/icons-material/AccountBalance';
-import HomeWorkIcon from '@mui/icons-material/HomeWork';
-import TrendingUpIcon from '@mui/icons-material/TrendingUp';
-import BuildIcon from '@mui/icons-material/Build';
+import { alpha } from '@mui/material/styles';
+import SendRoundedIcon from '@mui/icons-material/SendRounded';
+import AddRoundedIcon from '@mui/icons-material/AddRounded';
+import AutoAwesomeRoundedIcon from '@mui/icons-material/AutoAwesomeRounded';
+import BarChartRoundedIcon from '@mui/icons-material/BarChartRounded';
+import AccountBalanceRoundedIcon from '@mui/icons-material/AccountBalanceRounded';
+import HomeWorkRoundedIcon from '@mui/icons-material/HomeWorkRounded';
+import TrendingUpRoundedIcon from '@mui/icons-material/TrendingUpRounded';
+import MemoryRoundedIcon from '@mui/icons-material/MemoryRounded';
+import HistoryRoundedIcon from '@mui/icons-material/HistoryRounded';
 import useSWR from 'swr';
 import ReactMarkdown from 'react-markdown';
 
 const fetcher = (url: string) => fetch(url).then(r => r.json());
 
 const QUICK_PROMPTS = [
-  { label: 'Spending Summary', prompt: 'Give me a spending summary for the last few months', icon: <BarChartIcon sx={{ fontSize: 18 }} /> },
-  { label: 'Budget Check', prompt: 'Analyze my budget and suggest improvements', icon: <AccountBalanceIcon sx={{ fontSize: 18 }} /> },
-  { label: 'Property Report', prompt: 'Generate a property equity report', icon: <HomeWorkIcon sx={{ fontSize: 18 }} /> },
-  { label: 'Net Worth', prompt: 'Analyze my net worth and financial health', icon: <TrendingUpIcon sx={{ fontSize: 18 }} /> },
+  { label: 'Spending Summary', prompt: 'Give me a spending summary for the last few months', icon: <BarChartRoundedIcon sx={{ fontSize: 18 }} /> },
+  { label: 'Budget Check', prompt: 'Analyze my budget and suggest improvements', icon: <AccountBalanceRoundedIcon sx={{ fontSize: 18 }} /> },
+  { label: 'Property Report', prompt: 'Generate a property equity report', icon: <HomeWorkRoundedIcon sx={{ fontSize: 18 }} /> },
+  { label: 'Net Worth', prompt: 'Analyze my net worth and financial health', icon: <TrendingUpRoundedIcon sx={{ fontSize: 18 }} /> },
 ];
 
 interface Message {
@@ -71,10 +73,7 @@ export default function ChatPage() {
       const res = await fetch('/api/ai/analyze', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          message: text,
-          conversationId,
-        }),
+        body: JSON.stringify({ message: text, conversationId }),
       });
 
       if (!res.ok) throw new Error('AI request failed');
@@ -91,43 +90,23 @@ export default function ChatPage() {
         if (done) break;
 
         buffer += decoder.decode(value, { stream: true });
-
-        // Process complete lines from the buffer
         const lines = buffer.split('\n');
-        // Keep the last incomplete line in the buffer
         buffer = lines.pop() ?? '';
 
         for (const line of lines) {
           if (!line) continue;
-
-          // Try to parse as JSON (metadata or tool status)
           try {
             const parsed = JSON.parse(line);
-            if (parsed.conversationId) {
-              setConversationId(parsed.conversationId);
-              continue;
-            }
-            if (parsed.tool) {
-              setActiveTools(prev => [...prev, parsed.label]);
-              continue;
-            }
-          } catch {
-            // Not JSON — it's text content
-          }
-
-          // Treat as response text
+            if (parsed.conversationId) { setConversationId(parsed.conversationId); continue; }
+            if (parsed.tool) { setActiveTools(prev => [...prev, parsed.label]); continue; }
+          } catch { /* text content */ }
           fullContent += line;
           setStreamingContent(fullContent);
         }
 
-        // Remaining buffer content that isn't a complete line is likely
-        // streaming text (not newline-terminated)
-        if (buffer) {
-          setStreamingContent(fullContent + buffer);
-        }
+        if (buffer) setStreamingContent(fullContent + buffer);
       }
 
-      // Process any remaining buffer
       if (buffer) {
         fullContent += buffer;
         setStreamingContent(fullContent);
@@ -158,15 +137,15 @@ export default function ChatPage() {
         variant="temporary"
         open={sidebarOpen}
         onClose={() => setSidebarOpen(false)}
-        sx={{ '& .MuiDrawer-paper': { width: 280, position: 'relative' } }}
+        sx={{ '& .MuiDrawer-paper': { width: 300 } }}
       >
         <Box sx={{ p: 2 }}>
-          <Button fullWidth variant="outlined" startIcon={<AddIcon />} onClick={handleNewChat}>
+          <Button fullWidth variant="outlined" startIcon={<AddRoundedIcon />} onClick={handleNewChat}>
             New Chat
           </Button>
         </Box>
         <Divider />
-        <List>
+        <List sx={{ px: 1 }}>
           {(conversations ?? []).map((conv: { id: number; title: string | null; updatedAt: string }) => (
             <ListItemButton
               key={conv.id}
@@ -184,21 +163,36 @@ export default function ChatPage() {
 
       {/* Main chat area */}
       <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
-          <Button size="small" onClick={() => setSidebarOpen(true)}>History</Button>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mb: 2 }}>
+          <Button
+            size="small"
+            variant="outlined"
+            startIcon={<HistoryRoundedIcon />}
+            onClick={() => setSidebarOpen(true)}
+          >
+            History
+          </Button>
           <Typography variant="h4">AI Chat</Typography>
         </Box>
 
         {/* Messages */}
         <Box sx={{ flex: 1, overflow: 'auto', mb: 2 }}>
           {messages.length === 0 && !streamingContent ? (
-            <Box sx={{ textAlign: 'center', py: 8 }}>
-              <AutoAwesomeIcon sx={{ fontSize: 48, color: 'primary.main', opacity: 0.7, mb: 2 }} />
-              <Typography variant="h6" color="text.secondary" gutterBottom>
-                Ask me about your finances
+            <Box sx={{ textAlign: 'center', py: 10 }}>
+              <Box
+                sx={{
+                  width: 64, height: 64, borderRadius: 4, mx: 'auto', mb: 2,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  background: 'linear-gradient(135deg, rgba(94,234,212,0.15), rgba(167,139,250,0.15))',
+                }}
+              >
+                <AutoAwesomeRoundedIcon sx={{ fontSize: 32, color: 'primary.main' }} />
+              </Box>
+              <Typography variant="h5" sx={{ mb: 1 }}>
+                Ask me anything
               </Typography>
-              <Typography variant="body2" color="text.secondary" sx={{ mb: 3, maxWidth: 400, mx: 'auto' }}>
-                I can analyze your spending, review your budget, categorize transactions, manage rules, and add tips to your dashboard.
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 4, maxWidth: 420, mx: 'auto' }}>
+                I can look up your data, analyze spending, categorize transactions, manage rules, and add tips to your dashboard.
               </Typography>
               <Stack direction="row" spacing={1} justifyContent="center" flexWrap="wrap" useFlexGap>
                 {QUICK_PROMPTS.map((qp) => (
@@ -208,13 +202,7 @@ export default function ChatPage() {
                     size="small"
                     startIcon={qp.icon}
                     onClick={() => sendMessage(qp.prompt)}
-                    sx={{
-                      mb: 1,
-                      '&:hover': {
-                        bgcolor: 'rgba(78, 205, 196, 0.08)',
-                        borderColor: 'primary.main',
-                      },
-                    }}
+                    sx={{ mb: 1 }}
                   >
                     {qp.label}
                   </Button>
@@ -226,14 +214,18 @@ export default function ChatPage() {
               {messages.map((msg, i) => (
                 <Paper
                   key={i}
+                  elevation={0}
                   sx={{
                     p: 2,
                     maxWidth: '80%',
                     alignSelf: msg.role === 'user' ? 'flex-end' : 'flex-start',
-                    bgcolor: msg.role === 'user' ? 'primary.dark' : 'background.paper',
+                    bgcolor: msg.role === 'user'
+                      ? alpha('#5EEAD4', 0.1)
+                      : alpha('#A78BFA', 0.06),
                     ml: msg.role === 'user' ? 'auto' : 0,
                     borderLeft: msg.role === 'assistant' ? '3px solid' : 'none',
-                    borderColor: msg.role === 'assistant' ? 'primary.main' : 'transparent',
+                    borderColor: msg.role === 'assistant' ? 'secondary.main' : 'transparent',
+                    borderRadius: 4,
                   }}
                 >
                   {msg.role === 'assistant' ? (
@@ -248,31 +240,40 @@ export default function ChatPage() {
 
               {/* Tool status indicators */}
               {activeTools.length > 0 && (
-                <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap', alignItems: 'center' }}>
-                  <BuildIcon sx={{ fontSize: 16, color: 'primary.main', mr: 0.5 }} />
+                <Box sx={{ display: 'flex', gap: 0.75, flexWrap: 'wrap', alignItems: 'center', pl: 0.5 }}>
+                  <MemoryRoundedIcon sx={{ fontSize: 16, color: 'secondary.main' }} />
                   {activeTools.map((label, i) => (
                     <Chip
                       key={i}
                       label={label}
                       size="small"
                       variant="outlined"
-                      color="primary"
-                      sx={{ fontSize: '0.75rem' }}
+                      color="secondary"
+                      sx={{ fontSize: '0.75rem', height: 26 }}
                     />
                   ))}
                 </Box>
               )}
 
               {streamingContent && (
-                <Paper sx={{ p: 2, maxWidth: '80%', bgcolor: 'background.paper', borderLeft: '3px solid', borderColor: 'primary.main' }}>
+                <Paper
+                  elevation={0}
+                  sx={{
+                    p: 2, maxWidth: '80%',
+                    bgcolor: alpha('#A78BFA', 0.06),
+                    borderLeft: '3px solid',
+                    borderColor: 'secondary.main',
+                    borderRadius: 4,
+                  }}
+                >
                   <Box sx={{ '& p': { m: 0 }, '& ul': { pl: 2 } }}>
                     <ReactMarkdown>{streamingContent}</ReactMarkdown>
                   </Box>
                 </Paper>
               )}
               {loading && !streamingContent && activeTools.length === 0 && (
-                <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
-                  <CircularProgress size={16} />
+                <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', pl: 0.5 }}>
+                  <CircularProgress size={16} color="secondary" />
                   <Typography variant="body2" color="text.secondary">Thinking...</Typography>
                 </Box>
               )}
@@ -282,12 +283,21 @@ export default function ChatPage() {
         </Box>
 
         {/* Disclaimer */}
-        <Typography variant="caption" color="text.secondary" sx={{ mb: 1, textAlign: 'center' }}>
+        <Typography variant="caption" color="text.secondary" sx={{ mb: 1, textAlign: 'center', opacity: 0.6 }}>
           AI responses are for informational purposes only. Not financial advice.
         </Typography>
 
         {/* Input */}
-        <Paper variant="outlined" sx={{ display: 'flex', gap: 1, p: 1 }}>
+        <Paper
+          elevation={0}
+          sx={{
+            display: 'flex', gap: 1, p: 1,
+            bgcolor: 'background.paper',
+            border: '1px solid',
+            borderColor: 'divider',
+            borderRadius: 4,
+          }}
+        >
           <TextField
             fullWidth
             size="small"
@@ -298,8 +308,16 @@ export default function ChatPage() {
             disabled={loading}
             sx={{ '& .MuiOutlinedInput-notchedOutline': { border: 'none' } }}
           />
-          <IconButton color="primary" onClick={() => sendMessage(input)} disabled={loading || !input.trim()}>
-            <SendIcon />
+          <IconButton
+            color="primary"
+            onClick={() => sendMessage(input)}
+            disabled={loading || !input.trim()}
+            sx={{
+              bgcolor: loading || !input.trim() ? 'transparent' : alpha('#5EEAD4', 0.12),
+              '&:hover': { bgcolor: alpha('#5EEAD4', 0.2) },
+            }}
+          >
+            <SendRoundedIcon />
           </IconButton>
         </Paper>
       </Box>

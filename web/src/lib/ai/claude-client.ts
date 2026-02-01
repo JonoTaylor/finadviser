@@ -1,7 +1,12 @@
 import Anthropic from '@anthropic-ai/sdk';
-import { SYSTEM_PROMPT, CATEGORIZATION_PROMPT } from './prompts';
+import { SYSTEM_PROMPT, CATEGORIZATION_PROMPT, AGENT_SYSTEM_PROMPT } from './prompts';
+import { TOOL_DEFINITIONS, TOOL_LABELS, executeTool } from './tools';
 
 const MODEL = 'claude-sonnet-4-20250514';
+
+export type AgentEvent =
+  | { type: 'tool'; name: string; label: string }
+  | { type: 'text'; content: string };
 
 function getClient() {
   return new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! });
@@ -72,4 +77,71 @@ export async function categorizeBatch(
   } catch {
     return {};
   }
+}
+
+/**
+ * Run the agentic loop: Claude can call tools, we execute them and loop
+ * until Claude produces a final text response.
+ *
+ * Yields AgentEvents so the caller can stream status updates + text to the client.
+ */
+export async function* runAgent(
+  userMessage: string,
+  history: Array<{ role: 'user' | 'assistant'; content: string }> = [],
+): AsyncGenerator<AgentEvent, string> {
+  const client = getClient();
+  const MAX_ITERATIONS = 15;
+
+  // Build messages for the API. History entries are simple text,
+  // the agent loop may add structured content blocks.
+  const messages: Anthropic.Messages.MessageParam[] = history.map((m) => ({
+    role: m.role,
+    content: m.content,
+  }));
+  messages.push({ role: 'user', content: userMessage });
+
+  let fullResponse = '';
+
+  for (let i = 0; i < MAX_ITERATIONS; i++) {
+    const response = await client.messages.create({
+      model: MODEL,
+      max_tokens: 4096,
+      system: AGENT_SYSTEM_PROMPT,
+      tools: TOOL_DEFINITIONS,
+      messages,
+    });
+
+    // If Claude wants to use tools, execute them and continue the loop
+    if (response.stop_reason === 'tool_use') {
+      // Add the assistant's response (which contains tool_use blocks) to messages
+      messages.push({ role: 'assistant', content: response.content });
+
+      // Execute each tool call
+      const toolResults: Anthropic.Messages.ToolResultBlockParam[] = [];
+      for (const block of response.content) {
+        if (block.type === 'tool_use') {
+          yield { type: 'tool', name: block.name, label: TOOL_LABELS[block.name] ?? block.name };
+          const result = await executeTool(block.name, block.input as Record<string, unknown>);
+          toolResults.push({
+            type: 'tool_result',
+            tool_use_id: block.id,
+            content: JSON.stringify(result),
+          });
+        }
+      }
+      messages.push({ role: 'user', content: toolResults });
+      continue;
+    }
+
+    // No tool use — extract text blocks as the final response
+    for (const block of response.content) {
+      if (block.type === 'text') {
+        fullResponse += block.text;
+        yield { type: 'text', content: block.text };
+      }
+    }
+    break;
+  }
+
+  return fullResponse;
 }

@@ -4,7 +4,7 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import {
   Box, Typography, TextField, IconButton, Button, Stack,
   List, ListItemButton, ListItemText, Paper, Divider, Drawer,
-  CircularProgress,
+  CircularProgress, Chip,
 } from '@mui/material';
 import SendIcon from '@mui/icons-material/Send';
 import AddIcon from '@mui/icons-material/Add';
@@ -13,6 +13,7 @@ import BarChartIcon from '@mui/icons-material/BarChart';
 import AccountBalanceIcon from '@mui/icons-material/AccountBalance';
 import HomeWorkIcon from '@mui/icons-material/HomeWork';
 import TrendingUpIcon from '@mui/icons-material/TrendingUp';
+import BuildIcon from '@mui/icons-material/Build';
 import useSWR from 'swr';
 import ReactMarkdown from 'react-markdown';
 
@@ -36,6 +37,7 @@ export default function ChatPage() {
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [streamingContent, setStreamingContent] = useState('');
+  const [activeTools, setActiveTools] = useState<string[]>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
@@ -45,7 +47,7 @@ export default function ChatPage() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
 
-  useEffect(scrollToBottom, [messages, streamingContent]);
+  useEffect(scrollToBottom, [messages, streamingContent, activeTools]);
 
   const loadConversation = useCallback(async (id: number) => {
     const res = await fetch(`/api/chat/conversations/${id}`);
@@ -63,6 +65,7 @@ export default function ChatPage() {
     setInput('');
     setLoading(true);
     setStreamingContent('');
+    setActiveTools([]);
 
     try {
       const res = await fetch('/api/ai/analyze', {
@@ -81,47 +84,60 @@ export default function ChatPage() {
 
       const decoder = new TextDecoder();
       let fullContent = '';
-      let firstChunk = true;
+      let buffer = '';
 
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
 
-        const chunk = decoder.decode(value, { stream: true });
+        buffer += decoder.decode(value, { stream: true });
 
-        if (firstChunk) {
-          const newlineIdx = chunk.indexOf('\n');
-          if (newlineIdx > -1) {
-            try {
-              const meta = JSON.parse(chunk.substring(0, newlineIdx));
-              if (meta.conversationId) {
-                setConversationId(meta.conversationId);
-              }
-            } catch { /* not JSON, treat as content */ }
-            fullContent += chunk.substring(newlineIdx + 1);
-          } else {
-            try {
-              const meta = JSON.parse(chunk);
-              if (meta.conversationId) {
-                setConversationId(meta.conversationId);
-                continue;
-              }
-            } catch {
-              fullContent += chunk;
+        // Process complete lines from the buffer
+        const lines = buffer.split('\n');
+        // Keep the last incomplete line in the buffer
+        buffer = lines.pop() ?? '';
+
+        for (const line of lines) {
+          if (!line) continue;
+
+          // Try to parse as JSON (metadata or tool status)
+          try {
+            const parsed = JSON.parse(line);
+            if (parsed.conversationId) {
+              setConversationId(parsed.conversationId);
+              continue;
             }
+            if (parsed.tool) {
+              setActiveTools(prev => [...prev, parsed.label]);
+              continue;
+            }
+          } catch {
+            // Not JSON — it's text content
           }
-          firstChunk = false;
-        } else {
-          fullContent += chunk;
+
+          // Treat as response text
+          fullContent += line;
+          setStreamingContent(fullContent);
         }
 
+        // Remaining buffer content that isn't a complete line is likely
+        // streaming text (not newline-terminated)
+        if (buffer) {
+          setStreamingContent(fullContent + buffer);
+        }
+      }
+
+      // Process any remaining buffer
+      if (buffer) {
+        fullContent += buffer;
         setStreamingContent(fullContent);
       }
 
       setMessages(prev => [...prev, { role: 'assistant', content: fullContent }]);
       setStreamingContent('');
+      setActiveTools([]);
       mutateConversations();
-    } catch (error) {
+    } catch {
       setMessages(prev => [...prev, { role: 'assistant', content: 'Sorry, an error occurred. Please check your API key in settings.' }]);
     } finally {
       setLoading(false);
@@ -132,6 +148,7 @@ export default function ChatPage() {
     setConversationId(null);
     setMessages([]);
     setStreamingContent('');
+    setActiveTools([]);
   };
 
   return (
@@ -181,7 +198,7 @@ export default function ChatPage() {
                 Ask me about your finances
               </Typography>
               <Typography variant="body2" color="text.secondary" sx={{ mb: 3, maxWidth: 400, mx: 'auto' }}>
-                I can analyze your spending, review your budget, generate reports, and help you make better financial decisions.
+                I can analyze your spending, review your budget, categorize transactions, manage rules, and add tips to your dashboard.
               </Typography>
               <Stack direction="row" spacing={1} justifyContent="center" flexWrap="wrap" useFlexGap>
                 {QUICK_PROMPTS.map((qp) => (
@@ -228,6 +245,24 @@ export default function ChatPage() {
                   )}
                 </Paper>
               ))}
+
+              {/* Tool status indicators */}
+              {activeTools.length > 0 && (
+                <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap', alignItems: 'center' }}>
+                  <BuildIcon sx={{ fontSize: 16, color: 'primary.main', mr: 0.5 }} />
+                  {activeTools.map((label, i) => (
+                    <Chip
+                      key={i}
+                      label={label}
+                      size="small"
+                      variant="outlined"
+                      color="primary"
+                      sx={{ fontSize: '0.75rem' }}
+                    />
+                  ))}
+                </Box>
+              )}
+
               {streamingContent && (
                 <Paper sx={{ p: 2, maxWidth: '80%', bgcolor: 'background.paper', borderLeft: '3px solid', borderColor: 'primary.main' }}>
                   <Box sx={{ '& p': { m: 0 }, '& ul': { pl: 2 } }}>
@@ -235,7 +270,7 @@ export default function ChatPage() {
                   </Box>
                 </Paper>
               )}
-              {loading && !streamingContent && (
+              {loading && !streamingContent && activeTools.length === 0 && (
                 <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
                   <CircularProgress size={16} />
                   <Typography variant="body2" color="text.secondary">Thinking...</Typography>

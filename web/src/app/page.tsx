@@ -8,6 +8,7 @@ import MonthlySummaryCard from '@/components/dashboard/MonthlySummaryCard';
 import SavingsRateCard from '@/components/dashboard/SavingsRateCard';
 import TopCategoriesCard from '@/components/dashboard/TopCategoriesCard';
 import RecentTransactionsTable from '@/components/dashboard/RecentTransactionsTable';
+import AiInsightsCard from '@/components/dashboard/AiInsightsCard';
 
 const fetcher = (url: string) => fetch(url).then(r => r.json());
 
@@ -44,6 +45,9 @@ export default function DashboardPage() {
           {loadingSpending ? <Skeleton variant="rounded" height={140} /> : (
             <TopCategoriesCard spending={spending ?? []} />
           )}
+        </Grid>
+        <Grid size={{ xs: 12 }}>
+          <AiInsightsCard />
         </Grid>
         <Grid size={{ xs: 12 }}>
           {loadingJournal ? <Skeleton variant="rounded" height={400} /> : (

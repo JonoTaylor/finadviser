@@ -5,3 +5,4 @@ export { propertyRepo } from './property.repo';
 export { conversationRepo } from './conversation.repo';
 export { fingerprintRepo } from './fingerprint.repo';
 export { importBatchRepo } from './import-batch.repo';
+export { tipRepo } from './tip.repo';

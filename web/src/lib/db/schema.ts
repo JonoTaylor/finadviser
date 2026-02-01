@@ -173,6 +173,17 @@ export const expenseAllocationRules = pgTable('expense_allocation_rules', {
   unique('allocation_property_owner_type_key').on(table.propertyId, table.ownerId, table.expenseType),
 ]);
 
+export const tipTypeEnum = pgEnum('tip_type', ['tip', 'warning', 'insight']);
+
+export const aiTips = pgTable('ai_tips', {
+  id: serial('id').primaryKey(),
+  content: text('content').notNull(),
+  tipType: tipTypeEnum('tip_type').notNull().default('tip'),
+  priority: integer('priority').notNull().default(0),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  dismissedAt: timestamp('dismissed_at'),
+});
+
 export const aiConversations = pgTable('ai_conversations', {
   id: serial('id').primaryKey(),
   title: text('title'),

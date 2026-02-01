@@ -20,12 +20,25 @@ interface Entry {
 function parseAmount(summary: string | null): string {
   if (!summary) return '0';
   const parts = summary.split('|');
+  // Prefer the asset account entry (skip offset accounts like
+  // "Uncategorized Expense" / "Uncategorized Income") so the sign
+  // reflects how the transaction affected the user's bank account.
   for (const part of parts) {
-    const [name, amt] = part.split(':');
-    if (name && amt) {
-      const num = parseFloat(amt);
-      if (num !== 0) return amt;
-    }
+    const idx = part.lastIndexOf(':');
+    if (idx === -1) continue;
+    const name = part.slice(0, idx);
+    const amt = part.slice(idx + 1);
+    if (name.startsWith('Uncategorized ')) continue;
+    const num = parseFloat(amt);
+    if (num !== 0) return amt;
+  }
+  // Fallback: first non-zero amount
+  for (const part of parts) {
+    const idx = part.lastIndexOf(':');
+    if (idx === -1) continue;
+    const amt = part.slice(idx + 1);
+    const num = parseFloat(amt);
+    if (num !== 0) return amt;
   }
   return '0';
 }

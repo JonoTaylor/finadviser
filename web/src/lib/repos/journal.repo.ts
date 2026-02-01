@@ -89,7 +89,7 @@ export const journalRepo = {
     const rows = await db.execute(sql`
       SELECT je.id, je.date, je.description, je.reference, je.category_id,
              c.name AS category_name,
-             STRING_AGG(a.name || ':' || be.amount, '|') AS entries_summary
+             STRING_AGG(a.name || ':' || be.amount, '|' ORDER BY CASE a.account_type WHEN 'ASSET' THEN 0 ELSE 1 END) AS entries_summary
       FROM journal_entries je
       LEFT JOIN categories c ON c.id = je.category_id
       LEFT JOIN book_entries be ON be.journal_entry_id = je.id
@@ -164,7 +164,7 @@ export const journalRepo = {
     const db = getDb();
     const rows = await db.execute(sql`
       SELECT je.id, je.date, je.description,
-             STRING_AGG(a.name || ':' || be.amount, '|') AS entries_summary
+             STRING_AGG(a.name || ':' || be.amount, '|' ORDER BY CASE a.account_type WHEN 'ASSET' THEN 0 ELSE 1 END) AS entries_summary
       FROM journal_entries je
       LEFT JOIN book_entries be ON be.journal_entry_id = je.id
       LEFT JOIN accounts a ON a.id = be.account_id
@@ -180,7 +180,7 @@ export const journalRepo = {
     const db = getDb();
     const rows = await db.execute(sql`
       SELECT je.id, je.date, je.description, je.category_id, c.name AS category_name,
-             STRING_AGG(a.name || ':' || be.amount, '|') AS entries_summary
+             STRING_AGG(a.name || ':' || be.amount, '|' ORDER BY CASE a.account_type WHEN 'ASSET' THEN 0 ELSE 1 END) AS entries_summary
       FROM journal_entries je
       LEFT JOIN categories c ON c.id = je.category_id
       LEFT JOIN book_entries be ON be.journal_entry_id = je.id

@@ -77,7 +77,7 @@ export default function TransactionFilters({
             onClick={preset.action}
             sx={{
               cursor: 'pointer',
-              '&:hover': { bgcolor: alpha('#5EEAD4', 0.08), borderColor: 'primary.main' },
+              '&:hover': { bgcolor: alpha('#818CF8', 0.08), borderColor: 'primary.main' },
             }}
           />
         ))}

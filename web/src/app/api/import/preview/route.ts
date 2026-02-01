@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { previewImport } from '@/lib/import/import-pipeline';
+import { parsePDF } from '@/lib/import/pdf-parser';
+import { categorizeTransactions } from '@/lib/import/categorizer';
 
 export async function POST(request: NextRequest) {
   try {
@@ -9,6 +11,19 @@ export async function POST(request: NextRequest) {
     const accountName = formData.get('accountName') as string;
 
     if (!file) return NextResponse.json({ error: 'No file uploaded' }, { status: 400 });
+
+    const isPdf = file.name.toLowerCase().endsWith('.pdf') || bankConfig === 'pdf';
+
+    if (isPdf) {
+      // PDF flow: use AI extraction
+      const arrayBuffer = await file.arrayBuffer();
+      const buffer = Buffer.from(arrayBuffer);
+      let transactions = await parsePDF(buffer);
+      transactions = await categorizeTransactions(transactions);
+      return NextResponse.json(transactions);
+    }
+
+    // CSV flow: existing pipeline
     if (!bankConfig) return NextResponse.json({ error: 'Bank config required' }, { status: 400 });
     if (!accountName) return NextResponse.json({ error: 'Account name required' }, { status: 400 });
 

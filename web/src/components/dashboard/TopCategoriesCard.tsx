@@ -33,7 +33,7 @@ export default function TopCategoriesCard({ spending }: { spending: SpendingRow[
       <Box
         sx={{
           position: 'absolute', top: 0, left: 0, right: 0, height: 3,
-          background: 'linear-gradient(90deg, #FBBF24, #F97316)',
+          background: 'linear-gradient(90deg, #FB923C, #F97316)',
         }}
       />
       <CardContent>
@@ -42,10 +42,10 @@ export default function TopCategoriesCard({ spending }: { spending: SpendingRow[
             sx={{
               width: 36, height: 36, borderRadius: 2.5,
               display: 'flex', alignItems: 'center', justifyContent: 'center',
-              bgcolor: alpha('#FBBF24', 0.12),
+              bgcolor: alpha('#FB923C', 0.12),
             }}
           >
-            <DonutSmallRoundedIcon sx={{ fontSize: 20, color: 'warning.main' }} />
+            <DonutSmallRoundedIcon sx={{ fontSize: 20, color: '#FB923C' }} />
           </Box>
           <Typography variant="subtitle2" color="text.secondary">Top Categories</Typography>
         </Box>
@@ -61,20 +61,29 @@ export default function TopCategoriesCard({ spending }: { spending: SpendingRow[
                 <Box key={cat}>
                   <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.25 }}>
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                      <Box sx={{ width: 8, height: 8, borderRadius: '50%', bgcolor: color, flexShrink: 0 }} />
+                      <Box
+                        sx={{
+                          width: 8,
+                          height: 8,
+                          borderRadius: '50%',
+                          bgcolor: color,
+                          flexShrink: 0,
+                          boxShadow: `0 0 6px ${alpha(color, 0.4)}`,
+                        }}
+                      />
                       <Typography variant="body2" noWrap sx={{ maxWidth: 120 }}>{cat}</Typography>
                     </Box>
                     <Typography variant="body2" fontWeight={600}>
                       {formatCurrency(amount.toString())}
                     </Typography>
                   </Box>
-                  <Box sx={{ ml: 2.5, height: 4, borderRadius: 2, bgcolor: alpha(color, 0.12) }}>
+                  <Box sx={{ ml: 2.5, height: 6, borderRadius: 3, bgcolor: alpha(color, 0.12) }}>
                     <Box
                       sx={{
                         width: `${pct}%`,
                         height: '100%',
-                        borderRadius: 2,
-                        bgcolor: color,
+                        borderRadius: 3,
+                        background: `linear-gradient(90deg, ${color}, ${alpha(color, 0.7)})`,
                         transition: 'width 0.4s ease',
                       }}
                     />

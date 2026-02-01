@@ -36,13 +36,25 @@ export default function AiInsightsCard() {
   if (!tips || tips.length === 0) return null;
 
   return (
-    <Card sx={{ position: 'relative', overflow: 'hidden' }}>
-      <Box
-        sx={{
-          position: 'absolute', top: 0, left: 0, right: 0, height: 3,
-          background: 'linear-gradient(90deg, #FBBF24, #F97316, #FB7185)',
-        }}
-      />
+    <Card
+      sx={{
+        position: 'relative',
+        overflow: 'hidden',
+        // Gradient border via pseudo-element mask trick
+        '&::before': {
+          content: '""',
+          position: 'absolute',
+          inset: 0,
+          borderRadius: 'inherit',
+          padding: '1px',
+          background: 'linear-gradient(135deg, #818CF8, #F472B6, #FB923C)',
+          WebkitMask: 'linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0)',
+          WebkitMaskComposite: 'xor',
+          maskComposite: 'exclude',
+          pointerEvents: 'none',
+        },
+      }}
+    >
       <CardContent>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1.5 }}>
           <Box
@@ -71,6 +83,11 @@ export default function AiInsightsCard() {
                   borderRadius: 2.5,
                   bgcolor: alpha(config.color, 0.06),
                   border: `1px solid ${alpha(config.color, 0.1)}`,
+                  transition: 'background-color 0.15s, border-color 0.15s',
+                  '&:hover': {
+                    bgcolor: alpha(config.color, 0.1),
+                    borderColor: alpha(config.color, 0.2),
+                  },
                 }}
               >
                 <Box sx={{ color: config.color, mt: 0.25, flexShrink: 0 }}>

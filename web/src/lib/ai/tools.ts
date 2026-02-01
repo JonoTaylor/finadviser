@@ -88,9 +88,21 @@ export const TOOL_DEFINITIONS: Tool[] = [
     },
   },
   {
+    name: 'list_uncategorized',
+    description:
+      'List uncategorized transactions with their id, date, description, and amount. Use this before auto_categorize to show the user what needs attention, or to review what is uncategorized.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        limit: { type: 'number', description: 'Max results (default 25).' },
+      },
+      required: [],
+    },
+  },
+  {
     name: 'auto_categorize',
     description:
-      'Bulk auto-categorise all uncategorised transactions using rules and AI. Returns a summary of how many were categorised.',
+      'Bulk auto-categorise all uncategorised transactions using rules and AI. Returns a summary of how many were categorised, plus details of each categorisation (id, description, category, method).',
     input_schema: {
       type: 'object' as const,
       properties: {},
@@ -162,6 +174,7 @@ export const TOOL_LABELS: Record<string, string> = {
   get_categories: 'Loading categories',
   get_property_summary: 'Loading property data',
   categorize_transaction: 'Categorising transaction',
+  list_uncategorized: 'Finding uncategorized transactions',
   auto_categorize: 'Auto-categorising transactions',
   create_category: 'Creating category',
   add_categorization_rule: 'Adding categorisation rule',
@@ -190,6 +203,8 @@ export async function executeTool(
       return executeGetPropertySummary();
     case 'categorize_transaction':
       return executeCategorizeTransaction(input);
+    case 'list_uncategorized':
+      return executeListUncategorized(input);
     case 'auto_categorize':
       return executeAutoCategorize();
     case 'create_category':
@@ -301,36 +316,57 @@ async function executeCategorizeTransaction(input: Record<string, unknown>) {
   return { success: true, journalId, categoryId };
 }
 
+async function executeListUncategorized(input: Record<string, unknown>) {
+  const limit = (input.limit as number) || 25;
+  const entries = await journalRepo.listUncategorizedWithAmounts(limit);
+  return entries.map((e) => ({
+    id: e.id,
+    date: e.date,
+    description: e.description,
+    amount: e.entries_summary,
+  }));
+}
+
 async function executeAutoCategorize() {
   const uncategorized = await journalRepo.listUncategorized();
   if (uncategorized.length === 0) {
-    return { total: 0, ruleBased: 0, aiCategorized: 0, remaining: 0 };
+    return { total: 0, ruleBased: 0, aiCategorized: 0, remaining: 0, details: [] };
   }
 
   const rules = await categoryRepo.getRules();
-  const ruleMatched: Array<{ id: number; categoryId: number }> = [];
+  const categories = await categoryRepo.listAll();
+  const nameToId = new Map(categories.map((c) => [c.name.toLowerCase(), c.id]));
+  const idToName = new Map(categories.map((c) => [c.id, c.name]));
+
+  const ruleMatched: Array<{ id: number; categoryId: number; description: string }> = [];
   const unmatched: Array<{ id: number; description: string }> = [];
 
   for (const entry of uncategorized) {
     const categoryId = matchRule(entry.description, rules);
     if (categoryId) {
-      ruleMatched.push({ id: entry.id, categoryId });
+      ruleMatched.push({ id: entry.id, categoryId, description: entry.description });
     } else {
       unmatched.push(entry);
     }
   }
 
+  const details: Array<{ id: number; description: string; category: string; method: 'rule' | 'ai' }> = [];
+
   for (const match of ruleMatched) {
     await journalRepo.updateCategory(match.id, match.categoryId);
+    details.push({
+      id: match.id,
+      description: match.description,
+      category: idToName.get(match.categoryId) ?? 'Unknown',
+      method: 'rule',
+    });
   }
 
   let aiCategorized = 0;
   if (unmatched.length > 0 && process.env.ANTHROPIC_API_KEY) {
-    const categories = await categoryRepo.listAll();
     const categoryNames = categories.map((c) => c.name);
     const descriptions = unmatched.map((e) => e.description);
     const aiResults = await categorizeBatch(descriptions, categoryNames);
-    const nameToId = new Map(categories.map((c) => [c.name.toLowerCase(), c.id]));
 
     for (const entry of unmatched) {
       const suggestedName = aiResults[entry.description];
@@ -339,14 +375,24 @@ async function executeAutoCategorize() {
       if (!catId) continue;
       await journalRepo.updateCategory(entry.id, catId);
       aiCategorized++;
+      details.push({
+        id: entry.id,
+        description: entry.description,
+        category: suggestedName,
+        method: 'ai',
+      });
     }
   }
+
+  const hasMore = details.length > 50;
 
   return {
     total: uncategorized.length,
     ruleBased: ruleMatched.length,
     aiCategorized,
     remaining: unmatched.length - aiCategorized,
+    details: details.slice(0, 50),
+    hasMore,
   };
 }
 

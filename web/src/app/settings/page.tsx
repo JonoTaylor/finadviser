@@ -39,7 +39,7 @@ export default function SettingsPage() {
 
         <SettingsCard
           icon={<CurrencyPoundRoundedIcon />}
-          iconColor="#FBBF24"
+          iconColor="#FB923C"
           title="Currency"
         >
           <Typography variant="body2" color="text.secondary">
@@ -51,7 +51,7 @@ export default function SettingsPage() {
 
         <SettingsCard
           icon={<StorageRoundedIcon />}
-          iconColor="#34D399"
+          iconColor="#4ADE80"
           title="Database"
         >
           <Typography variant="body2" color="text.secondary">
@@ -78,7 +78,7 @@ export default function SettingsPage() {
 
         <SettingsCard
           icon={<InfoRoundedIcon />}
-          iconColor="#A78BFA"
+          iconColor="#818CF8"
           title="About"
         >
           <Typography variant="body2" fontWeight={600}>FinAdviser v0.1.0</Typography>

@@ -1,12 +1,12 @@
-// Vibrant, balanced palette for category identification
+// Warm premium palette for category identification
 const CATEGORY_COLORS = [
-  '#5EEAD4', // teal (primary)
-  '#A78BFA', // violet
-  '#FBBF24', // amber
+  '#818CF8', // indigo (primary)
+  '#F472B6', // pink
+  '#FB923C', // orange
   '#60A5FA', // blue
+  '#4ADE80', // emerald
   '#FB7185', // rose
-  '#34D399', // emerald
-  '#F97316', // orange
+  '#FBBF24', // amber
   '#E879F9', // fuchsia
   '#38BDF8', // sky
   '#A3E635', // lime

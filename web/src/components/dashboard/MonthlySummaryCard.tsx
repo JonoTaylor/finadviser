@@ -58,7 +58,7 @@ export default function MonthlySummaryCard({
       <Box
         sx={{
           position: 'absolute', top: 0, left: 0, right: 0, height: 3,
-          background: 'linear-gradient(90deg, #60A5FA, #A78BFA)',
+          background: 'linear-gradient(90deg, #818CF8, #F472B6)',
         }}
       />
       <CardContent>
@@ -68,10 +68,10 @@ export default function MonthlySummaryCard({
               sx={{
                 width: 36, height: 36, borderRadius: 2.5,
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
-                bgcolor: alpha('#60A5FA', 0.12),
+                bgcolor: alpha('#818CF8', 0.12),
               }}
             >
-              <CalendarMonthRoundedIcon sx={{ fontSize: 20, color: 'info.main' }} />
+              <CalendarMonthRoundedIcon sx={{ fontSize: 20, color: 'primary.main' }} />
             </Box>
             <Typography variant="subtitle2" color="text.secondary">This Month</Typography>
           </Box>
@@ -85,10 +85,11 @@ export default function MonthlySummaryCard({
               size="small"
               sx={{
                 height: 24,
-                bgcolor: alpha(trendUp ? '#FB7185' : '#34D399', 0.12),
+                bgcolor: alpha(trendUp ? '#FB7185' : '#4ADE80', 0.12),
                 color: trendUp ? 'error.main' : 'success.main',
                 fontWeight: 600,
                 fontSize: '0.75rem',
+                boxShadow: `0 0 8px ${alpha(trendUp ? '#FB7185' : '#4ADE80', 0.15)}`,
                 '& .MuiChip-icon': { color: 'inherit' },
               }}
             />
@@ -98,7 +99,12 @@ export default function MonthlySummaryCard({
         <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.25 }}>
           <Row label="Income" value={formatCurrency(incomeTotal.toString())} color="success.main" />
           <Row label="Expenses" value={formatCurrency(monthExpenses.toString())} color="error.main" />
-          <Box sx={{ height: '1px', bgcolor: 'divider' }} />
+          <Box
+            sx={{
+              height: '1px',
+              background: `linear-gradient(90deg, transparent, ${alpha('#818CF8', 0.3)}, transparent)`,
+            }}
+          />
           <Row
             label="Net"
             value={formatCurrency(net.toString())}

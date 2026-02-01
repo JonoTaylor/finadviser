@@ -12,11 +12,13 @@ import PreviewTable from '@/components/import/PreviewTable';
 
 const fetcher = (url: string) => fetch(url).then(r => r.json());
 
-const steps = ['Upload CSV', 'Configure', 'Preview & Import'];
+const CSV_STEPS = ['Upload File', 'Configure', 'Preview & Import'];
+const PDF_STEPS = ['Upload File', 'Preview & Import'];
 
 export default function ImportPage() {
   const [activeStep, setActiveStep] = useState(0);
   const [file, setFile] = useState<File | null>(null);
+  const [fileType, setFileType] = useState<'csv' | 'pdf'>('csv');
   const [csvContent, setCsvContent] = useState('');
   const [bankConfig, setBankConfig] = useState('generic-csv');
   const [accountName, setAccountName] = useState('Bank');
@@ -28,12 +30,40 @@ export default function ImportPage() {
   const { data: bankConfigs } = useSWR('/api/import/bank-configs', fetcher);
   const { data: accounts } = useSWR('/api/accounts', fetcher);
 
+  const steps = fileType === 'pdf' ? PDF_STEPS : CSV_STEPS;
+
   const handleFileSelect = useCallback(async (f: File) => {
     setFile(f);
-    const content = await f.text();
-    setCsvContent(content);
-    setActiveStep(1);
-  }, []);
+    setError('');
+    const isPdf = f.name.toLowerCase().endsWith('.pdf');
+    setFileType(isPdf ? 'pdf' : 'csv');
+
+    if (isPdf) {
+      // PDF: skip config, go straight to preview via AI parsing
+      try {
+        const formData = new FormData();
+        formData.append('file', f);
+        formData.append('bankConfig', 'pdf');
+        formData.append('accountName', accountName);
+
+        const res = await fetch('/api/import/preview', { method: 'POST', body: formData });
+        if (!res.ok) {
+          const err = await res.json();
+          throw new Error(err.error || 'PDF preview failed');
+        }
+        const data = await res.json();
+        setPreview(data);
+        setActiveStep(1); // PDF step 1 = Preview
+      } catch (e) {
+        setError(e instanceof Error ? e.message : 'Failed to parse PDF');
+      }
+    } else {
+      // CSV: read content and go to config step
+      const content = await f.text();
+      setCsvContent(content);
+      setActiveStep(1); // CSV step 1 = Configure
+    }
+  }, [accountName]);
 
   const handleConfigure = useCallback(async () => {
     if (!file) return;
@@ -61,11 +91,22 @@ export default function ImportPage() {
     setImporting(true);
     setError('');
     try {
-      const res = await fetch('/api/import/confirm', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ csvContent, bankConfig, accountName }),
-      });
+      let res: Response;
+      if (fileType === 'pdf') {
+        // PDF: send pre-parsed transactions
+        res = await fetch('/api/import/confirm', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ parsedTransactions: preview, accountName }),
+        });
+      } else {
+        // CSV: send raw content for server-side parsing
+        res = await fetch('/api/import/confirm', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ csvContent, bankConfig, accountName }),
+        });
+      }
       if (!res.ok) {
         const err = await res.json();
         throw new Error(err.error || 'Import failed');
@@ -77,23 +118,27 @@ export default function ImportPage() {
     } finally {
       setImporting(false);
     }
-  }, [csvContent, bankConfig, accountName]);
+  }, [fileType, csvContent, bankConfig, accountName, preview]);
 
   const handleReset = () => {
     setActiveStep(0);
     setFile(null);
+    setFileType('csv');
     setCsvContent('');
     setPreview(null);
     setResult(null);
     setError('');
   };
 
+  // Determine if we're on the preview step
+  const isPreviewStep = fileType === 'pdf' ? activeStep === 1 : activeStep === 2;
+
   return (
     <Box>
       <Box sx={{ mb: 4 }}>
         <Typography variant="h4">Import Transactions</Typography>
         <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-          Upload CSV files from your bank to import transactions
+          Upload CSV files or PDF bank statements to import transactions
         </Typography>
       </Box>
 
@@ -121,7 +166,7 @@ export default function ImportPage() {
         <>
           {activeStep === 0 && <FileUploadStep onFileSelect={handleFileSelect} />}
 
-          {activeStep === 1 && (
+          {activeStep === 1 && fileType === 'csv' && (
             <ConfigStep
               bankConfig={bankConfig}
               accountName={accountName}
@@ -134,11 +179,11 @@ export default function ImportPage() {
             />
           )}
 
-          {activeStep === 2 && preview && (
+          {isPreviewStep && preview && (
             <Box>
               <PreviewTable transactions={preview} />
               <Stack direction="row" spacing={2} sx={{ mt: 2 }}>
-                <Button onClick={() => setActiveStep(1)}>Back</Button>
+                <Button onClick={() => { setActiveStep(0); setPreview(null); }}>Back</Button>
                 <Button variant="contained" onClick={handleImport} disabled={importing}>
                   {importing ? 'Importing...' : 'Confirm Import'}
                 </Button>

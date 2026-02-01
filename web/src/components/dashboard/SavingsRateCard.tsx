@@ -41,10 +41,10 @@ export default function SavingsRateCard({
   const target = 20;
 
   const color =
-    savingsRate < 10 ? '#FB7185' : savingsRate < 20 ? '#FBBF24' : '#34D399';
+    savingsRate < 10 ? '#FB7185' : savingsRate < 20 ? '#FBBF24' : '#4ADE80';
 
-  // Ring SVG params
-  const size = 80;
+  // Ring SVG params — larger ring
+  const size = 88;
   const stroke = 7;
   const radius = (size - stroke) / 2;
   const circumference = 2 * Math.PI * radius;
@@ -73,12 +73,30 @@ export default function SavingsRateCard({
         </Box>
 
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 2.5 }}>
-          {/* Ring gauge */}
+          {/* Ring gauge with glow */}
           <Box sx={{ position: 'relative', width: size, height: size, flexShrink: 0 }}>
-            <svg width={size} height={size} style={{ transform: 'rotate(-90deg)' }}>
+            {/* Radial glow behind ring */}
+            <Box
+              sx={{
+                position: 'absolute',
+                inset: -8,
+                borderRadius: '50%',
+                background: `radial-gradient(circle, ${alpha(color, 0.12)} 0%, transparent 70%)`,
+              }}
+            />
+            <svg width={size} height={size} style={{ transform: 'rotate(-90deg)', position: 'relative' }}>
+              <defs>
+                <filter id="ring-glow">
+                  <feGaussianBlur stdDeviation="3" result="blur" />
+                  <feMerge>
+                    <feMergeNode in="blur" />
+                    <feMergeNode in="SourceGraphic" />
+                  </feMerge>
+                </filter>
+              </defs>
               <circle
                 cx={size / 2} cy={size / 2} r={radius}
-                fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth={stroke}
+                fill="none" stroke={alpha(color, 0.1)} strokeWidth={stroke}
               />
               <circle
                 cx={size / 2} cy={size / 2} r={radius}
@@ -86,6 +104,7 @@ export default function SavingsRateCard({
                 strokeLinecap="round"
                 strokeDasharray={circumference}
                 strokeDashoffset={offset}
+                filter="url(#ring-glow)"
                 style={{ transition: 'stroke-dashoffset 0.6s ease' }}
               />
             </svg>

@@ -33,13 +33,14 @@ function parseAmount(summary: string | null): string {
 export default function RecentTransactionsTable({ entries }: { entries: Entry[] }) {
   return (
     <Card>
+      {/* Clean data treatment — no accent bar */}
       <CardContent>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
           <Box
             sx={{
               width: 36, height: 36, borderRadius: 2.5,
               display: 'flex', alignItems: 'center', justifyContent: 'center',
-              bgcolor: alpha('#A78BFA', 0.12),
+              bgcolor: alpha('#F472B6', 0.12),
             }}
           >
             <ReceiptLongRoundedIcon sx={{ fontSize: 20, color: 'secondary.main' }} />
@@ -52,13 +53,15 @@ export default function RecentTransactionsTable({ entries }: { entries: Entry[] 
             <ReceiptLongRoundedIcon sx={{ fontSize: 48, color: 'text.secondary', opacity: 0.3, mb: 1 }} />
             <Typography color="text.secondary">No transactions yet</Typography>
             <Typography variant="caption" color="text.secondary">
-              Import a CSV to get started
+              Import a CSV or PDF to get started
             </Typography>
           </Box>
         ) : (
           <Table size="small">
             <TableHead>
-              <TableRow>
+              <TableRow
+                sx={{ bgcolor: alpha('#818CF8', 0.04) }}
+              >
                 <TableCell>Date</TableCell>
                 <TableCell>Description</TableCell>
                 <TableCell>Category</TableCell>
@@ -66,13 +69,18 @@ export default function RecentTransactionsTable({ entries }: { entries: Entry[] 
               </TableRow>
             </TableHead>
             <TableBody>
-              {entries.map((entry) => {
+              {entries.map((entry, i) => {
                 const amount = parseAmount(entry.entries_summary);
                 const numAmount = parseFloat(amount);
                 const catName = entry.category_name || 'Uncategorized';
                 const catColor = getCategoryColor(catName);
                 return (
-                  <TableRow key={entry.id}>
+                  <TableRow
+                    key={entry.id}
+                    sx={{
+                      bgcolor: i % 2 === 1 ? alpha('#fff', 0.015) : 'transparent',
+                    }}
+                  >
                     <TableCell sx={{ whiteSpace: 'nowrap', color: 'text.secondary' }}>{entry.date}</TableCell>
                     <TableCell>{entry.description}</TableCell>
                     <TableCell>

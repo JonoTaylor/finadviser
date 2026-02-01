@@ -2,36 +2,57 @@
 
 import { createTheme, alpha } from '@mui/material/styles';
 
-// ── M3-inspired palette ──────────────────────────────────────────────
-// Primary:   electric teal – fresh, financial, modern
-// Secondary: rich violet   – fun, premium feel
-// Tertiary:  golden amber  – warmth, highlights, tips
-// Surfaces:  deep blue-grey tonal scale
+// ── Warm Premium Dark Palette ──────────────────────────────────────
+// Primary:   indigo — warm, premium fintech feel
+// Secondary: pink   — playful warmth, contrast
+// Tertiary:  orange — personality, highlights
+// Surfaces:  warm charcoal tonal scale
 // ─────────────────────────────────────────────────────────────────────
 
 const palette = {
-  primary:   { main: '#5EEAD4', light: '#99F6E4', dark: '#2DD4BF', contrastText: '#042F2E' },
-  secondary: { main: '#A78BFA', light: '#C4B5FD', dark: '#8B5CF6', contrastText: '#1E1033' },
-  tertiary:  { main: '#FBBF24', light: '#FDE68A', dark: '#F59E0B' },
+  primary:   { main: '#818CF8', light: '#A5B4FC', dark: '#6366F1', contrastText: '#1E1B4B' },
+  secondary: { main: '#F472B6', light: '#F9A8D4', dark: '#EC4899', contrastText: '#4A0D2B' },
+  tertiary:  { main: '#FB923C', light: '#FDBA74', dark: '#F97316' },
 
-  success: { main: '#34D399', dark: '#059669' },
+  success: { main: '#4ADE80', dark: '#16A34A' },
   error:   { main: '#FB7185', dark: '#E11D48' },
   warning: { main: '#FBBF24', dark: '#D97706' },
   info:    { main: '#60A5FA', dark: '#2563EB' },
 
-  // Tonal surface scale (M3 dark-theme approach: higher = lighter)
-  bg:      '#0C0F16',
-  surface: '#141720',
-  surfaceContainerLow:     '#181C26',
-  surfaceContainer:        '#1E2230',
-  surfaceContainerHigh:    '#262B3A',
-  surfaceContainerHighest: '#2F3545',
+  // Warm tonal surface scale
+  bg:      '#0E0E12',
+  surface: '#141418',
+  surfaceContainerLow:     '#18181F',
+  surfaceContainer:        '#1E1E28',
+  surfaceContainerHigh:    '#282833',
+  surfaceContainerHighest: '#323242',
 
   outline:        'rgba(255,255,255,0.10)',
   outlineVariant: 'rgba(255,255,255,0.06)',
-  textPrimary:    '#F0F4F8',
-  textSecondary:  '#94A3B8',
+  textPrimary:    '#F0F0F8',
+  textSecondary:  '#9694A8',
 };
+
+// ── Visual Effect Utilities ──────────────────────────────────────────
+export const glassCard = {
+  backgroundColor: alpha(palette.surfaceContainer, 0.55),
+  backdropFilter: 'blur(20px) saturate(180%)',
+  border: `1px solid ${alpha('#fff', 0.08)}`,
+};
+
+export const glowShadow = {
+  primary: `0 4px 24px -4px ${alpha(palette.primary.main, 0.2)}`,
+  success: `0 4px 24px -4px ${alpha(palette.success.main, 0.2)}`,
+  error:   `0 4px 24px -4px ${alpha(palette.error.main, 0.2)}`,
+  secondary: `0 4px 24px -4px ${alpha(palette.secondary.main, 0.2)}`,
+};
+
+export const gradientText = (from: string, to: string) => ({
+  background: `linear-gradient(135deg, ${from}, ${to})`,
+  WebkitBackgroundClip: 'text',
+  WebkitTextFillColor: 'transparent',
+  backgroundClip: 'text',
+});
 
 const theme = createTheme({
   palette: {
@@ -64,7 +85,14 @@ const theme = createTheme({
     // ── Surfaces ───────────────────────────────────────────────────
     MuiCssBaseline: {
       styleOverrides: {
-        body: { backgroundColor: palette.bg },
+        body: {
+          backgroundColor: palette.bg,
+          backgroundImage: `
+            radial-gradient(ellipse 80% 60% at 10% 90%, ${alpha(palette.primary.main, 0.06)} 0%, transparent 60%),
+            radial-gradient(ellipse 60% 50% at 90% 10%, ${alpha(palette.secondary.main, 0.05)} 0%, transparent 60%)
+          `,
+          backgroundAttachment: 'fixed',
+        },
         '::-webkit-scrollbar': { width: 6 },
         '::-webkit-scrollbar-track': { background: 'transparent' },
         '::-webkit-scrollbar-thumb': { background: 'rgba(255,255,255,0.10)', borderRadius: 3 },
@@ -79,8 +107,7 @@ const theme = createTheme({
       styleOverrides: {
         root: {
           backgroundImage: 'none',
-          backgroundColor: palette.surfaceContainer,
-          border: `1px solid ${palette.outlineVariant}`,
+          ...glassCard,
           borderRadius: 20,
           transition: 'border-color 0.2s, box-shadow 0.2s',
           '&:hover': {
@@ -105,8 +132,12 @@ const theme = createTheme({
           padding: '8px 20px',
         },
         contained: {
-          boxShadow: 'none',
-          '&:hover': { boxShadow: 'none' },
+          background: `linear-gradient(135deg, ${palette.primary.main}, ${palette.primary.dark})`,
+          boxShadow: glowShadow.primary,
+          '&:hover': {
+            background: `linear-gradient(135deg, ${palette.primary.light}, ${palette.primary.main})`,
+            boxShadow: glowShadow.primary,
+          },
         },
         outlined: {
           borderColor: palette.outline,
@@ -116,7 +147,7 @@ const theme = createTheme({
     },
     MuiFab: {
       styleOverrides: {
-        root: { boxShadow: `0 4px 20px ${alpha(palette.primary.main, 0.25)}` },
+        root: { boxShadow: glowShadow.primary },
       },
     },
 

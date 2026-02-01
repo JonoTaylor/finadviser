@@ -14,6 +14,8 @@ import BarChartRoundedIcon from '@mui/icons-material/BarChartRounded';
 import AccountBalanceRoundedIcon from '@mui/icons-material/AccountBalanceRounded';
 import HomeWorkRoundedIcon from '@mui/icons-material/HomeWorkRounded';
 import TrendingUpRoundedIcon from '@mui/icons-material/TrendingUpRounded';
+import CategoryRoundedIcon from '@mui/icons-material/CategoryRounded';
+import WarningAmberRoundedIcon from '@mui/icons-material/WarningAmberRounded';
 import MemoryRoundedIcon from '@mui/icons-material/MemoryRounded';
 import HistoryRoundedIcon from '@mui/icons-material/HistoryRounded';
 import useSWR from 'swr';
@@ -54,8 +56,10 @@ const markdownSx = {
 const QUICK_PROMPTS = [
   { label: 'Spending Summary', prompt: 'Give me a spending summary for the last few months', icon: <BarChartRoundedIcon sx={{ fontSize: 18 }} /> },
   { label: 'Budget Check', prompt: 'Analyze my budget and suggest improvements', icon: <AccountBalanceRoundedIcon sx={{ fontSize: 18 }} /> },
+  { label: 'Categorize Spending', prompt: 'Review my uncategorized transactions and categorize them', icon: <CategoryRoundedIcon sx={{ fontSize: 18 }} /> },
   { label: 'Property Report', prompt: 'Generate a property equity report', icon: <HomeWorkRoundedIcon sx={{ fontSize: 18 }} /> },
   { label: 'Net Worth', prompt: 'Analyze my net worth and financial health', icon: <TrendingUpRoundedIcon sx={{ fontSize: 18 }} /> },
+  { label: 'What to Watch', prompt: 'What should I watch out for in my finances? Flag any concerns or unusual patterns.', icon: <WarningAmberRoundedIcon sx={{ fontSize: 18 }} /> },
 ];
 
 interface Message {
@@ -214,7 +218,7 @@ export default function ChatPage() {
                 sx={{
                   width: 64, height: 64, borderRadius: 4, mx: 'auto', mb: 2,
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  background: 'linear-gradient(135deg, rgba(94,234,212,0.15), rgba(167,139,250,0.15))',
+                  background: 'linear-gradient(135deg, rgba(129,140,248,0.15), rgba(244,114,182,0.15))',
                 }}
               >
                 <AutoAwesomeRoundedIcon sx={{ fontSize: 32, color: 'primary.main' }} />
@@ -223,7 +227,7 @@ export default function ChatPage() {
                 Ask me anything
               </Typography>
               <Typography variant="body2" color="text.secondary" sx={{ mb: 4, maxWidth: 420, mx: 'auto' }}>
-                I can look up your data, analyze spending, categorize transactions, manage rules, and add tips to your dashboard.
+                I can analyze your spending, categorize transactions, check your budget, track property equity, and flag things you should watch out for.
               </Typography>
               <Stack direction="row" spacing={1} justifyContent="center" flexWrap="wrap" useFlexGap>
                 {QUICK_PROMPTS.map((qp) => (
@@ -251,8 +255,8 @@ export default function ChatPage() {
                     maxWidth: '80%',
                     alignSelf: msg.role === 'user' ? 'flex-end' : 'flex-start',
                     bgcolor: msg.role === 'user'
-                      ? alpha('#5EEAD4', 0.1)
-                      : alpha('#A78BFA', 0.06),
+                      ? alpha('#818CF8', 0.1)
+                      : alpha('#F472B6', 0.06),
                     ml: msg.role === 'user' ? 'auto' : 0,
                     borderLeft: msg.role === 'assistant' ? '3px solid' : 'none',
                     borderColor: msg.role === 'assistant' ? 'secondary.main' : 'transparent',
@@ -291,7 +295,7 @@ export default function ChatPage() {
                   elevation={0}
                   sx={{
                     p: 2, maxWidth: '80%',
-                    bgcolor: alpha('#A78BFA', 0.06),
+                    bgcolor: alpha('#F472B6', 0.06),
                     borderLeft: '3px solid',
                     borderColor: 'secondary.main',
                     borderRadius: 4,
@@ -344,8 +348,8 @@ export default function ChatPage() {
             onClick={() => sendMessage(input)}
             disabled={loading || !input.trim()}
             sx={{
-              bgcolor: loading || !input.trim() ? 'transparent' : alpha('#5EEAD4', 0.12),
-              '&:hover': { bgcolor: alpha('#5EEAD4', 0.2) },
+              bgcolor: loading || !input.trim() ? 'transparent' : alpha('#818CF8', 0.12),
+              '&:hover': { bgcolor: alpha('#818CF8', 0.2) },
             }}
           >
             <SendRoundedIcon />

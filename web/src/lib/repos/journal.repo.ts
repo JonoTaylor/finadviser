@@ -160,6 +160,22 @@ export const journalRepo = {
     return rows.rows as Array<{ id: number; description: string }>;
   },
 
+  async listUncategorizedWithAmounts(limit = 25) {
+    const db = getDb();
+    const rows = await db.execute(sql`
+      SELECT je.id, je.date, je.description,
+             STRING_AGG(a.name || ':' || be.amount, '|') AS entries_summary
+      FROM journal_entries je
+      LEFT JOIN book_entries be ON be.journal_entry_id = je.id
+      LEFT JOIN accounts a ON a.id = be.account_id
+      WHERE je.category_id IS NULL
+      GROUP BY je.id, je.date, je.description
+      ORDER BY je.date DESC
+      LIMIT ${limit}
+    `);
+    return rows.rows as Array<{ id: number; date: string; description: string; entries_summary: string | null }>;
+  },
+
   async search(query: string, limit = 50) {
     const db = getDb();
     const rows = await db.execute(sql`

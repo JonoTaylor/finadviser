@@ -5,6 +5,12 @@ import { Box, Typography, Card, CardContent } from '@mui/material';
 import { alpha } from '@mui/material/styles';
 import CloudUploadRoundedIcon from '@mui/icons-material/CloudUploadRounded';
 
+const ACCEPTED_EXTENSIONS = ['.csv', '.pdf'];
+
+function isAcceptedFile(file: File): boolean {
+  return ACCEPTED_EXTENSIONS.some(ext => file.name.toLowerCase().endsWith(ext));
+}
+
 export default function FileUploadStep({ onFileSelect }: { onFileSelect: (file: File) => void }) {
   const [dragOver, setDragOver] = useState(false);
 
@@ -12,7 +18,7 @@ export default function FileUploadStep({ onFileSelect }: { onFileSelect: (file: 
     e.preventDefault();
     setDragOver(false);
     const file = e.dataTransfer.files[0];
-    if (file && file.name.endsWith('.csv')) onFileSelect(file);
+    if (file && isAcceptedFile(file)) onFileSelect(file);
   }, [onFileSelect]);
 
   const handleChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
@@ -35,28 +41,28 @@ export default function FileUploadStep({ onFileSelect }: { onFileSelect: (file: 
             textAlign: 'center',
             cursor: 'pointer',
             transition: 'all 0.2s',
-            bgcolor: dragOver ? alpha('#5EEAD4', 0.04) : 'transparent',
-            '&:hover': { borderColor: 'primary.main', bgcolor: alpha('#5EEAD4', 0.04) },
+            bgcolor: dragOver ? alpha('#818CF8', 0.04) : 'transparent',
+            '&:hover': { borderColor: 'primary.main', bgcolor: alpha('#818CF8', 0.04) },
           }}
-          onClick={() => document.getElementById('csv-upload')?.click()}
+          onClick={() => document.getElementById('file-upload')?.click()}
         >
           <Box
             sx={{
               width: 64, height: 64, borderRadius: 4, mx: 'auto', mb: 2,
               display: 'flex', alignItems: 'center', justifyContent: 'center',
-              bgcolor: alpha('#5EEAD4', 0.1),
+              bgcolor: alpha('#818CF8', 0.1),
             }}
           >
             <CloudUploadRoundedIcon sx={{ fontSize: 32, color: 'primary.main' }} />
           </Box>
-          <Typography variant="h6">Drop CSV file here or click to upload</Typography>
+          <Typography variant="h6">Drop CSV or PDF file here or click to upload</Typography>
           <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-            Supports CSV files from your bank
+            Supports CSV files and PDF bank statements
           </Typography>
           <input
-            id="csv-upload"
+            id="file-upload"
             type="file"
-            accept=".csv"
+            accept=".csv,.pdf"
             hidden
             onChange={handleChange}
           />

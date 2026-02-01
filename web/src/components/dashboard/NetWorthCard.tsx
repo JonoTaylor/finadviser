@@ -6,6 +6,7 @@ import AccountBalanceWalletRoundedIcon from '@mui/icons-material/AccountBalanceW
 import ArrowUpwardRoundedIcon from '@mui/icons-material/ArrowUpwardRounded';
 import ArrowDownwardRoundedIcon from '@mui/icons-material/ArrowDownwardRounded';
 import { formatCurrency } from '@/lib/utils/formatting';
+import { glowShadow, gradientText } from '@/theme/theme';
 import Decimal from 'decimal.js';
 
 interface Balance {
@@ -28,19 +29,27 @@ export default function NetWorthCard({ balances }: { balances: Balance[] }) {
   const isPositive = netWorth.gte(0);
 
   return (
-    <Card sx={{ height: '100%', position: 'relative', overflow: 'hidden' }}>
-      {/* Gradient accent bar */}
+    <Card
+      sx={{
+        height: '100%',
+        position: 'relative',
+        overflow: 'hidden',
+        boxShadow: isPositive ? glowShadow.success : glowShadow.error,
+      }}
+    >
+      {/* Ambient glow at top */}
       <Box
         sx={{
           position: 'absolute',
           top: 0,
           left: 0,
           right: 0,
-          height: 3,
-          background: 'linear-gradient(90deg, #5EEAD4, #34D399)',
+          height: 80,
+          background: `radial-gradient(ellipse 80% 100% at 50% 0%, ${alpha(isPositive ? '#4ADE80' : '#FB7185', 0.1)} 0%, transparent 70%)`,
+          pointerEvents: 'none',
         }}
       />
-      <CardContent>
+      <CardContent sx={{ position: 'relative' }}>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
           <Box
             sx={{
@@ -50,7 +59,7 @@ export default function NetWorthCard({ balances }: { balances: Balance[] }) {
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              bgcolor: alpha('#5EEAD4', 0.12),
+              bgcolor: alpha('#818CF8', 0.12),
             }}
           >
             <AccountBalanceWalletRoundedIcon sx={{ fontSize: 20, color: 'primary.main' }} />
@@ -63,18 +72,21 @@ export default function NetWorthCard({ balances }: { balances: Balance[] }) {
         <Typography
           variant="h4"
           sx={{
-            color: isPositive ? 'success.main' : 'error.main',
             fontWeight: 800,
             fontSize: '1.75rem',
             letterSpacing: '-0.03em',
             mb: 2,
+            ...gradientText(
+              isPositive ? '#4ADE80' : '#FB7185',
+              isPositive ? '#16A34A' : '#E11D48',
+            ),
           }}
         >
           {formatCurrency(netWorth.toString())}
         </Typography>
 
         <Box sx={{ display: 'flex', gap: 2 }}>
-          <Box sx={{ flex: 1, p: 1.25, borderRadius: 2, bgcolor: alpha('#34D399', 0.08) }}>
+          <Box sx={{ flex: 1, p: 1.25, borderRadius: 2, bgcolor: alpha('#4ADE80', 0.08) }}>
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mb: 0.5 }}>
               <ArrowUpwardRoundedIcon sx={{ fontSize: 14, color: 'success.main' }} />
               <Typography variant="caption" color="success.main" fontWeight={600}>Assets</Typography>

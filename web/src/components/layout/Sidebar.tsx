@@ -22,6 +22,7 @@ import MenuRoundedIcon from '@mui/icons-material/MenuRounded';
 import ShowChartRoundedIcon from '@mui/icons-material/ShowChartRounded';
 import useMediaQuery from '@mui/material/useMediaQuery';
 import { useTheme, alpha } from '@mui/material/styles';
+import { glassCard } from '@/theme/theme';
 
 const DRAWER_WIDTH = 260;
 
@@ -53,6 +54,7 @@ export default function Sidebar({ children }: { children: React.ReactNode }) {
             alignItems: 'center',
             justifyContent: 'center',
             background: `linear-gradient(135deg, ${theme.palette.primary.main}, ${theme.palette.secondary.main})`,
+            boxShadow: `0 2px 12px -2px ${alpha(theme.palette.primary.main, 0.3)}`,
           }}
         >
           <ShowChartRoundedIcon sx={{ fontSize: 20, color: '#fff' }} />
@@ -86,6 +88,9 @@ export default function Sidebar({ children }: { children: React.ReactNode }) {
                     minWidth: 40,
                     color: isActive ? 'primary.main' : 'text.secondary',
                     transition: 'color 0.15s',
+                    ...(isActive && {
+                      filter: `drop-shadow(0 0 6px ${alpha(theme.palette.primary.main, 0.4)})`,
+                    }),
                   }}
                 >
                   {item.icon}
@@ -123,9 +128,7 @@ export default function Sidebar({ children }: { children: React.ReactNode }) {
             top: 12,
             left: 12,
             zIndex: 1300,
-            bgcolor: alpha(theme.palette.background.paper, 0.85),
-            backdropFilter: 'blur(12px)',
-            border: `1px solid ${alpha('#fff', 0.06)}`,
+            ...glassCard,
             '&:hover': { bgcolor: alpha(theme.palette.background.paper, 0.95) },
           }}
         >
@@ -144,6 +147,7 @@ export default function Sidebar({ children }: { children: React.ReactNode }) {
             width: DRAWER_WIDTH,
             boxSizing: 'border-box',
             borderRight: `1px solid ${alpha('#fff', 0.04)}`,
+            ...(isMobile && glassCard),
           },
         }}
       >

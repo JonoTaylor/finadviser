@@ -40,11 +40,33 @@ export async function executeImport(
   transactions = await checkDuplicates(transactions, account.id);
   transactions = await categorizeTransactions(transactions);
 
+  return importTransactions(transactions, account.id, bankConfigName, 'upload.csv');
+}
+
+export async function executeImportFromParsed(
+  parsedTransactions: RawTransaction[],
+  accountName: string,
+): Promise<ImportResult> {
+  const account = await accountRepo.getOrCreate(accountName, 'ASSET');
+
+  // Check duplicates against existing data
+  let transactions = await checkDuplicates(parsedTransactions, account.id);
+  transactions = await categorizeTransactions(transactions);
+
+  return importTransactions(transactions, account.id, 'pdf', 'upload.pdf');
+}
+
+async function importTransactions(
+  transactions: RawTransaction[],
+  accountId: number,
+  bankConfig: string,
+  filename: string,
+): Promise<ImportResult> {
   // Create import batch
   const batch = await importBatchRepo.create({
-    filename: 'upload.csv',
-    bankConfig: bankConfigName,
-    accountId: account.id,
+    filename,
+    bankConfig,
+    accountId,
     rowCount: transactions.length,
   });
 
@@ -57,10 +79,10 @@ export async function executeImport(
       continue;
     }
 
-    const journalId = await createJournalEntry(txn, account.id, batch.id);
+    const journalId = await createJournalEntry(txn, accountId, batch.id);
     await fingerprintRepo.create({
       fingerprint: txn.fingerprint,
-      accountId: account.id,
+      accountId,
       journalEntryId: journalId,
     });
     imported++;

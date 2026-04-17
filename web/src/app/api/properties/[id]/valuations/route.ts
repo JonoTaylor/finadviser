@@ -1,21 +1,23 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { z } from 'zod';
+import { NextResponse } from 'next/server';
 import { propertyRepo } from '@/lib/repos';
+import { apiHandler, validateBody, validateParams } from '@/lib/api/handler';
+import { dateString, idParams, moneyString } from '@/lib/api/schemas';
 
-export async function POST(
-  request: NextRequest,
-  { params }: { params: Promise<{ id: string }> },
-) {
-  try {
-    const { id } = await params;
-    const body = await request.json();
-    const valuation = await propertyRepo.addValuation(
-      parseInt(id),
-      body.valuation,
-      body.valuationDate,
-      body.source ?? 'manual',
-    );
-    return NextResponse.json(valuation, { status: 201 });
-  } catch (error) {
-    return NextResponse.json({ error: 'Failed to add valuation' }, { status: 500 });
-  }
-}
+const bodySchema = z.object({
+  valuation: moneyString,
+  valuationDate: dateString,
+  source: z.string().max(50).optional().default('manual'),
+});
+
+export const POST = apiHandler(async (req, ctx) => {
+  const { id } = await validateParams(ctx as { params: Promise<{ id: string }> }, idParams);
+  const body = await validateBody(req, bodySchema);
+  const valuation = await propertyRepo.addValuation(
+    id,
+    body.valuation,
+    body.valuationDate,
+    body.source,
+  );
+  return NextResponse.json(valuation, { status: 201 });
+});

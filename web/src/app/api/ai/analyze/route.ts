@@ -1,20 +1,36 @@
 import { NextRequest } from 'next/server';
+import { z } from 'zod';
 import { runAgent } from '@/lib/ai/claude-client';
 import { getHistory, addUserMessage, addAssistantMessage, getOrCreateConversation } from '@/lib/ai/conversation-manager';
 
 // Allow up to 120s for agentic tool-use loops
 export const maxDuration = 120;
 
+const bodySchema = z
+  .object({
+    message: z.string().min(1).max(100_000).optional(),
+    conversationId: z.number().int().positive().optional(),
+    quickPrompt: z.string().min(1).max(100_000).optional(),
+  })
+  .refine((v) => !!(v.message ?? v.quickPrompt), {
+    message: 'Either message or quickPrompt is required',
+  });
+
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json();
-    const { message, conversationId: inputConvId, quickPrompt } = body;
-
-    const userMessage = quickPrompt ?? message;
-    if (!userMessage) {
-      return new Response(JSON.stringify({ error: 'Message required' }), { status: 400 });
+    let parsed;
+    try {
+      parsed = bodySchema.parse(await request.json());
+    } catch (err) {
+      const issues = err instanceof z.ZodError ? err.issues : [{ message: String(err) }];
+      return new Response(JSON.stringify({ error: 'Validation failed', issues }), {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' },
+      });
     }
+    const { message, conversationId: inputConvId, quickPrompt } = parsed;
 
+    const userMessage = quickPrompt ?? message!;
     const conversationId = await getOrCreateConversation(inputConvId, userMessage.substring(0, 50));
     await addUserMessage(conversationId, userMessage);
 

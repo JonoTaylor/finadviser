@@ -1,23 +1,16 @@
-import { NextRequest, NextResponse } from 'next/server';
 import { calculateEquity } from '@/lib/properties/equity-calculator';
+import { apiHandler, validateParams } from '@/lib/api/handler';
+import { idParams } from '@/lib/api/schemas';
 
-export async function GET(
-  request: NextRequest,
-  { params }: { params: Promise<{ id: string }> },
-) {
-  try {
-    const { id } = await params;
-    const equityData = await calculateEquity(parseInt(id));
-    const serialized = equityData.map(e => ({
-      ownerId: e.ownerId,
-      name: e.name,
-      capitalAccountId: e.capitalAccountId,
-      capitalBalance: e.capitalBalance.toString(),
-      equityPct: e.equityPct,
-      equityAmount: e.equityAmount.toString(),
-    }));
-    return NextResponse.json(serialized);
-  } catch (error) {
-    return NextResponse.json({ error: 'Failed to calculate equity' }, { status: 500 });
-  }
-}
+export const GET = apiHandler(async (_req, ctx) => {
+  const { id } = await validateParams(ctx as { params: Promise<{ id: string }> }, idParams);
+  const equityData = await calculateEquity(id);
+  return equityData.map((e) => ({
+    ownerId: e.ownerId,
+    name: e.name,
+    capitalAccountId: e.capitalAccountId,
+    capitalBalance: e.capitalBalance.toString(),
+    equityPct: e.equityPct,
+    equityAmount: e.equityAmount.toString(),
+  }));
+});

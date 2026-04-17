@@ -1,13 +1,19 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { z } from 'zod';
 import { journalRepo } from '@/lib/repos';
+import { apiHandler, validateQuery } from '@/lib/api/handler';
 
-export async function GET(request: NextRequest) {
-  try {
-    const q = request.nextUrl.searchParams.get('q') ?? '';
-    const limit = parseInt(request.nextUrl.searchParams.get('limit') ?? '50');
-    const data = await journalRepo.search(q, limit);
-    return NextResponse.json(data);
-  } catch (error) {
-    return NextResponse.json({ error: 'Failed to search' }, { status: 500 });
-  }
-}
+const querySchema = z.object({
+  q: z.string().max(200).default(''),
+  limit: z
+    .string()
+    .regex(/^\d+$/)
+    .transform((v) => parseInt(v, 10))
+    .refine((n) => n > 0 && n <= 500)
+    .optional()
+    .default(50),
+});
+
+export const GET = apiHandler(async (req) => {
+  const { q, limit } = validateQuery(req, querySchema);
+  return journalRepo.search(q, limit);
+});

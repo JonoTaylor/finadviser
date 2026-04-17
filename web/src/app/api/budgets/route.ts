@@ -1,28 +1,17 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { z } from 'zod';
 import { budgetRepo } from '@/lib/repos';
+import { apiHandler, validateBody } from '@/lib/api/handler';
+import { dateString, idNumber, moneyString } from '@/lib/api/schemas';
 
-export async function GET() {
-  try {
-    const budgets = await budgetRepo.getAll();
-    return NextResponse.json(budgets);
-  } catch {
-    return NextResponse.json([]);
-  }
-}
+const createSchema = z.object({
+  categoryId: idNumber,
+  monthlyLimit: moneyString,
+  effectiveFrom: dateString,
+});
 
-export async function POST(request: NextRequest) {
-  try {
-    const body = await request.json();
-    const { categoryId, monthlyLimit, effectiveFrom } = body;
-    if (!categoryId || !monthlyLimit || !effectiveFrom) {
-      return NextResponse.json(
-        { error: 'categoryId, monthlyLimit, and effectiveFrom are required' },
-        { status: 400 },
-      );
-    }
-    const budget = await budgetRepo.upsert(categoryId, monthlyLimit, effectiveFrom);
-    return NextResponse.json(budget);
-  } catch {
-    return NextResponse.json({ error: 'Failed to save budget' }, { status: 500 });
-  }
-}
+export const GET = apiHandler(async () => budgetRepo.getAll());
+
+export const POST = apiHandler(async (req) => {
+  const { categoryId, monthlyLimit, effectiveFrom } = await validateBody(req, createSchema);
+  return budgetRepo.upsert(categoryId, monthlyLimit, effectiveFrom);
+});

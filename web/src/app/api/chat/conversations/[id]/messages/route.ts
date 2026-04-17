@@ -1,16 +1,17 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { z } from 'zod';
+import { NextResponse } from 'next/server';
 import { conversationRepo } from '@/lib/repos';
+import { apiHandler, validateBody, validateParams } from '@/lib/api/handler';
+import { idParams } from '@/lib/api/schemas';
 
-export async function POST(
-  request: NextRequest,
-  { params }: { params: Promise<{ id: string }> },
-) {
-  try {
-    const { id } = await params;
-    const body = await request.json();
-    const message = await conversationRepo.addMessage(parseInt(id), body.role, body.content);
-    return NextResponse.json(message, { status: 201 });
-  } catch (error) {
-    return NextResponse.json({ error: 'Failed to add message' }, { status: 500 });
-  }
-}
+const bodySchema = z.object({
+  role: z.enum(['user', 'assistant', 'system']),
+  content: z.string().min(1).max(100_000),
+});
+
+export const POST = apiHandler(async (req, ctx) => {
+  const { id } = await validateParams(ctx as { params: Promise<{ id: string }> }, idParams);
+  const { role, content } = await validateBody(req, bodySchema);
+  const message = await conversationRepo.addMessage(id, role, content);
+  return NextResponse.json(message, { status: 201 });
+});

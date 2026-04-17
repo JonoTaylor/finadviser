@@ -1,34 +1,31 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { z } from 'zod';
+import { NextResponse } from 'next/server';
 import { accountRepo } from '@/lib/repos';
+import { apiHandler, validateBody, validateQuery } from '@/lib/api/handler';
+import { accountType, idNumber } from '@/lib/api/schemas';
 
-export async function GET(request: NextRequest) {
-  try {
-    const balances = request.nextUrl.searchParams.get('balances');
+const querySchema = z.object({
+  balances: z.enum(['true', 'false']).optional(),
+  type: accountType.optional(),
+});
 
-    if (balances === 'true') {
-      const data = await accountRepo.getBalances();
-      return NextResponse.json(data);
-    }
+const createSchema = z.object({
+  name: z.string().min(1).max(200),
+  accountType,
+  parentId: idNumber.nullish(),
+  description: z.string().max(1000).nullish(),
+  isSystem: z.boolean().optional(),
+});
 
-    const type = request.nextUrl.searchParams.get('type');
-    if (type) {
-      const data = await accountRepo.listByType(type as 'ASSET' | 'LIABILITY' | 'EQUITY' | 'INCOME' | 'EXPENSE');
-      return NextResponse.json(data);
-    }
+export const GET = apiHandler(async (req) => {
+  const { balances, type } = validateQuery(req, querySchema);
+  if (balances === 'true') return accountRepo.getBalances();
+  if (type) return accountRepo.listByType(type);
+  return accountRepo.listAll();
+});
 
-    const data = await accountRepo.listAll();
-    return NextResponse.json(data);
-  } catch (error) {
-    return NextResponse.json({ error: 'Failed to fetch accounts' }, { status: 500 });
-  }
-}
-
-export async function POST(request: NextRequest) {
-  try {
-    const body = await request.json();
-    const account = await accountRepo.create(body);
-    return NextResponse.json(account, { status: 201 });
-  } catch (error) {
-    return NextResponse.json({ error: 'Failed to create account' }, { status: 500 });
-  }
-}
+export const POST = apiHandler(async (req) => {
+  const body = await validateBody(req, createSchema);
+  const account = await accountRepo.create(body);
+  return NextResponse.json(account, { status: 201 });
+});

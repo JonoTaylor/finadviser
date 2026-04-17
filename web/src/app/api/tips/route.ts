@@ -1,24 +1,22 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { z } from 'zod';
+import { NextResponse } from 'next/server';
 import { tipRepo } from '@/lib/repos';
+import { apiHandler, validateQuery } from '@/lib/api/handler';
+import { idString } from '@/lib/api/schemas';
 
-export async function GET() {
+const idQuery = z.object({ id: idString });
+
+export const GET = apiHandler(async () => {
   try {
-    const tips = await tipRepo.listActive();
-    return NextResponse.json(tips);
+    return await tipRepo.listActive();
   } catch {
-    // Table may not exist yet — return empty array gracefully
+    // Table may not exist yet — return empty list gracefully.
     return NextResponse.json([]);
   }
-}
+});
 
-export async function PATCH(request: NextRequest) {
-  try {
-    const { searchParams } = new URL(request.url);
-    const id = searchParams.get('id');
-    if (!id) return NextResponse.json({ error: 'Missing id' }, { status: 400 });
-    await tipRepo.dismiss(parseInt(id));
-    return NextResponse.json({ success: true });
-  } catch (error) {
-    return NextResponse.json({ error: 'Failed to dismiss tip' }, { status: 500 });
-  }
-}
+export const PATCH = apiHandler(async (req) => {
+  const { id } = validateQuery(req, idQuery);
+  await tipRepo.dismiss(id);
+  return { success: true };
+});

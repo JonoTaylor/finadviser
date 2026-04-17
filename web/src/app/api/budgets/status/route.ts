@@ -1,14 +1,14 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { z } from 'zod';
 import { budgetRepo } from '@/lib/repos';
 import { format } from 'date-fns';
+import { apiHandler, validateQuery } from '@/lib/api/handler';
+import { monthString } from '@/lib/api/schemas';
 
-export async function GET(request: NextRequest) {
-  try {
-    const { searchParams } = new URL(request.url);
-    const month = searchParams.get('month') ?? format(new Date(), 'yyyy-MM');
-    const status = await budgetRepo.getStatusForMonth(month);
-    return NextResponse.json(status);
-  } catch {
-    return NextResponse.json([]);
-  }
-}
+const querySchema = z.object({
+  month: monthString.optional(),
+});
+
+export const GET = apiHandler(async (req) => {
+  const { month } = validateQuery(req, querySchema);
+  return budgetRepo.getStatusForMonth(month ?? format(new Date(), 'yyyy-MM'));
+});

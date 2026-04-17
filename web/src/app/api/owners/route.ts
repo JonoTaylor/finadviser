@@ -1,21 +1,16 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { z } from 'zod';
+import { NextResponse } from 'next/server';
 import { propertyRepo } from '@/lib/repos';
+import { apiHandler, validateBody } from '@/lib/api/handler';
 
-export async function GET() {
-  try {
-    const data = await propertyRepo.listOwners();
-    return NextResponse.json(data);
-  } catch (error) {
-    return NextResponse.json({ error: 'Failed to fetch owners' }, { status: 500 });
-  }
-}
+const createSchema = z.object({
+  name: z.string().min(1).max(200),
+});
 
-export async function POST(request: NextRequest) {
-  try {
-    const body = await request.json();
-    const owner = await propertyRepo.createOwner(body.name);
-    return NextResponse.json(owner, { status: 201 });
-  } catch (error) {
-    return NextResponse.json({ error: 'Failed to create owner' }, { status: 500 });
-  }
-}
+export const GET = apiHandler(async () => propertyRepo.listOwners());
+
+export const POST = apiHandler(async (req) => {
+  const { name } = await validateBody(req, createSchema);
+  const owner = await propertyRepo.createOwner(name);
+  return NextResponse.json(owner, { status: 201 });
+});

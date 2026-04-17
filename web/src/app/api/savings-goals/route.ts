@@ -1,47 +1,40 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { z } from 'zod';
 import { savingsGoalRepo } from '@/lib/repos';
+import { apiHandler, validateBody } from '@/lib/api/handler';
+import { dateString, idNumber, moneyString } from '@/lib/api/schemas';
 
-export async function GET() {
-  try {
-    const goals = await savingsGoalRepo.getAll();
-    return NextResponse.json(goals);
-  } catch {
-    return NextResponse.json([]);
-  }
-}
+const createSchema = z.object({
+  name: z.string().min(1).max(200),
+  targetAmount: moneyString,
+  currentAmount: moneyString.optional(),
+  targetDate: dateString.nullish(),
+  accountId: idNumber.nullish(),
+});
 
-export async function POST(request: NextRequest) {
-  try {
-    const body = await request.json();
-    const { name, targetAmount, targetDate, accountId } = body;
-    if (!name || !targetAmount) {
-      return NextResponse.json(
-        { error: 'name and targetAmount are required' },
-        { status: 400 },
-      );
-    }
-    const goal = await savingsGoalRepo.create({
-      name,
-      targetAmount,
-      targetDate: targetDate ?? null,
-      accountId: accountId ?? null,
-    });
-    return NextResponse.json(goal);
-  } catch {
-    return NextResponse.json({ error: 'Failed to create goal' }, { status: 500 });
-  }
-}
+const updateSchema = z.object({
+  id: idNumber,
+  name: z.string().min(1).max(200).optional(),
+  targetAmount: moneyString.optional(),
+  currentAmount: moneyString.optional(),
+  targetDate: dateString.nullish(),
+  accountId: idNumber.nullish(),
+  status: z.enum(['active', 'completed', 'cancelled']).optional(),
+});
 
-export async function PATCH(request: NextRequest) {
-  try {
-    const body = await request.json();
-    const { id, ...data } = body;
-    if (!id) {
-      return NextResponse.json({ error: 'id is required' }, { status: 400 });
-    }
-    const goal = await savingsGoalRepo.update(id, data);
-    return NextResponse.json(goal);
-  } catch {
-    return NextResponse.json({ error: 'Failed to update goal' }, { status: 500 });
-  }
-}
+export const GET = apiHandler(async () => savingsGoalRepo.getAll());
+
+export const POST = apiHandler(async (req) => {
+  const body = await validateBody(req, createSchema);
+  return savingsGoalRepo.create({
+    name: body.name,
+    targetAmount: body.targetAmount,
+    currentAmount: body.currentAmount,
+    targetDate: body.targetDate ?? null,
+    accountId: body.accountId ?? null,
+  });
+});
+
+export const PATCH = apiHandler(async (req) => {
+  const { id, ...data } = await validateBody(req, updateSchema);
+  return savingsGoalRepo.update(id, data);
+});

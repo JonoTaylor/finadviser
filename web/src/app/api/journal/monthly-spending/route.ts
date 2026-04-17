@@ -1,11 +1,4 @@
-import { NextResponse } from 'next/server';
 import { journalRepo } from '@/lib/repos';
+import { apiHandler } from '@/lib/api/handler';
 
-export async function GET() {
-  try {
-    const data = await journalRepo.getMonthlySpending();
-    return NextResponse.json(data);
-  } catch (error) {
-    return NextResponse.json({ error: 'Failed to fetch monthly spending' }, { status: 500 });
-  }
-}
+export const GET = apiHandler(async () => journalRepo.getMonthlySpending());

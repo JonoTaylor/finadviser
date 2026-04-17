@@ -1,38 +1,39 @@
-import { NextRequest, NextResponse } from 'next/server';
 import { previewImport } from '@/lib/import/import-pipeline';
 import { categorizeTransactions } from '@/lib/import/categorizer';
+import { apiHandler, badRequest } from '@/lib/api/handler';
 
-export async function POST(request: NextRequest) {
-  try {
-    const formData = await request.formData();
-    const file = formData.get('file') as File | null;
-    const bankConfig = formData.get('bankConfig') as string;
-    const accountName = formData.get('accountName') as string;
+// 20 MiB cap on uploaded statements.
+const MAX_UPLOAD_BYTES = 20 * 1024 * 1024;
 
-    if (!file) return NextResponse.json({ error: 'No file uploaded' }, { status: 400 });
+export const POST = apiHandler(async (req) => {
+  const formData = await req.formData();
+  const file = formData.get('file');
+  const bankConfigRaw = formData.get('bankConfig');
+  const accountNameRaw = formData.get('accountName');
 
-    const isPdf = file.name.toLowerCase().endsWith('.pdf') || bankConfig === 'pdf';
-
-    if (isPdf) {
-      // Dynamic import — pdf-parse + pdfjs-dist crash Vercel if loaded at module init
-      const { parsePDF } = await import('@/lib/import/pdf-parser');
-      const arrayBuffer = await file.arrayBuffer();
-      const buffer = Buffer.from(arrayBuffer);
-      let transactions = await parsePDF(buffer);
-      transactions = await categorizeTransactions(transactions);
-      return NextResponse.json(transactions);
-    }
-
-    // CSV flow: existing pipeline
-    if (!bankConfig) return NextResponse.json({ error: 'Bank config required' }, { status: 400 });
-    if (!accountName) return NextResponse.json({ error: 'Account name required' }, { status: 400 });
-
-    const csvContent = await file.text();
-    const transactions = await previewImport(csvContent, bankConfig, accountName);
-    return NextResponse.json(transactions);
-  } catch (error) {
-    console.error('[import/preview]', error);
-    const message = error instanceof Error ? error.message : 'Failed to preview import';
-    return NextResponse.json({ error: message }, { status: 500 });
+  if (!(file instanceof File)) throw badRequest('No file uploaded');
+  if (file.size > MAX_UPLOAD_BYTES) {
+    throw badRequest(`File too large (limit ${MAX_UPLOAD_BYTES} bytes)`);
   }
-}
+
+  const bankConfig = typeof bankConfigRaw === 'string' ? bankConfigRaw : '';
+  const accountName = typeof accountNameRaw === 'string' ? accountNameRaw : '';
+
+  const isPdf = file.name.toLowerCase().endsWith('.pdf') || bankConfig === 'pdf';
+
+  if (isPdf) {
+    // Dynamic import — pdf-parse + pdfjs-dist crash Vercel if loaded at module init.
+    const { parsePDF } = await import('@/lib/import/pdf-parser');
+    const arrayBuffer = await file.arrayBuffer();
+    const buffer = Buffer.from(arrayBuffer);
+    let transactions = await parsePDF(buffer);
+    transactions = await categorizeTransactions(transactions);
+    return transactions;
+  }
+
+  if (!bankConfig) throw badRequest('Bank config required');
+  if (!accountName) throw badRequest('Account name required');
+
+  const csvContent = await file.text();
+  return previewImport(csvContent, bankConfig, accountName);
+});

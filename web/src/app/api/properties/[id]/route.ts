@@ -1,30 +1,24 @@
-import { NextRequest, NextResponse } from 'next/server';
 import { propertyRepo } from '@/lib/repos';
+import { apiHandler, notFound, validateParams } from '@/lib/api/handler';
+import { idParams } from '@/lib/api/schemas';
 
-export async function GET(
-  request: NextRequest,
-  { params }: { params: Promise<{ id: string }> },
-) {
-  try {
-    const { id } = await params;
-    const property = await propertyRepo.getProperty(parseInt(id));
-    if (!property) return NextResponse.json({ error: 'Not found' }, { status: 404 });
+export const GET = apiHandler(async (_req, ctx) => {
+  const { id } = await validateParams(ctx as { params: Promise<{ id: string }> }, idParams);
+  const property = await propertyRepo.getProperty(id);
+  if (!property) throw notFound('Property');
 
-    const [ownership, valuations, mortgages, allocations] = await Promise.all([
-      propertyRepo.getOwnership(parseInt(id)),
-      propertyRepo.getValuations(parseInt(id)),
-      propertyRepo.getMortgages(parseInt(id)),
-      propertyRepo.getAllocationRules(parseInt(id)),
-    ]);
+  const [ownership, valuations, mortgages, allocations] = await Promise.all([
+    propertyRepo.getOwnership(id),
+    propertyRepo.getValuations(id),
+    propertyRepo.getMortgages(id),
+    propertyRepo.getAllocationRules(id),
+  ]);
 
-    return NextResponse.json({
-      ...property,
-      ownership,
-      valuations,
-      mortgages,
-      allocations,
-    });
-  } catch (error) {
-    return NextResponse.json({ error: 'Failed to fetch property' }, { status: 500 });
-  }
-}
+  return {
+    ...property,
+    ownership,
+    valuations,
+    mortgages,
+    allocations,
+  };
+});

@@ -1,21 +1,28 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { z } from 'zod';
 import { executeImport, executeImportFromParsed } from '@/lib/import/import-pipeline';
+import { apiHandler, validateBody } from '@/lib/api/handler';
 
-export async function POST(request: NextRequest) {
-  try {
-    const body = await request.json();
+const parsedFlowSchema = z.object({
+  parsedTransactions: z.array(z.record(z.string(), z.unknown())).min(1).max(10_000),
+  accountName: z.string().min(1).max(200),
+  csvContent: z.string().optional(),
+  bankConfig: z.string().optional(),
+});
 
-    // PDF flow: pre-parsed transactions
-    if (body.parsedTransactions) {
-      const result = await executeImportFromParsed(body.parsedTransactions, body.accountName);
-      return NextResponse.json(result);
-    }
+const csvFlowSchema = z.object({
+  parsedTransactions: z.undefined().optional(),
+  csvContent: z.string().min(1).max(20 * 1024 * 1024),
+  bankConfig: z.string().min(1).max(100),
+  accountName: z.string().min(1).max(200),
+});
 
-    // CSV flow: parse from raw content
-    const result = await executeImport(body.csvContent, body.bankConfig, body.accountName);
-    return NextResponse.json(result);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : 'Failed to execute import';
-    return NextResponse.json({ error: message }, { status: 500 });
+const bodySchema = z.union([parsedFlowSchema, csvFlowSchema]);
+
+export const POST = apiHandler(async (req) => {
+  const body = await validateBody(req, bodySchema);
+  if ('parsedTransactions' in body && body.parsedTransactions) {
+    // Pipeline accepts loose transaction objects; structural validation happens there.
+    return executeImportFromParsed(body.parsedTransactions as never, body.accountName);
   }
-}
+  return executeImport(body.csvContent!, body.bankConfig!, body.accountName);
+});

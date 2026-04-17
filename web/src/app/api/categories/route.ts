@@ -1,21 +1,19 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { z } from 'zod';
+import { NextResponse } from 'next/server';
 import { categoryRepo } from '@/lib/repos';
+import { apiHandler, validateBody } from '@/lib/api/handler';
+import { idNumber } from '@/lib/api/schemas';
 
-export async function GET() {
-  try {
-    const data = await categoryRepo.listAll();
-    return NextResponse.json(data);
-  } catch (error) {
-    return NextResponse.json({ error: 'Failed to fetch categories' }, { status: 500 });
-  }
-}
+const createSchema = z.object({
+  name: z.string().min(1).max(100),
+  parentId: idNumber.nullish(),
+  isSystem: z.boolean().optional(),
+});
 
-export async function POST(request: NextRequest) {
-  try {
-    const body = await request.json();
-    const category = await categoryRepo.create(body);
-    return NextResponse.json(category, { status: 201 });
-  } catch (error) {
-    return NextResponse.json({ error: 'Failed to create category' }, { status: 500 });
-  }
-}
+export const GET = apiHandler(async () => categoryRepo.listAll());
+
+export const POST = apiHandler(async (req) => {
+  const body = await validateBody(req, createSchema);
+  const category = await categoryRepo.create(body);
+  return NextResponse.json(category, { status: 201 });
+});

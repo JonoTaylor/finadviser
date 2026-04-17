@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { jsonRequest, paramsCtx } from '../../__tests__/helpers';
+import { getRequest, jsonRequest, paramsCtx } from '../../__tests__/helpers';
 
 const getEntry = vi.fn();
 const getBookEntries = vi.fn();
@@ -28,20 +28,14 @@ describe('GET /api/journal/[id]', () => {
 
   it('returns 404 when the entry does not exist', async () => {
     getEntry.mockResolvedValue(null);
-    const res = await GET(
-      new Request('http://localhost/') as never,
-      paramsCtx({ id: '42' }),
-    );
+    const res = await GET(getRequest('http://localhost/api/journal/42'), paramsCtx({ id: '42' }));
     expect(res.status).toBe(404);
   });
 
   it('returns the entry with its book entries', async () => {
     getEntry.mockResolvedValue({ id: 42, description: 'x' });
     getBookEntries.mockResolvedValue([{ accountId: 1, amount: '10' }]);
-    const res = await GET(
-      new Request('http://localhost/') as never,
-      paramsCtx({ id: '42' }),
-    );
+    const res = await GET(getRequest('http://localhost/api/journal/42'), paramsCtx({ id: '42' }));
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({
       id: 42,
@@ -51,10 +45,7 @@ describe('GET /api/journal/[id]', () => {
   });
 
   it('rejects a non-numeric id param', async () => {
-    const res = await GET(
-      new Request('http://localhost/') as never,
-      paramsCtx({ id: 'abc' }),
-    );
+    const res = await GET(getRequest('http://localhost/api/journal/abc'), paramsCtx({ id: 'abc' }));
     expect(res.status).toBe(400);
   });
 });
@@ -67,7 +58,7 @@ describe('PATCH /api/journal/[id]', () => {
 
   it('updates the category for a valid body', async () => {
     const res = await PATCH(
-      jsonRequest('http://localhost/', { categoryId: 5 }, 'PATCH'),
+      jsonRequest('http://localhost/api/journal/10', { categoryId: 5 }, 'PATCH'),
       paramsCtx({ id: '10' }),
     );
     expect(res.status).toBe(200);
@@ -77,7 +68,7 @@ describe('PATCH /api/journal/[id]', () => {
   it('creates a rule when createRule=true and the rule is new', async () => {
     await PATCH(
       jsonRequest(
-        'http://localhost/',
+        'http://localhost/api/journal/10',
         { categoryId: 5, createRule: true, description: 'Tesco' },
         'PATCH',
       ),
@@ -94,7 +85,7 @@ describe('PATCH /api/journal/[id]', () => {
     ]);
     await PATCH(
       jsonRequest(
-        'http://localhost/',
+        'http://localhost/api/journal/10',
         { categoryId: 5, createRule: true, description: 'Tesco' },
         'PATCH',
       ),
@@ -105,7 +96,7 @@ describe('PATCH /api/journal/[id]', () => {
 
   it('rejects a non-integer categoryId', async () => {
     const res = await PATCH(
-      jsonRequest('http://localhost/', { categoryId: 'nope' }, 'PATCH'),
+      jsonRequest('http://localhost/api/journal/10', { categoryId: 'nope' }, 'PATCH'),
       paramsCtx({ id: '10' }),
     );
     expect(res.status).toBe(400);

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z, ZodError } from 'zod';
+import { log, newRequestId } from '@/lib/logger';
 
 // Central error + response wrapper for /api/* route handlers.
 //
@@ -27,31 +28,69 @@ export const badRequest = (msg: string, extra?: Record<string, unknown>) =>
 
 type Handler = (request: NextRequest, context: unknown) => Promise<unknown>;
 
+const REQUEST_ID_HEADER = 'x-request-id';
+
+function tagResponse(res: NextResponse, requestId: string): NextResponse {
+  res.headers.set(REQUEST_ID_HEADER, requestId);
+  return res;
+}
+
 export function apiHandler(handler: Handler) {
   return async (request: NextRequest, context: unknown): Promise<NextResponse> => {
+    const requestId = request.headers.get(REQUEST_ID_HEADER) ?? newRequestId();
+    const route = request.nextUrl.pathname;
+    const method = request.method;
     try {
       const result = await handler(request, context);
-      if (result instanceof Response) return result as NextResponse;
-      if (result === undefined) return new NextResponse(null, { status: 204 });
-      return NextResponse.json(result);
+      if (result instanceof Response) {
+        (result as NextResponse).headers.set(REQUEST_ID_HEADER, requestId);
+        return result as NextResponse;
+      }
+      if (result === undefined) {
+        return tagResponse(new NextResponse(null, { status: 204 }), requestId);
+      }
+      return tagResponse(NextResponse.json(result), requestId);
     } catch (err) {
       if (err instanceof ApiError) {
-        return NextResponse.json({ error: err.message, ...err.extra }, { status: err.status });
-      }
-      if (err instanceof ZodError) {
-        return NextResponse.json(
-          { error: 'Validation failed', issues: err.issues },
-          { status: 400 },
+        log.info('api.client_error', {
+          requestId,
+          route,
+          method,
+          status: err.status,
+          message: err.message,
+        });
+        return tagResponse(
+          NextResponse.json({ error: err.message, ...err.extra }, { status: err.status }),
+          requestId,
         );
       }
-      const correlationId =
-        typeof crypto !== 'undefined' && 'randomUUID' in crypto
-          ? crypto.randomUUID()
-          : String(Date.now());
-      console.error(`[api] unhandled error correlationId=${correlationId}`, err);
-      return NextResponse.json(
-        { error: 'Internal server error', correlationId },
-        { status: 500 },
+      if (err instanceof ZodError) {
+        log.info('api.validation_error', {
+          requestId,
+          route,
+          method,
+          issues: err.issues.length,
+        });
+        return tagResponse(
+          NextResponse.json(
+            { error: 'Validation failed', issues: err.issues },
+            { status: 400 },
+          ),
+          requestId,
+        );
+      }
+      log.error('api.unhandled_error', {
+        requestId,
+        route,
+        method,
+        err: err instanceof Error ? { name: err.name, message: err.message, stack: err.stack } : String(err),
+      });
+      return tagResponse(
+        NextResponse.json(
+          { error: 'Internal server error', correlationId: requestId },
+          { status: 500 },
+        ),
+        requestId,
       );
     }
   };

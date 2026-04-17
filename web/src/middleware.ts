@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { log, newRequestId } from '@/lib/logger';
 
 // Edge middleware for /api/* requests:
 //   1. Rate limit (in-memory fixed-window, per request IP)
@@ -66,24 +67,30 @@ function applyCorsHeaders(headers: Headers, origin: string | null, allowed: stri
 export function middleware(request: NextRequest) {
   const origin = request.headers.get('origin');
   const allowedOrigins = parseAllowedOrigins();
+  const requestId = request.headers.get('x-request-id') ?? newRequestId();
+  const route = request.nextUrl.pathname;
 
   // CORS preflight — answer before auth/rate-limit so browsers can proceed.
   if (request.method === 'OPTIONS') {
     const res = new NextResponse(null, { status: 204 });
     applyCorsHeaders(res.headers, origin, allowedOrigins);
+    res.headers.set('x-request-id', requestId);
     return res;
   }
 
   // Rate limit.
   const limit = Math.max(1, parseInt(process.env.RATE_LIMIT_PER_MIN ?? '', 10) || DEFAULT_LIMIT);
-  const rl = rateLimit(clientKey(request), limit);
+  const key = clientKey(request);
+  const rl = rateLimit(key, limit);
   if (!rl.ok) {
     const retryAfter = Math.max(1, Math.ceil((rl.resetAt - Date.now()) / 1000));
+    log.warn('rate_limit.blocked', { requestId, route, key, limit });
     const res = NextResponse.json(
       { error: 'Too many requests' },
       { status: 429, headers: { 'Retry-After': String(retryAfter) } },
     );
     applyCorsHeaders(res.headers, origin, allowedOrigins);
+    res.headers.set('x-request-id', requestId);
     return res;
   }
 
@@ -94,6 +101,7 @@ export function middleware(request: NextRequest) {
   let response: NextResponse;
   if (!token) {
     if (isProd) {
+      log.error('auth.misconfigured', { requestId, route });
       response = NextResponse.json(
         { error: 'API_AUTH_TOKEN is not configured on the server.' },
         { status: 503 },
@@ -105,6 +113,7 @@ export function middleware(request: NextRequest) {
     const header = request.headers.get('authorization') ?? '';
     const provided = header.startsWith('Bearer ') ? header.slice('Bearer '.length) : '';
     if (!provided || !timingSafeEqual(provided, token)) {
+      log.warn('auth.rejected', { requestId, route, hasToken: Boolean(provided) });
       response = NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     } else {
       response = NextResponse.next();
@@ -114,6 +123,7 @@ export function middleware(request: NextRequest) {
   response.headers.set('X-RateLimit-Limit', String(limit));
   response.headers.set('X-RateLimit-Remaining', String(rl.remaining));
   response.headers.set('X-RateLimit-Reset', String(Math.ceil(rl.resetAt / 1000)));
+  response.headers.set('x-request-id', requestId);
   applyCorsHeaders(response.headers, origin, allowedOrigins);
   return response;
 }

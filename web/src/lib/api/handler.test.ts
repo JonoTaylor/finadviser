@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { NextRequest } from 'next/server';
 import { z } from 'zod';
 import {
@@ -10,6 +10,15 @@ import {
   validateQuery,
   validateParams,
 } from './handler';
+
+beforeEach(() => {
+  // Silence logger output during tests.
+  vi.spyOn(console, 'log').mockImplementation(() => {});
+  vi.spyOn(console, 'warn').mockImplementation(() => {});
+  vi.spyOn(console, 'error').mockImplementation(() => {});
+});
+
+afterEach(() => vi.restoreAllMocks());
 
 function makeRequest(
   url = 'http://localhost/api/test',
@@ -69,6 +78,32 @@ describe('apiHandler', () => {
     const body = await res.json();
     expect(body.error).toBe('Internal server error');
     expect(typeof body.correlationId).toBe('string');
+  });
+
+  it('emits an x-request-id header and echoes an inbound one', async () => {
+    const handler = apiHandler(async () => ({ ok: true }));
+    const fresh = await handler(makeRequest(), {});
+    expect(fresh.headers.get('x-request-id')).toMatch(/\S/);
+
+    const echoed = await handler(
+      makeRequest('http://localhost/', { headers: { 'x-request-id': 'abc-123' } }),
+      {},
+    );
+    expect(echoed.headers.get('x-request-id')).toBe('abc-123');
+  });
+
+  it('logs unhandled errors at error level', async () => {
+    const spy = vi.spyOn(console, 'error');
+    const handler = apiHandler(async () => {
+      throw new Error('boom');
+    });
+    await handler(makeRequest(), {});
+    expect(spy).toHaveBeenCalledOnce();
+    const line = spy.mock.calls[0][0] as string;
+    const record = JSON.parse(line);
+    expect(record.level).toBe('error');
+    expect(record.message).toBe('api.unhandled_error');
+    expect(record.err.message).toBe('boom');
   });
 });
 

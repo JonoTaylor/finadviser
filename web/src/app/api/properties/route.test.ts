@@ -69,12 +69,12 @@ describe('/api/properties', () => {
   });
 
   it('POST rejects malformed JSON body', async () => {
-    const req = new Request('http://localhost/', {
+    const req = new (await import('next/server')).NextRequest('http://localhost/api/properties', {
       method: 'POST',
       body: 'not-json',
       headers: { 'Content-Type': 'application/json' },
     });
-    const res = await POST(req as never, {});
+    const res = await POST(req, {});
     expect(res.status).toBe(400);
   });
 });

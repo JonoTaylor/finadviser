@@ -64,11 +64,17 @@ function applyCorsHeaders(headers: Headers, origin: string | null, allowed: stri
   }
 }
 
+// Routes exempt from the bearer-token auth check. The OpenAPI spec is
+// useful for client tooling and contains no user data, so we keep it
+// publicly readable. Rate limiting + CORS still apply.
+const PUBLIC_ROUTES = new Set(['/api/openapi']);
+
 export function middleware(request: NextRequest) {
   const origin = request.headers.get('origin');
   const allowedOrigins = parseAllowedOrigins();
   const requestId = request.headers.get('x-request-id') ?? newRequestId();
   const route = request.nextUrl.pathname;
+  const isPublic = PUBLIC_ROUTES.has(route);
 
   // CORS preflight — answer before auth/rate-limit so browsers can proceed.
   if (request.method === 'OPTIONS') {
@@ -94,12 +100,14 @@ export function middleware(request: NextRequest) {
     return res;
   }
 
-  // Auth.
+  // Auth — skipped for PUBLIC_ROUTES.
   const token = process.env.API_AUTH_TOKEN;
   const isProd = process.env.NODE_ENV === 'production';
 
   let response: NextResponse;
-  if (!token) {
+  if (isPublic) {
+    response = NextResponse.next();
+  } else if (!token) {
     if (isProd) {
       log.error('auth.misconfigured', { requestId, route });
       response = NextResponse.json(

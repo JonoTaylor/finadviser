@@ -3,31 +3,41 @@
 _Last updated: 2026-04-17_
 
 This document captures the results of a full-stack audit of the `finadviser`
-codebase and proposes a prioritized plan to address the findings. It covers the
-Python TUI backend (`finadviser/`), the Next.js web API + frontend (`web/`),
-the shared data layer, and the test/deployment story.
+codebase and proposes a prioritized plan to address the findings. It now covers
+the Next.js web API + frontend (`web/`), which is the sole backend after the
+Python TUI was retired as part of Phase 3.
+
+## Status so far
+
+- **Phase 1** — env validation, seed gating, auth middleware skeleton, and
+  Zod-validated inputs + central `apiHandler()` error wrapper across all 30
+  `/api/*` routes. **Done.**
+- **Phase 2 (started)** — CORS + per-IP rate limiting in middleware (H3), CSV
+  parse errors surfaced in the import UI (H6), batched mortgage balance query
+  (H7), ReDoS heuristic + runtime input cap (H5, partial). **Done.**
+- **Phase 3 (started)** — CI workflow (pytest/lint/typecheck/vitest),
+  Vitest skeleton + tests for `env`, `apiHandler`, `regex-safety`, and
+  `csv-parser`. Python TUI retired (#13). **Done.**
+- **Still open** — C4 (money precision — mitigated by retiring SQLite;
+  Postgres already uses `numeric(14,2)`), H8 (async CSV offload), Phase 3 #18
+  (broader test coverage incl. Playwright), Phase 4 (observability, backups,
+  OpenAPI, accessibility, audit log).
 
 ---
 
 ## 1. Current State Summary
 
 **Stack**
-- Python 3.9+ Textual TUI with a SQLite database (`finadviser/`)
 - Next.js 16 (React + Material-UI + Decimal.js) with Drizzle ORM on Postgres
   (Neon HTTP driver) (`web/`)
 - Anthropic Claude for the adviser conversation layer
-- CSV-based transaction import with bank-specific config
+- CSV/PDF transaction import with bank-specific config
 
-**High-level observations**
-- Two parallel backends (Python TUI and Next.js API) implement overlapping
-  logic (CSV parsing, bank config, categorisation, fingerprinting). The TUI
-  appears to be the prototype; the web stack is where new work is landing.
-- The web API has **no authentication, authorisation, input validation,
-  rate limiting or CORS policy**. Any caller on the internet can read, mutate
-  or wipe data.
-- The SQLite schema stores monetary amounts as `REAL`, which introduces
-  floating-point rounding errors for financial data. The Postgres schema
-  correctly uses `numeric(14,2)`.
+**High-level observations (post-Phase-3)**
+- `/api/*` now uses a single `apiHandler()` wrapper with Zod-validated input,
+  bearer-token auth in production, per-IP rate limiting, and CORS allowlist.
+- Postgres schema uses `numeric(14,2)` for money — the REAL/SQLite precision
+  concern is gone with the Python TUI.
 - Tests cover the Python package only; the web API and UI have no automated
   coverage.
 - No CI, no migrations tracking, no deployment manifests.

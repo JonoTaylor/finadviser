@@ -1,19 +1,11 @@
-__pycache__/
-*.py[cod]
-*$py.class
-*.egg-info/
+node_modules/
+.next/
 dist/
 build/
-.eggs/
-*.egg
 .env
-*.db
-*.sqlite
-*.sqlite3
-.venv/
-venv/
-.pytest_cache/
-.mypy_cache/
-.textual/
-.vercel
 .env*.local
+.vercel
+
+# Local dev artefacts
+.DS_Store
+*.log

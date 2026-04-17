@@ -28,7 +28,7 @@ export const POST = apiHandler(async (req) => {
     const buffer = Buffer.from(arrayBuffer);
     let transactions = await parsePDF(buffer);
     transactions = await categorizeTransactions(transactions);
-    return transactions;
+    return { transactions, skipped: [] };
   }
 
   if (!bankConfig) throw badRequest('Bank config required');

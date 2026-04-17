@@ -401,6 +401,25 @@ class PropertyRepo:
         ).fetchone()
         return Decimal(str(row["balance"]))
 
+    def get_mortgage_balances(self, mortgage_ids: list[int]) -> dict[int, Decimal]:
+        """Batch variant of get_mortgage_balance — one query for N mortgages."""
+        if not mortgage_ids:
+            return {}
+        placeholders = ",".join("?" for _ in mortgage_ids)
+        rows = self.conn.execute(
+            f"""SELECT m.id AS mortgage_id,
+                       COALESCE(SUM(be.amount), 0) AS balance
+                FROM mortgages m
+                LEFT JOIN book_entries be ON be.account_id = m.liability_account_id
+                WHERE m.id IN ({placeholders})
+                GROUP BY m.id""",
+            mortgage_ids,
+        ).fetchall()
+        result = {mid: Decimal("0") for mid in mortgage_ids}
+        for r in rows:
+            result[r["mortgage_id"]] = Decimal(str(r["balance"]))
+        return result
+
     def get_equity_view(self, property_id: int) -> list[OwnerEquity]:
         rows = self.conn.execute(
             "SELECT * FROM v_property_equity WHERE property_id = ?", (property_id,)

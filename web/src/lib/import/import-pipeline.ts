@@ -4,26 +4,27 @@ import { checkDuplicates } from './duplicate-detector';
 import { categorizeTransactions } from './categorizer';
 import { accountRepo, journalRepo, fingerprintRepo, importBatchRepo } from '@/lib/repos';
 import { getBankConfig } from '@/lib/config/bank-configs';
-import type { RawTransaction, ImportResult } from '@/lib/types';
+import type { ImportResult, ParsePreview, RawTransaction, SkippedRow } from '@/lib/types';
 
 export async function previewImport(
   csvContent: string,
   bankConfigName: string,
   accountName: string,
-): Promise<RawTransaction[]> {
+): Promise<ParsePreview> {
   const config = getBankConfig(bankConfigName);
   if (!config) throw new Error(`Unknown bank config: ${bankConfigName}`);
 
   const account = await accountRepo.getByName(accountName);
   const accountId = account?.id ?? 0;
 
-  let transactions = await parseCSV(csvContent, config);
+  const parsed = await parseCSV(csvContent, config);
+  let transactions = parsed.transactions;
   if (accountId) {
     transactions = await checkDuplicates(transactions, accountId);
   }
   transactions = await categorizeTransactions(transactions);
 
-  return transactions;
+  return { transactions, skipped: parsed.skipped };
 }
 
 export async function executeImport(
@@ -36,11 +37,12 @@ export async function executeImport(
 
   const account = await accountRepo.getOrCreate(accountName, 'ASSET');
 
-  let transactions = await parseCSV(csvContent, config);
+  const parsed = await parseCSV(csvContent, config);
+  let transactions = parsed.transactions;
   transactions = await checkDuplicates(transactions, account.id);
   transactions = await categorizeTransactions(transactions);
 
-  return importTransactions(transactions, account.id, bankConfigName, 'upload.csv');
+  return importTransactions(transactions, account.id, bankConfigName, 'upload.csv', parsed.skipped);
 }
 
 export async function executeImportFromParsed(
@@ -49,11 +51,10 @@ export async function executeImportFromParsed(
 ): Promise<ImportResult> {
   const account = await accountRepo.getOrCreate(accountName, 'ASSET');
 
-  // Check duplicates against existing data
   let transactions = await checkDuplicates(parsedTransactions, account.id);
   transactions = await categorizeTransactions(transactions);
 
-  return importTransactions(transactions, account.id, 'pdf', 'upload.pdf');
+  return importTransactions(transactions, account.id, 'pdf', 'upload.pdf', []);
 }
 
 async function importTransactions(
@@ -61,8 +62,8 @@ async function importTransactions(
   accountId: number,
   bankConfig: string,
   filename: string,
+  skipped: SkippedRow[],
 ): Promise<ImportResult> {
-  // Create import batch
   const batch = await importBatchRepo.create({
     filename,
     bankConfig,
@@ -94,7 +95,9 @@ async function importTransactions(
     batchId: batch.id,
     importedCount: imported,
     duplicateCount: duplicates,
-    totalCount: transactions.length,
+    skippedCount: skipped.length,
+    totalCount: transactions.length + skipped.length,
+    skipped,
   };
 }
 

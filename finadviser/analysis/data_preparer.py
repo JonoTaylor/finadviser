@@ -113,6 +113,12 @@ class DataPreparer:
         currency = self.config.currency_symbol
         lines = ["PROPERTY EQUITY SUMMARY:"]
 
+        # Gather every mortgage up front so we can fetch their balances in a
+        # single query instead of one per mortgage.
+        mortgages_by_property = {p["id"]: self.prop_repo.get_mortgages(p["id"]) for p in properties}
+        all_mortgage_ids = [m["id"] for ms in mortgages_by_property.values() for m in ms]
+        balances = self.prop_repo.get_mortgage_balances(all_mortgage_ids)
+
         for prop in properties:
             pid = prop["id"]
             lines.append(f"\n  {prop['name']}:")
@@ -123,9 +129,8 @@ class DataPreparer:
             if valuation:
                 lines.append(f"    Current Valuation: {format_currency(valuation['valuation'], currency)} ({valuation['valuation_date']})")
 
-            mortgages = self.prop_repo.get_mortgages(pid)
-            for m in mortgages:
-                balance = self.prop_repo.get_mortgage_balance(m["id"])
+            for m in mortgages_by_property[pid]:
+                balance = balances.get(m["id"], Decimal("0"))
                 lines.append(f"    Mortgage ({m['lender']}): Balance {format_currency(abs(balance), currency)}")
 
             equity_data = self.equity_calc.calculate(pid)

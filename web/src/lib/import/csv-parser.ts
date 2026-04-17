@@ -1,12 +1,11 @@
 import Papa from 'papaparse';
 import Decimal from 'decimal.js';
-import { parse, format } from 'date-fns';
+import { parse, format, isValid } from 'date-fns';
 import { BankConfig } from '@/lib/config/bank-configs';
 import { transactionFingerprint } from '@/lib/utils/hashing';
-import type { RawTransaction } from '@/lib/types';
+import type { ParsePreview, RawTransaction, SkippedRow } from '@/lib/types';
 
-function parseDateFormat(dateStr: string, dateFormat: string): string {
-  // Convert Python-style format to date-fns format
+function parseDateFormat(dateStr: string, dateFormat: string): string | null {
   const fnsFormat = dateFormat
     .replace('%d', 'dd')
     .replace('%m', 'MM')
@@ -17,87 +16,114 @@ function parseDateFormat(dateStr: string, dateFormat: string): string {
     .replace('MM', 'MM');
 
   const parsed = parse(dateStr.trim(), fnsFormat, new Date());
+  if (!isValid(parsed)) return null;
   return format(parsed, 'yyyy-MM-dd');
+}
+
+function stripAmount(s: string): string {
+  return s.trim().replace(/,/g, '').replace('$', '').replace('£', '');
 }
 
 export async function parseCSV(
   csvContent: string,
   config: BankConfig,
-): Promise<RawTransaction[]> {
-  const result = Papa.parse(csvContent, {
+): Promise<ParsePreview> {
+  const result = Papa.parse<Record<string, string>>(csvContent, {
     header: true,
     skipEmptyLines: true,
     transformHeader: (h: string) => h.trim(),
   });
 
-  // Skip configured rows
-  const rows = result.data.slice(config.skipRows) as Record<string, string>[];
+  const rows = result.data.slice(config.skipRows);
   const transactions: RawTransaction[] = [];
+  const skipped: SkippedRow[] = [];
 
+  let rowNumber = config.skipRows + 1; // 1-indexed, post-header
   for (const row of rows) {
+    rowNumber++;
     try {
-      const txn = await parseRow(row, config);
-      if (txn) transactions.push(txn);
-    } catch {
-      continue;
+      const parsed = await parseRow(row, config);
+      if (parsed.ok) {
+        transactions.push(parsed.txn);
+      } else {
+        skipped.push({ rowNumber, reason: parsed.reason });
+      }
+    } catch (err) {
+      skipped.push({
+        rowNumber,
+        reason: err instanceof Error ? err.message : 'Unknown parse error',
+      });
     }
   }
 
-  return transactions;
+  return { transactions, skipped };
 }
+
+type RowParseResult =
+  | { ok: true; txn: RawTransaction }
+  | { ok: false; reason: string };
 
 async function parseRow(
   row: Record<string, string>,
   config: BankConfig,
-): Promise<RawTransaction | null> {
+): Promise<RowParseResult> {
   const cols = config.columns;
 
-  // Parse date
   const dateStr = row[cols.date]?.trim();
-  if (!dateStr) return null;
+  if (!dateStr) return { ok: false, reason: `Missing date column (${cols.date})` };
   const parsedDate = parseDateFormat(dateStr, config.dateFormat);
+  if (!parsedDate) {
+    return { ok: false, reason: `Unparseable date "${dateStr}" (expected ${config.dateFormat})` };
+  }
 
-  // Parse description
   const description = row[cols.description]?.trim();
-  if (!description) return null;
+  if (!description) return { ok: false, reason: `Missing description column (${cols.description})` };
 
-  // Parse amount
   let amount: Decimal;
   if (cols.amount) {
-    const amountStr = row[cols.amount]?.trim().replace(/,/g, '').replace('$', '').replace('£', '');
-    if (!amountStr) return null;
-    amount = new Decimal(amountStr).mul(config.amountMultiplier);
+    const amountStr = stripAmount(row[cols.amount] ?? '');
+    if (!amountStr) return { ok: false, reason: `Missing amount column (${cols.amount})` };
+    try {
+      amount = new Decimal(amountStr).mul(config.amountMultiplier);
+    } catch {
+      return { ok: false, reason: `Invalid amount "${amountStr}"` };
+    }
   } else if (cols.debit && cols.credit) {
-    const debitStr = row[cols.debit]?.trim().replace(/,/g, '').replace('$', '').replace('£', '') || '0';
-    const creditStr = row[cols.credit]?.trim().replace(/,/g, '').replace('$', '').replace('£', '') || '0';
-    const debit = debitStr && debitStr !== '' ? new Decimal(debitStr) : new Decimal(0);
-    const credit = creditStr && creditStr !== '' ? new Decimal(creditStr) : new Decimal(0);
-    amount = credit.minus(debit);
+    const debitStr = stripAmount(row[cols.debit] ?? '') || '0';
+    const creditStr = stripAmount(row[cols.credit] ?? '') || '0';
+    try {
+      const debit = new Decimal(debitStr);
+      const credit = new Decimal(creditStr);
+      amount = credit.minus(debit);
+    } catch {
+      return { ok: false, reason: `Invalid debit/credit "${debitStr}"/"${creditStr}"` };
+    }
   } else {
-    return null;
+    return { ok: false, reason: 'Bank config has no amount (or debit/credit) column' };
   }
 
   if (config.signConvention === 'inverted') {
     amount = amount.neg();
   }
 
-  // Parse optional reference
   let reference: string | null = null;
   if (cols.reference) {
     const refVal = row[cols.reference]?.trim();
     if (refVal) reference = refVal;
   }
 
-  // Generate fingerprint
   const fp = await transactionFingerprint(parsedDate, amount.toString(), description);
 
   return {
-    date: parsedDate,
-    description,
-    amount: amount.toString(),
-    reference,
-    fingerprint: fp,
-    isDuplicate: false,
-    suggestedCategoryId: null,
+    ok: true,
+    txn: {
+      date: parsedDate,
+      description,
+      amount: amount.toString(),
+      reference,
+      fingerprint: fp,
+      isDuplicate: false,
+      suggestedCategoryId: null,
+    },
   };
 }

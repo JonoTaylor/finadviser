@@ -23,8 +23,15 @@ export default function ImportPage() {
   const [bankConfig, setBankConfig] = useState('generic-csv');
   const [accountName, setAccountName] = useState('Bank');
   const [preview, setPreview] = useState<Array<Record<string, unknown>> | null>(null);
+  const [skipped, setSkipped] = useState<Array<{ rowNumber: number; reason: string }>>([]);
   const [importing, setImporting] = useState(false);
-  const [result, setResult] = useState<{ importedCount: number; duplicateCount: number; totalCount: number } | null>(null);
+  const [result, setResult] = useState<{
+    importedCount: number;
+    duplicateCount: number;
+    skippedCount?: number;
+    totalCount: number;
+    skipped?: Array<{ rowNumber: number; reason: string }>;
+  } | null>(null);
   const [error, setError] = useState('');
 
   const { data: bankConfigs } = useSWR('/api/import/bank-configs', fetcher);
@@ -52,7 +59,8 @@ export default function ImportPage() {
           throw new Error(err.error || 'PDF preview failed');
         }
         const data = await res.json();
-        setPreview(data);
+        setPreview(data.transactions ?? []);
+        setSkipped(data.skipped ?? []);
         setActiveStep(1); // PDF step 1 = Preview
       } catch (e) {
         setError(e instanceof Error ? e.message : 'Failed to parse PDF');
@@ -80,7 +88,8 @@ export default function ImportPage() {
         throw new Error(err.error || 'Preview failed');
       }
       const data = await res.json();
-      setPreview(data);
+      setPreview(data.transactions ?? []);
+      setSkipped(data.skipped ?? []);
       setActiveStep(2);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Preview failed');
@@ -126,6 +135,7 @@ export default function ImportPage() {
     setFileType('csv');
     setCsvContent('');
     setPreview(null);
+    setSkipped([]);
     setResult(null);
     setError('');
   };
@@ -156,7 +166,27 @@ export default function ImportPage() {
             <Alert severity="success" sx={{ mb: 2 }}>Import complete!</Alert>
             <Typography>Imported: {result.importedCount}</Typography>
             <Typography>Duplicates skipped: {result.duplicateCount}</Typography>
+            {typeof result.skippedCount === 'number' && result.skippedCount > 0 && (
+              <Typography>Rows skipped (parse errors): {result.skippedCount}</Typography>
+            )}
             <Typography>Total rows: {result.totalCount}</Typography>
+            {result.skipped && result.skipped.length > 0 && (
+              <Alert severity="warning" sx={{ mt: 2 }}>
+                <Typography variant="subtitle2" sx={{ mb: 1 }}>
+                  {result.skipped.length} row(s) could not be parsed:
+                </Typography>
+                <Box component="ul" sx={{ m: 0, pl: 3 }}>
+                  {result.skipped.slice(0, 10).map((s) => (
+                    <li key={s.rowNumber}>
+                      Row {s.rowNumber}: {s.reason}
+                    </li>
+                  ))}
+                  {result.skipped.length > 10 && (
+                    <li>... and {result.skipped.length - 10} more</li>
+                  )}
+                </Box>
+              </Alert>
+            )}
             <Button variant="contained" sx={{ mt: 2 }} onClick={handleReset}>
               Import Another
             </Button>
@@ -181,9 +211,26 @@ export default function ImportPage() {
 
           {isPreviewStep && preview && (
             <Box>
+              {skipped.length > 0 && (
+                <Alert severity="warning" sx={{ mb: 2 }}>
+                  <Typography variant="subtitle2" sx={{ mb: 1 }}>
+                    {skipped.length} row(s) skipped during parsing:
+                  </Typography>
+                  <Box component="ul" sx={{ m: 0, pl: 3 }}>
+                    {skipped.slice(0, 10).map((s) => (
+                      <li key={s.rowNumber}>
+                        Row {s.rowNumber}: {s.reason}
+                      </li>
+                    ))}
+                    {skipped.length > 10 && (
+                      <li>... and {skipped.length - 10} more</li>
+                    )}
+                  </Box>
+                </Alert>
+              )}
               <PreviewTable transactions={preview} />
               <Stack direction="row" spacing={2} sx={{ mt: 2 }}>
-                <Button onClick={() => { setActiveStep(0); setPreview(null); }}>Back</Button>
+                <Button onClick={() => { setActiveStep(0); setPreview(null); setSkipped([]); }}>Back</Button>
                 <Button variant="contained" onClick={handleImport} disabled={importing}>
                   {importing ? 'Importing...' : 'Confirm Import'}
                 </Button>

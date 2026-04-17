@@ -171,11 +171,23 @@ export interface RawTransaction {
   suggestedCategoryId: number | null;
 }
 
+export interface SkippedRow {
+  rowNumber: number;
+  reason: string;
+}
+
+export interface ParsePreview {
+  transactions: RawTransaction[];
+  skipped: SkippedRow[];
+}
+
 export interface ImportResult {
   batchId: number;
   importedCount: number;
   duplicateCount: number;
+  skippedCount: number;
   totalCount: number;
+  skipped: SkippedRow[];
 }
 
 export interface AccountBalance {

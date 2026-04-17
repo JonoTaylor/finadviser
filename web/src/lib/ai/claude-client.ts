@@ -1,15 +1,18 @@
 import Anthropic from '@anthropic-ai/sdk';
+import { env } from '@/lib/env';
 import { SYSTEM_PROMPT, CATEGORIZATION_PROMPT, AGENT_SYSTEM_PROMPT } from './prompts';
 import { TOOL_DEFINITIONS, TOOL_LABELS, executeTool } from './tools';
-
-const MODEL = 'claude-sonnet-4-20250514';
 
 export type AgentEvent =
   | { type: 'tool'; name: string; label: string }
   | { type: 'text'; content: string };
 
 function getClient() {
-  return new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! });
+  return new Anthropic({ apiKey: env().ANTHROPIC_API_KEY });
+}
+
+function getModel() {
+  return env().CLAUDE_MODEL;
 }
 
 export async function* streamChat(
@@ -28,7 +31,7 @@ export async function* streamChat(
   messages.push({ role: 'user', content });
 
   const stream = client.messages.stream({
-    model: MODEL,
+    model: getModel(),
     max_tokens: 4096,
     system: SYSTEM_PROMPT,
     messages,
@@ -64,7 +67,7 @@ export async function categorizeBatch(
     .replace('{transactions}', descriptions.map(d => `- ${d}`).join('\n'));
 
   const response = await client.messages.create({
-    model: MODEL,
+    model: getModel(),
     max_tokens: 2048,
     system: 'You are a financial transaction categorizer. Respond only with valid JSON.',
     messages: [{ role: 'user', content: prompt }],
@@ -104,7 +107,7 @@ export async function* runAgent(
 
   for (let i = 0; i < MAX_ITERATIONS; i++) {
     const response = await client.messages.create({
-      model: MODEL,
+      model: getModel(),
       max_tokens: 4096,
       system: AGENT_SYSTEM_PROMPT,
       tools: TOOL_DEFINITIONS,

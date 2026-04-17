@@ -1,7 +1,34 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { accountRepo, journalRepo, propertyRepo, categoryRepo } from '@/lib/repos';
+import { env } from '@/lib/env';
 
-export async function POST() {
+function timingSafeEqual(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  let out = 0;
+  for (let i = 0; i < a.length; i++) out |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return out === 0;
+}
+
+export async function POST(request: NextRequest) {
+  const cfg = env();
+  if (!cfg.ALLOW_SEED) {
+    return NextResponse.json(
+      { error: 'Seed endpoint disabled. Set ALLOW_SEED=true to enable.' },
+      { status: 403 },
+    );
+  }
+  if (!cfg.ADMIN_TOKEN) {
+    return NextResponse.json(
+      { error: 'Seed endpoint requires ADMIN_TOKEN to be configured.' },
+      { status: 403 },
+    );
+  }
+  const header = request.headers.get('authorization') ?? '';
+  const provided = header.startsWith('Bearer ') ? header.slice('Bearer '.length) : '';
+  if (!provided || !timingSafeEqual(provided, cfg.ADMIN_TOKEN)) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
   try {
     // Create owners
     const emily = await propertyRepo.createOwner('Emily Pun');

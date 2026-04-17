@@ -31,3 +31,14 @@ jobs:
         run: npx tsc --noEmit
       - name: Vitest
         run: npm test
+      - name: Drizzle — migrations up to date
+        env:
+          DATABASE_URL: postgres://placeholder
+        run: |
+          npx drizzle-kit generate --name ci-check > /dev/null
+          if ! git diff --quiet drizzle/; then
+            echo "::error::drizzle/ has uncommitted changes — run 'npx drizzle-kit generate' and commit the result." >&2
+            git status drizzle/
+            git --no-pager diff drizzle/
+            exit 1
+          fi

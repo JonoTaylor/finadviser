@@ -3,6 +3,13 @@ import { accountRepo, journalRepo, propertyRepo } from '@/lib/repos';
 import { calculateEquity } from '@/lib/properties/equity-calculator';
 import { formatCurrency } from '@/lib/utils/formatting';
 
+// Hard cap on the financial-context string sent to Claude. At ~4 chars/token
+// this is ~25k tokens — generous for a chat turn, but bounds the blast
+// radius if a future query path triggers unexpectedly large sections. The
+// plan (M4) calls for a proper summariser for older data; this is a
+// defence-in-depth backstop until then.
+export const MAX_CONTEXT_CHARS = 100_000;
+
 export async function prepareContext(query: string, currencySymbol = '£'): Promise<string> {
   const sections: string[] = [];
   const queryLower = query.toLowerCase();
@@ -32,7 +39,12 @@ export async function prepareContext(query: string, currencySymbol = '£'): Prom
     sections.push(await recentTransactions(currencySymbol));
   }
 
-  return sections.filter(Boolean).join('\n\n');
+  const full = sections.filter(Boolean).join('\n\n');
+  if (full.length <= MAX_CONTEXT_CHARS) return full;
+  return (
+    full.slice(0, MAX_CONTEXT_CHARS) +
+    `\n\n[context truncated at ${MAX_CONTEXT_CHARS} chars]`
+  );
 }
 
 async function accountSummary(currency: string): Promise<string> {

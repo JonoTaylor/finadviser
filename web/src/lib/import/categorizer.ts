@@ -1,4 +1,5 @@
 import { categoryRepo } from '@/lib/repos';
+import { capInput, isSafeRegex } from '@/lib/utils/regex-safety';
 import type { RawTransaction } from '@/lib/types';
 
 export async function categorizeTransactions(
@@ -31,8 +32,11 @@ export function matchRule(
     } else if (matchType === 'contains' && descLower.includes(pattern)) {
       return rule.categoryId;
     } else if (matchType === 'regex') {
+      // Skip patterns that fail the ReDoS heuristic — they should have been
+      // rejected at rule-creation time, but an older rule may still be on disk.
+      if (!isSafeRegex(rule.pattern).ok) continue;
       try {
-        if (new RegExp(rule.pattern, 'i').test(description)) {
+        if (new RegExp(rule.pattern, 'i').test(capInput(description))) {
           return rule.categoryId;
         }
       } catch {

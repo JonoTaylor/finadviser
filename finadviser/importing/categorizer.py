@@ -8,6 +8,31 @@ import sqlite3
 from finadviser.db.models import CategorizationRule, MatchType, RawTransaction
 from finadviser.db.repositories import CategoryRepo
 
+# ReDoS mitigations mirroring the TypeScript implementation
+# (web/src/lib/utils/regex-safety.ts). Runtime input is capped; patterns with
+# nested quantifiers are refused. Follow-up (H5): route regex through the
+# `google-re2` package or a subprocess with a hard timeout.
+PATTERN_MAX_LENGTH = 500
+MATCH_INPUT_CAP = 1000
+_NESTED_QUANTIFIER = re.compile(r"\((?:[^()]*[+*]|[^()]*\{\d+,?\d*\})[^()]*\)[+*]")
+
+
+def is_safe_regex(pattern: str) -> tuple[bool, str]:
+    if not pattern:
+        return False, "Pattern is empty"
+    if len(pattern) > PATTERN_MAX_LENGTH:
+        return False, f"Pattern exceeds {PATTERN_MAX_LENGTH} characters"
+    try:
+        re.compile(pattern)
+    except re.error:
+        return False, "Invalid regex syntax"
+    if _NESTED_QUANTIFIER.search(pattern):
+        return False, (
+            "Pattern contains a nested quantifier (e.g. (a+)+) which is vulnerable "
+            "to catastrophic backtracking"
+        )
+    return True, ""
+
 
 class RuleCategorizer:
     """Categorize transactions using pattern-based rules."""
@@ -44,8 +69,12 @@ class RuleCategorizer:
             elif rule.match_type == MatchType.CONTAINS and pattern in desc_lower:
                 return rule.category_id
             elif rule.match_type == MatchType.REGEX:
+                ok, _ = is_safe_regex(rule.pattern)
+                if not ok:
+                    continue
                 try:
-                    if re.search(rule.pattern, description, re.IGNORECASE):
+                    capped = description[:MATCH_INPUT_CAP]
+                    if re.search(rule.pattern, capped, re.IGNORECASE):
                         return rule.category_id
                 except re.error:
                     continue

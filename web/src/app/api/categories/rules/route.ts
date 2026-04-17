@@ -2,20 +2,11 @@ import { z } from 'zod';
 import { categoryRepo } from '@/lib/repos';
 import { apiHandler, badRequest, validateBody, validateQuery } from '@/lib/api/handler';
 import { idNumber, idString, matchType, ruleSource } from '@/lib/api/schemas';
-
-// Best-effort: reject patterns that don't compile as a JS regex. Full ReDoS
-// protection (timeouts or re2) is tracked in the improvement plan (H5).
-const safeRegex = z.string().superRefine((val, ctx) => {
-  try {
-    new RegExp(val);
-  } catch {
-    ctx.addIssue({ code: 'custom', message: 'Invalid regex pattern' });
-  }
-});
+import { isSafeRegex, PATTERN_MAX_LENGTH } from '@/lib/utils/regex-safety';
 
 const createSchema = z
   .object({
-    pattern: z.string().min(1).max(500),
+    pattern: z.string().min(1).max(PATTERN_MAX_LENGTH),
     categoryId: idNumber,
     matchType: matchType.optional().default('contains'),
     priority: z.number().int().min(0).max(10_000).optional().default(0),
@@ -23,9 +14,9 @@ const createSchema = z
   })
   .superRefine((val, ctx) => {
     if (val.matchType === 'regex') {
-      const r = safeRegex.safeParse(val.pattern);
-      if (!r.success) {
-        ctx.addIssue({ code: 'custom', path: ['pattern'], message: 'Invalid regex pattern' });
+      const result = isSafeRegex(val.pattern);
+      if (!result.ok) {
+        ctx.addIssue({ code: 'custom', path: ['pattern'], message: result.reason });
       }
     }
   });
@@ -33,7 +24,7 @@ const createSchema = z
 const idQuery = z.object({ id: idString });
 
 const updateSchema = z.object({
-  pattern: z.string().min(1).max(500).optional(),
+  pattern: z.string().min(1).max(PATTERN_MAX_LENGTH).optional(),
   matchType: matchType.optional(),
   categoryId: idNumber.optional(),
   priority: z.number().int().min(0).max(10_000).optional(),
@@ -56,8 +47,8 @@ export const PATCH = apiHandler(async (req) => {
   const { id } = validateQuery(req, idQuery);
   const body = await validateBody(req, updateSchema);
   if (body.matchType === 'regex' && body.pattern) {
-    const r = safeRegex.safeParse(body.pattern);
-    if (!r.success) throw badRequest('Invalid regex pattern');
+    const result = isSafeRegex(body.pattern);
+    if (!result.ok) throw badRequest(result.reason);
   }
   return categoryRepo.updateRule(id, body);
 });

@@ -19,9 +19,11 @@
     "@mui/icons-material": "^7.3.7",
     "@mui/material": "^7.3.7",
     "@neondatabase/serverless": "^1.0.2",
+    "bcryptjs": "^3.0.3",
     "date-fns": "^4.1.0",
     "decimal.js": "^10.6.0",
     "drizzle-orm": "^0.45.1",
+    "jose": "^6.2.2",
     "next": "16.1.6",
     "papaparse": "^5.5.3",
     "pdf-parse": "^1.1.1",
@@ -32,6 +34,7 @@
     "zod": "^4.3.6"
   },
   "devDependencies": {
+    "@types/bcryptjs": "^2.4.6",
     "@types/node": "^20",
     "@types/papaparse": "^5.5.2",
     "@types/react": "^19",

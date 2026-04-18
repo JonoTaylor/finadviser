@@ -9,14 +9,14 @@ describe('buildOpenAPISpec', () => {
     expect(spec.info).toMatchObject({ title: 'finadviser API', version: expect.any(String) });
   });
 
-  it('declares BearerAuth and applies it globally', () => {
+  it('declares SessionCookie and BearerAuth and applies them as alternatives', () => {
     const components = spec.components as Record<string, unknown>;
     const security = spec.security as Array<Record<string, unknown>>;
-    expect((components.securitySchemes as Record<string, unknown>).BearerAuth).toMatchObject({
-      type: 'http',
-      scheme: 'bearer',
-    });
-    expect(security[0]).toHaveProperty('BearerAuth');
+    const schemes = components.securitySchemes as Record<string, Record<string, unknown>>;
+    expect(schemes.SessionCookie).toMatchObject({ type: 'apiKey', in: 'cookie' });
+    expect(schemes.BearerAuth).toMatchObject({ type: 'http', scheme: 'bearer' });
+    // An OR: either requirement object alone satisfies the caller.
+    expect(security).toEqual([{ SessionCookie: [] }, { BearerAuth: [] }]);
   });
 
   it('covers the major routes', () => {
@@ -38,10 +38,11 @@ describe('buildOpenAPISpec', () => {
     }
   });
 
-  it('each operation declares a 400 and 401 response (except the spec endpoint)', () => {
+  it('non-public routes declare a 400 and 401 response', () => {
+    const publicRoutes = new Set(['/api/openapi', '/api/auth/signin', '/api/auth/signout', '/api/auth/me']);
     const paths = spec.paths as Record<string, Record<string, Record<string, unknown>>>;
     for (const [path, methods] of Object.entries(paths)) {
-      if (path === '/api/openapi') continue;
+      if (publicRoutes.has(path)) continue;
       for (const [method, op] of Object.entries(methods)) {
         if (method === 'parameters') continue;
         const responses = op.responses as Record<string, unknown>;
@@ -51,9 +52,12 @@ describe('buildOpenAPISpec', () => {
     }
   });
 
-  it('exposes the spec endpoint without auth', () => {
+  it('auth + spec endpoints opt out of the global security requirement', () => {
     const paths = spec.paths as Record<string, Record<string, Record<string, unknown>>>;
-    expect(paths['/api/openapi'].get.security).toEqual([]);
+    for (const route of ['/api/openapi', '/api/auth/signin', '/api/auth/signout', '/api/auth/me']) {
+      const method = Object.keys(paths[route]).find((k) => k !== 'parameters')!;
+      expect(paths[route][method].security, `${route} should opt out`).toEqual([]);
+    }
   });
 
   it('inlines JSON Schema for Error, Property, and Account', () => {

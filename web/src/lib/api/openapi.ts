@@ -144,9 +144,13 @@ export function buildOpenAPISpec() {
         '<API_AUTH_TOKEN>` header in production.',
     },
     servers: [{ url: '/', description: 'This deployment' }],
-    security: [{ BearerAuth: [] }],
+    // A request authenticates EITHER by a session cookie (set by
+    // POST /api/auth/signin) OR by an API_AUTH_TOKEN bearer header — not
+    // both required.
+    security: [{ SessionCookie: [] }, { BearerAuth: [] }],
     components: {
       securitySchemes: {
+        SessionCookie: { type: 'apiKey', in: 'cookie', name: 'finadviser_session' },
         BearerAuth: { type: 'http', scheme: 'bearer' },
       },
       headers: {
@@ -373,6 +377,45 @@ export function buildOpenAPISpec() {
           security: [],
           responses: {
             200: jsonResponse('OpenAPI 3.1 document', z.unknown()),
+          },
+        },
+      },
+      '/api/auth/signin': {
+        post: {
+          summary: 'Exchange the owner password for a session cookie',
+          security: [],
+          requestBody: jsonBody(z.object({ password: z.string() })),
+          responses: {
+            200: jsonResponse('Signed in — cookie set', z.object({ success: z.boolean() })),
+            400: validationError,
+            500: serverError,
+          },
+        },
+      },
+      '/api/auth/signout': {
+        post: {
+          summary: 'Clear the session cookie',
+          security: [],
+          responses: {
+            200: jsonResponse('Signed out', z.object({ success: z.boolean() })),
+            500: serverError,
+          },
+        },
+      },
+      '/api/auth/me': {
+        get: {
+          summary: 'Report whether the caller has a valid session cookie',
+          security: [],
+          responses: {
+            200: jsonResponse(
+              'Session status',
+              z.object({
+                authenticated: z.boolean(),
+                subject: z.string().optional(),
+                expiresAt: z.number().optional(),
+              }),
+            ),
+            500: serverError,
           },
         },
       },

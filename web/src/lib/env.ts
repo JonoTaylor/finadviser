@@ -11,6 +11,16 @@ const envSchema = z.object({
     .enum(['true', 'false'])
     .default('false')
     .transform((v) => v === 'true'),
+  // Personal-app auth: bcrypt hash of the single user's password and the
+  // secret used to sign the session JWT.
+  APP_PASSWORD_HASH: z.string().min(1).optional(),
+  AUTH_SECRET: z.string().min(32).optional(),
+  // Session lifetime in seconds. Default: 30 days.
+  SESSION_TTL_SECONDS: z
+    .string()
+    .regex(/^\d+$/)
+    .transform((v) => parseInt(v, 10))
+    .optional(),
 });
 
 export type Env = z.infer<typeof envSchema>;

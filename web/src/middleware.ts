@@ -1,17 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { log, newRequestId } from '@/lib/logger';
+import { SESSION_COOKIE, verifySessionTokenWith } from '@/lib/auth';
 
 // Edge middleware for /api/* requests:
 //   1. Rate limit (in-memory fixed-window, per request IP)
 //   2. CORS (allowlist via ALLOWED_ORIGINS env var)
-//   3. Bearer-token auth against API_AUTH_TOKEN
+//   3. Auth: accept EITHER a valid session cookie (owner logged in via
+//      /api/auth/signin) OR a bearer API_AUTH_TOKEN header (service
+//      accounts, scripts, CI).
 //
 // The rate limiter is per-process, so behind a multi-region deploy (Vercel
 // edge) each region has its own counter. For strict global limits, swap in
 // Upstash or similar — tracked in the improvement plan.
-//
-// The auth layer is a shared-secret stub; the follow-up is proper session
-// auth so the browser UI can authenticate as a real user.
 
 function timingSafeEqual(a: string, b: string): boolean {
   if (a.length !== b.length) return false;
@@ -64,19 +64,45 @@ function applyCorsHeaders(headers: Headers, origin: string | null, allowed: stri
   }
 }
 
-// Routes exempt from the bearer-token auth check. The OpenAPI spec is
-// useful for client tooling and contains no user data, so we keep it
-// publicly readable. Rate limiting + CORS still apply.
-const PUBLIC_ROUTES = new Set(['/api/openapi']);
+// Routes that don't require auth. The OpenAPI spec is read-only tooling
+// data; the sign-in endpoint obviously can't require a valid session;
+// /api/auth/me is read-only and safe to query anonymously (it just reports
+// whether the caller is authenticated).
+const PUBLIC_ROUTES = new Set([
+  '/api/openapi',
+  '/api/auth/signin',
+  '/api/auth/signout',
+  '/api/auth/me',
+]);
 
-export function middleware(request: NextRequest) {
+async function checkAuth(request: NextRequest): Promise<'ok' | 'missing-config' | 'rejected'> {
+  const apiToken = process.env.API_AUTH_TOKEN;
+  const authSecret = process.env.AUTH_SECRET;
+
+  // Session cookie is the primary path (used by the browser UI).
+  if (authSecret) {
+    const cookie = request.cookies.get(SESSION_COOKIE)?.value;
+    if (cookie && (await verifySessionTokenWith(cookie, authSecret))) return 'ok';
+  }
+
+  // Bearer fallback for service accounts (CI, scripts, MCP).
+  if (apiToken) {
+    const header = request.headers.get('authorization') ?? '';
+    const provided = header.startsWith('Bearer ') ? header.slice('Bearer '.length) : '';
+    if (provided && timingSafeEqual(provided, apiToken)) return 'ok';
+  }
+
+  if (!authSecret && !apiToken) return 'missing-config';
+  return 'rejected';
+}
+
+export async function middleware(request: NextRequest) {
   const origin = request.headers.get('origin');
   const allowedOrigins = parseAllowedOrigins();
   const requestId = request.headers.get('x-request-id') ?? newRequestId();
   const route = request.nextUrl.pathname;
   const isPublic = PUBLIC_ROUTES.has(route);
 
-  // CORS preflight — answer before auth/rate-limit so browsers can proceed.
   if (request.method === 'OPTIONS') {
     const res = new NextResponse(null, { status: 204 });
     applyCorsHeaders(res.headers, origin, allowedOrigins);
@@ -84,7 +110,6 @@ export function middleware(request: NextRequest) {
     return res;
   }
 
-  // Rate limit.
   const limit = Math.max(1, parseInt(process.env.RATE_LIMIT_PER_MIN ?? '', 10) || DEFAULT_LIMIT);
   const key = clientKey(request);
   const rl = rateLimit(key, limit);
@@ -100,28 +125,28 @@ export function middleware(request: NextRequest) {
     return res;
   }
 
-  // Auth — skipped for PUBLIC_ROUTES.
-  const token = process.env.API_AUTH_TOKEN;
   const isProd = process.env.NODE_ENV === 'production';
-
   let response: NextResponse;
+
   if (isPublic) {
     response = NextResponse.next();
-  } else if (!token) {
-    if (isProd) {
-      log.error('auth.misconfigured', { requestId, route });
-      response = NextResponse.json(
-        { error: 'API_AUTH_TOKEN is not configured on the server.' },
-        { status: 503 },
-      );
-    } else {
-      response = NextResponse.next();
-    }
   } else {
-    const header = request.headers.get('authorization') ?? '';
-    const provided = header.startsWith('Bearer ') ? header.slice('Bearer '.length) : '';
-    if (!provided || !timingSafeEqual(provided, token)) {
-      log.warn('auth.rejected', { requestId, route, hasToken: Boolean(provided) });
+    const verdict = await checkAuth(request);
+    if (verdict === 'missing-config') {
+      if (isProd) {
+        log.error('auth.misconfigured', { requestId, route });
+        response = NextResponse.json(
+          {
+            error:
+              'Auth is not configured. Set AUTH_SECRET + APP_PASSWORD_HASH (for session login) or API_AUTH_TOKEN (for service accounts).',
+          },
+          { status: 503 },
+        );
+      } else {
+        response = NextResponse.next();
+      }
+    } else if (verdict === 'rejected') {
+      log.warn('auth.rejected', { requestId, route });
       response = NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     } else {
       response = NextResponse.next();

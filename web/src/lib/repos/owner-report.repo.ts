@@ -1,8 +1,10 @@
 import Decimal from 'decimal.js';
 import { propertyRepo } from './property.repo';
-import { rentalReportRepo, type RentalReportTotals } from './rental-report.repo';
+import { rentalReportRepo, resolveAllocationPct, type RentalReportTotals } from './rental-report.repo';
+import { tenancyRepo } from './tenancy.repo';
+import { expandTenancies, type RentFrequency } from '@/lib/properties/rent-schedule';
 import { taxYearRange, type TaxYearRange } from '@/lib/tax/ukTaxYear';
-import { mtdQuartersForTaxYear, type MtdQuarter } from '@/lib/tax/mtdQuarters';
+import { mtdQuartersForTaxYear } from '@/lib/tax/mtdQuarters';
 import { NotFoundError } from '@/lib/errors';
 
 export interface OwnerPropertySummary {
@@ -120,15 +122,18 @@ export const ownerReportRepo = {
   },
 
   /**
-   * MTD-IT quarterly gross-income report for an owner. For each of the
-   * four standard fiscal quarters in the tax year, computes the owner's
-   * share of gross income across all properties they own — using the
-   * tenancy schedule (rent contracts), not bank-account credits, per
-   * Jane's brief.
+   * MTD-IT quarterly gross-income report for an owner.
    *
-   * Quarterly updates only need gross income — expenses go in the
-   * end-of-year return — so we deliberately don't pull expenses or
-   * mortgage interest here.
+   * Per HMRC + Jane's brief, the quarterly update declares gross rent only
+   * — schedule-derived income from tenancy contracts. Manual journal-based
+   * income (laundry, deposit retention) belongs in the end-of-year return
+   * and is intentionally excluded here.
+   *
+   * Implementation: fetch each property's tenancies + allocation share
+   * once, then expand the schedule for each of the four quarters in
+   * memory. DB queries scale with property count, not quarter count
+   * (was 4×N round-trips, now N×2 + 2 — fixes the fan-out concern and
+   * makes the schedule-only contract concrete).
    */
   async getQuarterlyReport(params: {
     ownerId: number;
@@ -143,40 +148,58 @@ export const ownerReportRepo = {
     const properties = await propertyRepo.listPropertiesByOwner(ownerId);
     const quarters = mtdQuartersForTaxYear(range);
 
-    // Compute (property × quarter) shares in parallel — each is one Neon
-    // query (the tax-year report endpoint) at the quarter's date range.
-    const grid: Array<{ q: MtdQuarter; shares: OwnerQuarterPropertyShare[] }> = await Promise.all(
-      quarters.map(async (q) => {
-        const shares = await Promise.all(
-          properties.map(async (p) => {
-            const report = await rentalReportRepo.getTaxYearReport({
-              propertyId: p.id,
-              startDate: q.startDate,
-              endDate: q.endDate,
-              ownerId,
-            });
-            const totals = report.totalsForOwner ?? report.totals;
-            return {
-              propertyId: p.id,
-              propertyName: p.name,
-              allocationPct: report.allocationPct,
-              grossIncome: totals.grossIncome,
-            };
-          }),
-        );
-        return { q, shares };
+    // One fetch per property for both tenancies and allocation pct. After
+    // this, all quarter computation is pure in-memory schedule expansion.
+    const propertyData = await Promise.all(
+      properties.map(async (p) => {
+        const [tenancies, allocationPct] = await Promise.all([
+          tenancyRepo.listByProperty(p.id),
+          resolveAllocationPct(p.id, ownerId),
+        ]);
+        return { property: p, tenancies, allocationPct };
       }),
     );
 
-    const ownerQuarters: OwnerQuarter[] = grid.map(({ q, shares }) => {
-      const total = shares.reduce((acc, s) => acc.plus(s.grossIncome), new Decimal(0));
+    const ownerQuarters: OwnerQuarter[] = quarters.map((q) => {
+      const shares: OwnerQuarterPropertyShare[] = propertyData.map((pd) => {
+        const schedule = expandTenancies(
+          pd.tenancies.map(t => ({
+            id: t.id,
+            tenantName: t.tenantName,
+            startDate: t.startDate,
+            endDate: t.endDate,
+            rentAmount: t.rentAmount,
+            rentFrequency: t.rentFrequency as RentFrequency,
+          })),
+          q.startDate,
+          q.endDate,
+        );
+        const factor = pd.allocationPct.div(100);
+        // Allocate per due-date line then sum, matching the tax-year
+        // report's per-line server-side allocation. Means quarter+quarter
+        // = annual schedule total exactly, no rounding drift.
+        const total = schedule.reduce(
+          (acc, line) => acc.plus(new Decimal(line.amount).mul(factor).toFixed(2)),
+          new Decimal(0),
+        );
+        return {
+          propertyId: pd.property.id,
+          propertyName: pd.property.name,
+          allocationPct: pd.allocationPct.toFixed(4),
+          grossIncome: total.toFixed(2),
+        };
+      });
+      const grossIncome = shares.reduce(
+        (acc, s) => acc.plus(s.grossIncome),
+        new Decimal(0),
+      );
       return {
         index: q.index,
         label: q.label,
         startDate: q.startDate,
         endDate: q.endDate,
         submissionDeadline: q.submissionDeadline,
-        grossIncome: total.toFixed(2),
+        grossIncome: grossIncome.toFixed(2),
         perProperty: shares,
       };
     });

@@ -3,8 +3,8 @@
  *
  * Per HMRC's standard fiscal quarters for property income, each tax year is
  * split into four quarters running 6 Apr → 5 Jul, 6 Jul → 5 Oct, 6 Oct →
- * 5 Jan, 6 Jan → 5 Apr. Quarterly updates are due one calendar month + 7
- * days after the quarter end (i.e. 7 Aug / 7 Nov / 7 Feb / 7 May).
+ * 5 Jan, 6 Jan → 5 Apr. Quarterly updates are due on the 7th of the second
+ * month after each quarter end — i.e. 7 Aug, 7 Nov, 7 Feb, 7 May.
  *
  * Per Jane's brief:
  *   "you only have to declare your share of the quarterly gross income
@@ -21,16 +21,16 @@ import { taxYearRange, type TaxYearRange } from './ukTaxYear';
 export interface MtdQuarter {
   /** 1, 2, 3, or 4 within the tax year. */
   index: 1 | 2 | 3 | 4;
-  /** Human label, e.g. 'Q1 2026-27 (6 Apr → 5 Jul 2026)'. */
+  /** Human label, e.g. 'Q1 2026-27 (2026-04-06 → 2026-07-05)'. */
   label: string;
   /** First day of the quarter (YYYY-MM-DD). */
   startDate: string;
   /** Last day of the quarter (YYYY-MM-DD), inclusive. */
   endDate: string;
   /**
-   * Quarterly update deadline (YYYY-MM-DD). HMRC: one calendar month and
-   * seven days after the quarter end (5 Jul → 7 Aug, 5 Oct → 7 Nov,
-   * 5 Jan → 7 Feb, 5 Apr → 7 May).
+   * Quarterly update deadline (YYYY-MM-DD): the 7th of the second month
+   * after the quarter end (5 Jul → 7 Aug, 5 Oct → 7 Nov, 5 Jan → 7 Feb,
+   * 5 Apr → 7 May).
    */
   submissionDeadline: string;
 }

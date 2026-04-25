@@ -11,6 +11,7 @@ export const journalRepo = {
       reference?: string | null;
       categoryId?: number | null;
       importBatchId?: number | null;
+      propertyId?: number | null;
     },
     entries: Array<{ accountId: number; amount: string }>,
   ): Promise<number> {
@@ -24,7 +25,6 @@ export const journalRepo = {
       throw new Error(`Book entries must sum to zero, got ${total}`);
     }
 
-    // Insert journal entry
     const [je] = await db
       .insert(journalEntries)
       .values({
@@ -33,6 +33,7 @@ export const journalRepo = {
         reference: journal.reference ?? null,
         categoryId: journal.categoryId ?? null,
         importBatchId: journal.importBatchId ?? null,
+        propertyId: journal.propertyId ?? null,
       })
       .returning();
 

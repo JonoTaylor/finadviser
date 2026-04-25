@@ -1,3 +1,11 @@
+-- Schema additions (idempotent)
+ALTER TABLE journal_entries
+    ADD COLUMN IF NOT EXISTS property_id INTEGER REFERENCES properties(id);
+
+CREATE INDEX IF NOT EXISTS idx_journal_entries_property_date
+    ON journal_entries(property_id, date)
+    WHERE property_id IS NOT NULL;
+
 -- Views
 CREATE OR REPLACE VIEW v_account_balances AS
 SELECT
@@ -69,8 +77,9 @@ VALUES
     ('Bank', 'ASSET', true, 'Default bank account'),
     ('Cash', 'ASSET', true, 'Cash on hand'),
     ('Uncategorized Income', 'INCOME', true, 'Default income account'),
-    ('Uncategorized Expense', 'EXPENSE', true, 'Default expense account')
-ON CONFLICT (name) DO NOTHING;
+    ('Uncategorized Expense', 'EXPENSE', true, 'Default expense account'),
+    ('Mortgage Interest', 'EXPENSE', true, 'Mortgage interest paid (S.24 — basic-rate relief only, reported separately on tax-year report)')
+ON CONFLICT (name) DO UPDATE SET is_system = true;
 
 -- Default categories
 INSERT INTO categories (name, is_system)

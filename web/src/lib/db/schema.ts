@@ -55,6 +55,7 @@ export const journalEntries = pgTable('journal_entries', {
   reference: text('reference'),
   categoryId: integer('category_id').references(() => categories.id),
   importBatchId: integer('import_batch_id').references((): AnyPgColumn => importBatches.id),
+  propertyId: integer('property_id').references((): AnyPgColumn => properties.id),
   createdAt: timestamp('created_at').notNull().defaultNow(),
 });
 

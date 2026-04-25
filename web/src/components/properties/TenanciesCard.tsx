@@ -15,11 +15,15 @@ import {
   TableBody,
   IconButton,
   Chip,
+  Snackbar,
+  Alert,
 } from '@mui/material';
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/Delete';
 import AddIcon from '@mui/icons-material/Add';
 import { formatCurrency } from '@/lib/utils/formatting';
+import { londonTodayIso } from '@/lib/dates/today';
+import type { RentFrequency } from '@/lib/repos/tenancy.repo';
 import TenancyDialog, { TenancyFormValues } from './TenancyDialog';
 
 interface Tenancy {
@@ -29,14 +33,14 @@ interface Tenancy {
   startDate: string;
   endDate: string | null;
   rentAmount: string;
-  rentFrequency: string;
+  rentFrequency: RentFrequency;
   depositAmount: string | null;
   notes: string | null;
 }
 
 const fetcher = (url: string) => fetch(url).then(r => r.json());
 
-const FREQ_LABEL: Record<string, string> = {
+const FREQ_LABEL: Record<RentFrequency, string> = {
   monthly: '/ month',
   four_weekly: '/ 4 weeks',
   weekly: '/ week',
@@ -44,7 +48,7 @@ const FREQ_LABEL: Record<string, string> = {
   annual: '/ year',
 };
 
-function isCurrent(t: Tenancy, today = new Date().toISOString().slice(0, 10)): boolean {
+function isCurrent(t: Tenancy, today: string): boolean {
   if (t.startDate > today) return false;
   if (t.endDate && t.endDate < today) return false;
   return true;
@@ -57,6 +61,9 @@ export default function TenanciesCard({ propertyId }: { propertyId: number }) {
   );
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<Tenancy | null>(null);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  const today = londonTodayIso();
 
   const handleSave = async (data: TenancyFormValues) => {
     const payload = {
@@ -68,28 +75,37 @@ export default function TenanciesCard({ propertyId }: { propertyId: number }) {
       depositAmount: data.depositAmount || null,
       notes: data.notes || null,
     };
-    if (editing) {
-      await fetch(`/api/tenancies/${editing.id}`, {
-        method: 'PATCH',
+    try {
+      const url = editing ? `/api/tenancies/${editing.id}` : `/api/properties/${propertyId}/tenancies`;
+      const res = await fetch(url, {
+        method: editing ? 'PATCH' : 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
-    } else {
-      await fetch(`/api/properties/${propertyId}/tenancies`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error ?? `HTTP ${res.status}`);
+      }
+      setDialogOpen(false);
+      setEditing(null);
+      mutate();
+    } catch (e) {
+      setErrorMsg(e instanceof Error ? e.message : 'Failed to save tenancy');
     }
-    setDialogOpen(false);
-    setEditing(null);
-    mutate();
   };
 
   const handleDelete = async (id: number) => {
-    if (!confirm('Delete this tenancy? Recorded rental income journal entries are kept.')) return;
-    await fetch(`/api/tenancies/${id}`, { method: 'DELETE' });
-    mutate();
+    if (!confirm('Delete this tenancy?')) return;
+    try {
+      const res = await fetch(`/api/tenancies/${id}`, { method: 'DELETE' });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error ?? `HTTP ${res.status}`);
+      }
+      mutate();
+    } catch (e) {
+      setErrorMsg(e instanceof Error ? e.message : 'Failed to delete tenancy');
+    }
   };
 
   const list = tenancies ?? [];
@@ -138,9 +154,9 @@ export default function TenanciesCard({ propertyId }: { propertyId: number }) {
                     {formatCurrency(t.rentAmount)} {FREQ_LABEL[t.rentFrequency] ?? ''}
                   </TableCell>
                   <TableCell>
-                    {isCurrent(t) ? (
+                    {isCurrent(t, today) ? (
                       <Chip size="small" color="success" label="Current" />
-                    ) : t.endDate && t.endDate < new Date().toISOString().slice(0, 10) ? (
+                    ) : t.endDate && t.endDate < today ? (
                       <Chip size="small" label="Past" />
                     ) : (
                       <Chip size="small" label="Future" />
@@ -177,7 +193,7 @@ export default function TenanciesCard({ propertyId }: { propertyId: number }) {
                 startDate: editing.startDate,
                 endDate: editing.endDate ?? '',
                 rentAmount: editing.rentAmount,
-                rentFrequency: editing.rentFrequency as TenancyFormValues['rentFrequency'],
+                rentFrequency: editing.rentFrequency,
                 depositAmount: editing.depositAmount ?? '',
                 notes: editing.notes ?? '',
               }
@@ -189,6 +205,17 @@ export default function TenanciesCard({ propertyId }: { propertyId: number }) {
         }}
         onSave={handleSave}
       />
+
+      <Snackbar
+        open={Boolean(errorMsg)}
+        autoHideDuration={6000}
+        onClose={() => setErrorMsg(null)}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+      >
+        <Alert severity="error" onClose={() => setErrorMsg(null)}>
+          {errorMsg}
+        </Alert>
+      </Snackbar>
     </Card>
   );
 }

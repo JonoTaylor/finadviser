@@ -1,9 +1,13 @@
-import { eq, sql } from 'drizzle-orm';
+import { and, desc, eq, gte, isNull, lte, or } from 'drizzle-orm';
 import { getDb, schema } from '@/lib/db';
 
 const { tenancies } = schema;
 
-export type RentFrequency = 'monthly' | 'weekly' | 'four_weekly' | 'quarterly' | 'annual';
+/** Derived from the Drizzle enum so DB / repo / UI all share one type. */
+export type RentFrequency = (typeof schema.rentFrequencyEnum.enumValues)[number];
+
+/** Schema-inferred row shape; use this everywhere we return tenancies. */
+export type Tenancy = typeof tenancies.$inferSelect;
 
 export interface TenancyInput {
   propertyId: number;
@@ -17,7 +21,7 @@ export interface TenancyInput {
 }
 
 export const tenancyRepo = {
-  async create(input: TenancyInput) {
+  async create(input: TenancyInput): Promise<Tenancy> {
     const db = getDb();
     const [row] = await db
       .insert(tenancies)
@@ -35,7 +39,7 @@ export const tenancyRepo = {
     return row;
   },
 
-  async update(id: number, patch: Partial<TenancyInput>) {
+  async update(id: number, patch: Partial<TenancyInput>): Promise<Tenancy | null> {
     const db = getDb();
     const updates: Record<string, unknown> = {};
     if (patch.tenantName !== undefined) updates.tenantName = patch.tenantName;
@@ -56,40 +60,49 @@ export const tenancyRepo = {
     return row ?? null;
   },
 
-  async delete(id: number) {
+  async delete(id: number): Promise<void> {
     const db = getDb();
     await db.delete(tenancies).where(eq(tenancies.id, id));
   },
 
-  async get(id: number) {
+  async get(id: number): Promise<Tenancy | null> {
     const db = getDb();
     const [row] = await db.select().from(tenancies).where(eq(tenancies.id, id));
     return row ?? null;
   },
 
-  async listByProperty(propertyId: number) {
+  async listByProperty(propertyId: number): Promise<Tenancy[]> {
     const db = getDb();
     return db
       .select()
       .from(tenancies)
       .where(eq(tenancies.propertyId, propertyId))
-      .orderBy(sql`start_date DESC`);
+      .orderBy(desc(tenancies.startDate));
   },
 
   /**
-   * Active tenancy on a given date: start_date <= date AND (end_date IS NULL OR end_date >= date).
-   * If multiple tenancies overlap (data entry error), returns the most recently started.
+   * Active tenancy on a given date: start_date <= date AND (end_date IS NULL
+   * OR end_date >= date). Returns the most recently started match if more
+   * than one is active (i.e. overlapping data-entry).
+   *
+   * Uses Drizzle's typed query builder so the row is returned with the same
+   * camelCase shape as the rest of the repo (the previous raw SQL execute()
+   * returned snake_case keys, which would have surprised callers).
    */
-  async getActiveOn(propertyId: number, isoDate: string) {
+  async getActiveOn(propertyId: number, isoDate: string): Promise<Tenancy | null> {
     const db = getDb();
-    const rows = await db.execute(sql`
-      SELECT * FROM tenancies
-      WHERE property_id = ${propertyId}
-        AND start_date <= ${isoDate}
-        AND (end_date IS NULL OR end_date >= ${isoDate})
-      ORDER BY start_date DESC
-      LIMIT 1
-    `);
-    return rows.rows[0] ?? null;
+    const [row] = await db
+      .select()
+      .from(tenancies)
+      .where(
+        and(
+          eq(tenancies.propertyId, propertyId),
+          lte(tenancies.startDate, isoDate),
+          or(isNull(tenancies.endDate), gte(tenancies.endDate, isoDate)),
+        ),
+      )
+      .orderBy(desc(tenancies.startDate))
+      .limit(1);
+    return row ?? null;
   },
 };

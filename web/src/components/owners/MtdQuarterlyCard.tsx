@@ -11,7 +11,9 @@ import {
   Alert,
   Chip,
   Divider,
+  Button,
 } from '@mui/material';
+import DownloadIcon from '@mui/icons-material/Download';
 import { formatCurrency } from '@/lib/utils/formatting';
 import { londonTodayIso } from '@/lib/dates/today';
 
@@ -100,15 +102,36 @@ export default function MtdQuarterlyCard({ ownerId, year }: { ownerId: number | 
   return (
     <Card sx={{ mb: 3 }}>
       <CardContent>
-        <Stack direction="row" justifyContent="space-between" alignItems="baseline" sx={{ mb: 1 }}>
+        <Stack direction={{ xs: 'column', md: 'row' }} justifyContent="space-between" alignItems={{ md: 'baseline' }} spacing={1} sx={{ mb: 1 }}>
           <Typography variant="h6">MTD-IT quarterly (gross income only)</Typography>
-          <Typography variant="caption" color="text.secondary">
-            Tax year {data.taxYear.label}
-          </Typography>
+          <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
+            <Button
+              size="small"
+              variant="outlined"
+              startIcon={<DownloadIcon />}
+              component="a"
+              href={`/api/owners/${ownerId}/mtd/quarters/export?year=${year}`}
+            >
+              Quarterly CSV
+            </Button>
+            <Button
+              size="small"
+              variant="outlined"
+              startIcon={<DownloadIcon />}
+              component="a"
+              href={`/api/owners/${ownerId}/mtd/end-of-year/export?year=${year}`}
+            >
+              End-of-year CSV
+            </Button>
+            <Typography variant="caption" color="text.secondary">
+              Tax year {data.taxYear.label}
+            </Typography>
+          </Stack>
         </Stack>
         <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
           Per HMRC, quarterly updates declare your share of gross rent only — expenses go in the
-          end-of-year return. Figures here are computed from tenancy contracts.
+          end-of-year return. Figures here are computed from tenancy contracts. Use the bridging
+          CSVs to import into MyTaxDigital, FreeAgent Landlord, or paste straight into HMRC.
         </Typography>
 
         <Stack

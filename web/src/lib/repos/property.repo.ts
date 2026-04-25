@@ -65,6 +65,30 @@ export const propertyRepo = {
     return db.select().from(owners).orderBy(owners.name);
   },
 
+  /**
+   * Properties this owner has any stake in. Returns just the property rows;
+   * use getOwnership(propertyId) for the per-property allocation details.
+   */
+  async listPropertiesByOwner(ownerId: number) {
+    const db = getDb();
+    const rows = await db.execute(sql`
+      SELECT p.id, p.name, p.address, p.purchase_date AS "purchaseDate",
+             p.purchase_price AS "purchasePrice", p.created_at AS "createdAt"
+        FROM properties p
+        JOIN property_ownership po ON po.property_id = p.id
+       WHERE po.owner_id = ${ownerId}
+       ORDER BY p.name
+    `);
+    return rows.rows as Array<{
+      id: number;
+      name: string;
+      address: string | null;
+      purchaseDate: string | null;
+      purchasePrice: string | null;
+      createdAt: string;
+    }>;
+  },
+
   async addOwnership(propertyId: number, ownerId: number, capitalAccountId: number) {
     const db = getDb();
     const [row] = await db

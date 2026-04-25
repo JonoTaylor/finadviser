@@ -174,6 +174,21 @@ export const expenseAllocationRules = pgTable('expense_allocation_rules', {
   unique('allocation_property_owner_type_key').on(table.propertyId, table.ownerId, table.expenseType),
 ]);
 
+export const rentFrequencyEnum = pgEnum('rent_frequency', ['monthly', 'weekly', 'four_weekly', 'quarterly', 'annual']);
+
+export const tenancies = pgTable('tenancies', {
+  id: serial('id').primaryKey(),
+  propertyId: integer('property_id').notNull().references(() => properties.id, { onDelete: 'cascade' }),
+  tenantName: text('tenant_name').notNull(),
+  startDate: text('start_date').notNull(),
+  endDate: text('end_date'),
+  rentAmount: numeric('rent_amount', { precision: 14, scale: 2 }).notNull(),
+  rentFrequency: rentFrequencyEnum('rent_frequency').notNull().default('monthly'),
+  depositAmount: numeric('deposit_amount', { precision: 14, scale: 2 }),
+  notes: text('notes'),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+});
+
 export const tipTypeEnum = pgEnum('tip_type', ['tip', 'warning', 'insight']);
 
 export const aiTips = pgTable('ai_tips', {

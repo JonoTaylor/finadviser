@@ -5,6 +5,9 @@
  * Runs as part of the Vercel build (see package.json "build" script) so the
  * deployed app is never out of sync with the schema it expects.
  *
+ * Atomicity: the whole file is wrapped in BEGIN / COMMIT, with ROLLBACK on
+ * error, so a partial migration can never leave the DB half-applied.
+ *
  * Idempotency: every statement in migration.sql uses IF NOT EXISTS / ON
  * CONFLICT DO UPDATE / CREATE OR REPLACE, so running on every deploy is
  * safe — no migration history table needed for the workload at this stage.
@@ -18,7 +21,7 @@
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
-import { Pool, neonConfig } from '@neondatabase/serverless';
+import { Client, neonConfig } from '@neondatabase/serverless';
 import ws from 'ws';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -36,18 +39,27 @@ async function main() {
 
   const sql = await readFile(MIGRATION_PATH, 'utf-8');
 
-  // Neon's serverless Pool uses websockets for multi-statement queries, which
-  // we need here because migration.sql contains DO $$ ... $$ blocks and
-  // multiple statements that node-postgres' HTTP transport can't run together.
+  // Neon's Client uses websockets, which is what we need for multi-statement
+  // queries and DO $$ ... $$ bodies (the HTTP transport can't run those).
   neonConfig.webSocketConstructor = ws;
 
-  const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+  // A single Client (not a Pool) for a one-shot script: lighter, and it
+  // guarantees every statement in the transaction runs on the same
+  // connection.
+  const client = new Client({ connectionString: process.env.DATABASE_URL });
+  await client.connect();
+
   const start = Date.now();
   try {
-    await pool.query(sql);
+    await client.query('BEGIN');
+    await client.query(sql);
+    await client.query('COMMIT');
     console.log(`[migrate] applied migration.sql in ${Date.now() - start}ms`);
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => { /* swallow rollback errors */ });
+    throw err;
   } finally {
-    await pool.end();
+    await client.end();
   }
 }
 

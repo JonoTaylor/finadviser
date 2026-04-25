@@ -1,3 +1,11 @@
+-- Schema additions (idempotent)
+ALTER TABLE journal_entries
+    ADD COLUMN IF NOT EXISTS property_id INTEGER REFERENCES properties(id);
+
+CREATE INDEX IF NOT EXISTS idx_journal_entries_property_date
+    ON journal_entries(property_id, date)
+    WHERE property_id IS NOT NULL;
+
 -- Views
 CREATE OR REPLACE VIEW v_account_balances AS
 SELECT

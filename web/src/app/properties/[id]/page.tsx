@@ -12,6 +12,8 @@ import MortgageCard from '@/components/properties/MortgageCard';
 import ValuationHistory from '@/components/properties/ValuationHistory';
 import AddValuationDialog from '@/components/properties/AddValuationDialog';
 import RecordPaymentDialog from '@/components/properties/RecordPaymentDialog';
+import ReceiptLongIcon from '@mui/icons-material/ReceiptLong';
+import { currentTaxYear } from '@/lib/tax/ukTaxYear';
 
 const fetcher = (url: string) => fetch(url).then(r => r.json());
 
@@ -105,7 +107,7 @@ export default function PropertyDetailPage({ params }: { params: Promise<{ id: s
             <MortgageCard key={m.id} mortgage={m} propertyId={parseInt(id)} />
           ))}
 
-          <Stack direction="row" spacing={1} sx={{ mt: 2 }}>
+          <Stack direction="row" spacing={1} sx={{ mt: 2 }} flexWrap="wrap" useFlexGap>
             <Button variant="outlined" size="small" onClick={() => setValuationOpen(true)}>
               Add Valuation
             </Button>
@@ -114,6 +116,15 @@ export default function PropertyDetailPage({ params }: { params: Promise<{ id: s
                 Record Payment
               </Button>
             )}
+            <Button
+              component={Link}
+              href={`/properties/${id}/reports/${currentTaxYear().label}`}
+              variant="outlined"
+              size="small"
+              startIcon={<ReceiptLongIcon />}
+            >
+              Tax-year report
+            </Button>
           </Stack>
         </Grid>
       </Grid>

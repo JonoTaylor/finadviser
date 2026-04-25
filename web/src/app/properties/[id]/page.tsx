@@ -14,6 +14,7 @@ import AddValuationDialog from '@/components/properties/AddValuationDialog';
 import RecordPaymentDialog from '@/components/properties/RecordPaymentDialog';
 import TenanciesCard from '@/components/properties/TenanciesCard';
 import ExpensesCard from '@/components/properties/ExpensesCard';
+import MortgageInterestSummary from '@/components/properties/MortgageInterestSummary';
 import ReceiptLongIcon from '@mui/icons-material/ReceiptLong';
 import { currentTaxYear } from '@/lib/tax/ukTaxYear';
 
@@ -21,6 +22,7 @@ const fetcher = (url: string) => fetch(url).then(r => r.json());
 
 export default function PropertyDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
+  const propertyId = parseInt(id, 10);
   const { data: property, isLoading, mutate } = useSWR(`/api/properties/${id}`, fetcher);
   const { data: equity, mutate: mutateEquity } = useSWR(`/api/properties/${id}/equity`, fetcher);
   const [valuationOpen, setValuationOpen] = useState(false);
@@ -81,9 +83,9 @@ export default function PropertyDetailPage({ params }: { params: Promise<{ id: s
             </CardContent>
           </Card>
 
-          <TenanciesCard propertyId={parseInt(id)} />
+          <TenanciesCard propertyId={propertyId} />
 
-          <ExpensesCard propertyId={parseInt(id)} />
+          <ExpensesCard propertyId={propertyId} />
 
           <ValuationHistory valuations={property.valuations ?? []} />
         </Grid>
@@ -110,8 +112,12 @@ export default function PropertyDetailPage({ params }: { params: Promise<{ id: s
           </Card>
 
           {property.mortgages?.map((m: { id: number; lender: string; originalAmount: string; startDate: string; termMonths: number }) => (
-            <MortgageCard key={m.id} mortgage={m} propertyId={parseInt(id)} />
+            <MortgageCard key={m.id} mortgage={m} propertyId={propertyId} />
           ))}
+
+          {property.mortgages?.length > 0 && (
+            <MortgageInterestSummary propertyId={propertyId} />
+          )}
 
           <Stack direction="row" spacing={1} sx={{ mt: 2 }} flexWrap="wrap" useFlexGap>
             <Button variant="outlined" size="small" onClick={() => setValuationOpen(true)}>

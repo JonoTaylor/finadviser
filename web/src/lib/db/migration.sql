@@ -6,11 +6,22 @@ CREATE INDEX IF NOT EXISTS idx_journal_entries_property_date
     ON journal_entries(property_id, date)
     WHERE property_id IS NOT NULL;
 
+-- book_entries is joined by account_id and journal_entry_id in every report
+-- query (tax-year report, v_account_balances, v_property_equity) and in the
+-- mortgage backfill below. Postgres doesn't create indexes for foreign keys
+-- automatically, so add them explicitly.
+CREATE INDEX IF NOT EXISTS idx_book_entries_account_id
+    ON book_entries(account_id);
+CREATE INDEX IF NOT EXISTS idx_book_entries_journal_entry_id
+    ON book_entries(journal_entry_id);
+
 -- Backfill property_id on historical mortgage payment journals so they show
 -- up in the tax-year report. Identifies them by the mortgage liability
 -- account they touch (the only account that ties a journal to a specific
--- property for these legacy entries). Idempotent: only updates rows where
--- property_id is still NULL.
+-- property for these legacy entries). Self-limiting and idempotent: only
+-- candidates are journals that already join to a mortgage AND still have a
+-- NULL property_id, so subsequent deploys are essentially no-ops once
+-- backfilled.
 UPDATE journal_entries je
    SET property_id = m.property_id
   FROM mortgages m

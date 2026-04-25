@@ -110,7 +110,8 @@ export default function MtdQuarterlyCard({ ownerId, year }: { ownerId: number | 
               variant="outlined"
               startIcon={<DownloadIcon />}
               component="a"
-              href={`/api/owners/${ownerId}/mtd/quarters/export?year=${year}`}
+              href={`/api/owners/${ownerId}/mtd/quarters/export?year=${encodeURIComponent(year)}`}
+              download
             >
               Quarterly CSV
             </Button>
@@ -119,7 +120,8 @@ export default function MtdQuarterlyCard({ ownerId, year }: { ownerId: number | 
               variant="outlined"
               startIcon={<DownloadIcon />}
               component="a"
-              href={`/api/owners/${ownerId}/mtd/end-of-year/export?year=${year}`}
+              href={`/api/owners/${ownerId}/mtd/end-of-year/export?year=${encodeURIComponent(year)}`}
+              download
             >
               End-of-year CSV
             </Button>

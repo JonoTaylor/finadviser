@@ -13,8 +13,10 @@ import type { RentalExpenseLine } from '@/lib/repos/rental-report.repo';
  *
  * Section column groups rows so a bridging product (or human reader) can
  * filter / pivot easily:
- *   Income        — total gross rent (schedule) + each non-rent line
- *   Expenses      — total expenses + each category total + each itemised line
+ *   Income            — total schedule rent + per-property schedule totals
+ *   Other income      — manual non-rent journal entries (separate so they
+ *                       are not double-counted against schedule rent)
+ *   Expenses          — total expenses + per-category + itemised
  *   Mortgage interest — total restricted under S.24
  *   Summary       — combined totals at owner share
  */
@@ -49,15 +51,40 @@ export async function GET(
 
     push('Section', 'Item', 'Amount', 'Property', 'Date');
 
-    // ── Income (schedule + per-line) ────────────────────────
-    push('Income', 'Total gross rent (schedule)', rollup.combined.grossIncome, '', '');
+    // ps.totals.grossIncome includes BOTH schedule rent AND journal
+    // otherIncome — so we can't print it under a "schedule rent" label
+    // without misleading the reader. Compute schedule-only and
+    // other-income separately, label each clearly, and skip the
+    // combined total to avoid implying double-counting.
+    let totalScheduleRent = new Decimal(0);
+    let totalOtherIncome = new Decimal(0);
+    for (const report of perProperty) {
+      for (const line of report.income) totalScheduleRent = totalScheduleRent.plus(line.amount);
+      for (const line of report.otherIncome) totalOtherIncome = totalOtherIncome.plus(line.amount);
+    }
+
+    // ── Income (schedule rent — total + per-property) ────────
+    push('Income', 'Total gross rent (schedule, all properties)', totalScheduleRent.toFixed(2), '', '');
     perProperty.forEach((report, i) => {
       const ps = rollup.properties[i];
-      push('Income', `Gross rent — ${ps.propertyName}`, ps.totals.grossIncome, ps.propertyName, '');
-      for (const line of report.otherIncome) {
-        push('Income (non-rent)', line.description ?? '', line.amount, ps.propertyName, line.date);
-      }
+      const propertyScheduleTotal = report.income.reduce(
+        (acc, line) => acc.plus(line.amount),
+        new Decimal(0),
+      );
+      push('Income', `Gross rent (schedule) — ${ps.propertyName}`, propertyScheduleTotal.toFixed(2), ps.propertyName, '');
     });
+
+    // ── Other income (manual journal entries — separate so it's not
+    //    double-counted against the schedule total) ───────────────
+    if (totalOtherIncome.gt(0) || perProperty.some(r => r.otherIncome.length > 0)) {
+      push('Other income', 'Total other (non-rent) income, all properties', totalOtherIncome.toFixed(2), '', '');
+      perProperty.forEach((report, i) => {
+        const ps = rollup.properties[i];
+        for (const line of report.otherIncome) {
+          push('Other income (itemised)', line.description ?? '', line.amount, ps.propertyName, line.date);
+        }
+      });
+    }
 
     // ── Expenses (category totals + itemised) ───────────────
     push('Expenses', 'Total deductible expenses', rollup.combined.totalExpenses, '', '');

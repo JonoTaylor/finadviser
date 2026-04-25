@@ -6,6 +6,28 @@ CREATE INDEX IF NOT EXISTS idx_journal_entries_property_date
     ON journal_entries(property_id, date)
     WHERE property_id IS NOT NULL;
 
+DO $$ BEGIN
+    CREATE TYPE rent_frequency AS ENUM ('monthly', 'weekly', 'four_weekly', 'quarterly', 'annual');
+EXCEPTION
+    WHEN duplicate_object THEN null;
+END $$;
+
+CREATE TABLE IF NOT EXISTS tenancies (
+    id SERIAL PRIMARY KEY,
+    property_id INTEGER NOT NULL REFERENCES properties(id) ON DELETE CASCADE,
+    tenant_name TEXT NOT NULL,
+    start_date TEXT NOT NULL,
+    end_date TEXT,
+    rent_amount NUMERIC(14,2) NOT NULL,
+    rent_frequency rent_frequency NOT NULL DEFAULT 'monthly',
+    deposit_amount NUMERIC(14,2),
+    notes TEXT,
+    created_at TIMESTAMP NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_tenancies_property_dates
+    ON tenancies(property_id, start_date, end_date);
+
 -- Views
 CREATE OR REPLACE VIEW v_account_balances AS
 SELECT

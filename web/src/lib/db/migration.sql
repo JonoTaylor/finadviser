@@ -173,22 +173,39 @@ BEGIN
                 -- (name, keeper_root_id) doesn't currently exist.
                 UPDATE categories SET parent_id = keeper_root_id WHERE id = dup_child.id;
             ELSE
-                -- Re-point FK references to the canonical child, then drop
-                -- the duplicate child.
+                -- Re-point all FK references from dup_child to keeper_child.
                 UPDATE journal_entries SET category_id = keeper_child_id WHERE category_id = dup_child.id;
                 UPDATE categorization_rules SET category_id = keeper_child_id WHERE category_id = dup_child.id;
+                -- budgets.category_id is UNIQUE, so we can't just re-point if
+                -- keeper_child already has a budget. Re-point if it's free,
+                -- otherwise drop the duplicate's budget (keeper's wins —
+                -- it's the budget the user set on the kept category).
+                UPDATE budgets SET category_id = keeper_child_id
+                 WHERE category_id = dup_child.id
+                   AND NOT EXISTS (SELECT 1 FROM budgets WHERE category_id = keeper_child_id);
+                DELETE FROM budgets WHERE category_id = dup_child.id;
+                -- Re-parent any grandchildren onto keeper_child. The
+                -- (name, parent_id) unique constraint will reject a
+                -- collision and roll the migration back rather than create
+                -- silent duplicates — that's the safe failure mode.
+                UPDATE categories SET parent_id = keeper_child_id WHERE parent_id = dup_child.id;
                 DELETE FROM categories WHERE id = dup_child.id;
             END IF;
         END LOOP;
 
         -- Re-point any root-level FK references from the duplicates to the
-        -- keeper, then delete the duplicate roots.
+        -- keeper. budgets needs the same UNIQUE-aware treatment.
         UPDATE journal_entries
            SET category_id = keeper_root_id
          WHERE category_id = ANY(dup_root.dup_ids);
         UPDATE categorization_rules
            SET category_id = keeper_root_id
          WHERE category_id = ANY(dup_root.dup_ids);
+        UPDATE budgets
+           SET category_id = keeper_root_id
+         WHERE category_id = ANY(dup_root.dup_ids)
+           AND NOT EXISTS (SELECT 1 FROM budgets WHERE category_id = keeper_root_id);
+        DELETE FROM budgets WHERE category_id = ANY(dup_root.dup_ids);
         DELETE FROM categories WHERE id = ANY(dup_root.dup_ids);
     END LOOP;
 END $$;

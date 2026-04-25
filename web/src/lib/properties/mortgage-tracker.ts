@@ -43,11 +43,13 @@ export async function recordMortgagePayment(params: {
   const principal = new Decimal(principalAmount);
   const interest = new Decimal(interestAmount);
 
-  // Create main payment journal entry
+  // Create main payment journal entry. property_id stamps the journal so the
+  // tax-year report's mortgage-interest bucket picks up the interest portion.
   const journalId = await journalRepo.createEntry(
     {
       date: paymentDate,
       description: `Mortgage payment - ${mortgage.lender}`,
+      propertyId,
     },
     [
       { accountId: fromAccountId, amount: total.neg().toString() },
@@ -56,7 +58,8 @@ export async function recordMortgagePayment(params: {
     ],
   );
 
-  // Create capital contribution entry
+  // Create capital contribution entry. Tag the property too — capital movements
+  // are property-specific and stamping makes property-scoped queries cheap.
   const equityTracking = await accountRepo.getOrCreate(
     `Equity Contributions - ${mortgage.lender}`,
     'EQUITY',
@@ -66,6 +69,7 @@ export async function recordMortgagePayment(params: {
     {
       date: paymentDate,
       description: `Capital contribution via mortgage principal - ${mortgage.lender}`,
+      propertyId,
     },
     [
       { accountId: payerCapitalAccountId, amount: principal.toString() },

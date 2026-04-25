@@ -6,6 +6,18 @@ CREATE INDEX IF NOT EXISTS idx_journal_entries_property_date
     ON journal_entries(property_id, date)
     WHERE property_id IS NOT NULL;
 
+-- Backfill property_id on historical mortgage payment journals so they show
+-- up in the tax-year report. Identifies them by the mortgage liability
+-- account they touch (the only account that ties a journal to a specific
+-- property for these legacy entries). Idempotent: only updates rows where
+-- property_id is still NULL.
+UPDATE journal_entries je
+   SET property_id = m.property_id
+  FROM mortgages m
+  JOIN book_entries be ON be.account_id = m.liability_account_id
+ WHERE be.journal_entry_id = je.id
+   AND je.property_id IS NULL;
+
 DO $$ BEGIN
     CREATE TYPE rent_frequency AS ENUM ('monthly', 'weekly', 'four_weekly', 'quarterly', 'annual');
 EXCEPTION

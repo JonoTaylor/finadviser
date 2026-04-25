@@ -31,7 +31,8 @@ export async function POST() {
     let aiCategorized = 0;
 
     // AI fallback for unmatched entries
-    if (unmatched.length > 0 && process.env.ANTHROPIC_API_KEY) {
+    // Gateway-backed: AI_GATEWAY_API_KEY replaced ANTHROPIC_API_KEY in PR #17.
+    if (unmatched.length > 0 && process.env.AI_GATEWAY_API_KEY) {
       const categories = await categoryRepo.listAll();
       const categoryNames = categories.map((c) => c.name);
 

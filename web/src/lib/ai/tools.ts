@@ -1,4 +1,3 @@
-import Anthropic from '@anthropic-ai/sdk';
 import Decimal from 'decimal.js';
 import { format, subMonths } from 'date-fns';
 import { accountRepo, journalRepo, categoryRepo, propertyRepo, tipRepo, budgetRepo, savingsGoalRepo } from '@/lib/repos';
@@ -7,10 +6,23 @@ import { formatCurrency } from '@/lib/utils/formatting';
 import { matchRule } from '@/lib/import/categorizer';
 import { categorizeBatch } from './claude-client';
 
-type Tool = Anthropic.Messages.Tool;
+/**
+ * Plain JSON-Schema tool definition. claude-client.ts wraps each entry
+ * with the AI SDK's tool() + jsonSchema() helpers so the gateway can
+ * route to whichever provider MODEL_ID points at.
+ */
+interface Tool {
+  name: string;
+  description: string;
+  input_schema: {
+    type: 'object';
+    properties: Record<string, unknown>;
+    required: string[];
+  };
+}
 
 // -------------------------------------------------------------------
-// Tool definitions (Anthropic tool-use schema)
+// Tool definitions (JSON-Schema; provider-agnostic)
 // -------------------------------------------------------------------
 
 export const TOOL_DEFINITIONS: Tool[] = [
@@ -489,7 +501,8 @@ async function executeAutoCategorize() {
   }
 
   let aiCategorized = 0;
-  if (unmatched.length > 0 && process.env.ANTHROPIC_API_KEY) {
+  // Gateway-backed: AI_GATEWAY_API_KEY replaced ANTHROPIC_API_KEY in PR #17.
+  if (unmatched.length > 0 && process.env.AI_GATEWAY_API_KEY) {
     const categoryNames = categories.map((c) => c.name);
     const descriptions = unmatched.map((e) => e.description);
     const aiResults = await categorizeBatch(descriptions, categoryNames);

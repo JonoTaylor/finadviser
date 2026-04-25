@@ -159,9 +159,18 @@ export default function TaxYearReportPage({
             </Stack>
           )}
           {ownerId && (
-            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 2 }}>
-              Showing {report.allocationPct}% share. Per-line amounts are pre-allocated server-side so the table sums match the totals exactly.
-            </Typography>
+            <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mt: 2 }}>
+              <Typography variant="caption" color="text.secondary">
+                Showing {report.allocationPct}% share. Per-line amounts are pre-allocated server-side so the table sums match the totals exactly.
+              </Typography>
+              <Button
+                component={Link}
+                size="small"
+                href={`/owners/${ownerId}/tax-year/${report.taxYear.label}`}
+              >
+                {owners.find(o => o.owner_id === ownerId)?.owner_name ?? 'Owner'}&apos;s combined report →
+              </Button>
+            </Stack>
           )}
         </CardContent>
       </Card>

@@ -15,6 +15,7 @@ import {
   TableBody,
   IconButton,
   Chip,
+  Box,
   Snackbar,
   Alert,
 } from '@mui/material';
@@ -23,6 +24,8 @@ import DeleteIcon from '@mui/icons-material/Delete';
 import AddIcon from '@mui/icons-material/Add';
 import { formatCurrency } from '@/lib/utils/formatting';
 import { londonTodayIso } from '@/lib/dates/today';
+import { currentTaxYear, taxYearRange } from '@/lib/tax/ukTaxYear';
+import { expandTenancies, totalScheduled } from '@/lib/properties/rent-schedule';
 import type { RentFrequency } from '@/lib/repos/tenancy.repo';
 import TenancyDialog, { TenancyFormValues } from './TenancyDialog';
 
@@ -110,6 +113,26 @@ export default function TenanciesCard({ propertyId }: { propertyId: number }) {
 
   const list = tenancies ?? [];
 
+  // Compute "expected gross this tax year" preview from contracts.
+  const thisTaxYear = currentTaxYear();
+  const lastTaxYear = taxYearRange(thisTaxYear.startYear - 1);
+  const scheduleForRange = (range: { startDate: string; endDate: string }) =>
+    expandTenancies(
+      list.map(t => ({
+        id: t.id,
+        tenantName: t.tenantName,
+        startDate: t.startDate,
+        endDate: t.endDate,
+        rentAmount: t.rentAmount,
+        rentFrequency: t.rentFrequency,
+      })),
+      range.startDate,
+      range.endDate,
+    );
+
+  const thisYearTotal = totalScheduled(scheduleForRange(thisTaxYear));
+  const lastYearTotal = totalScheduled(scheduleForRange(lastTaxYear));
+
   return (
     <Card sx={{ mb: 3 }}>
       <CardContent>
@@ -124,62 +147,78 @@ export default function TenanciesCard({ propertyId }: { propertyId: number }) {
               setDialogOpen(true);
             }}
           >
-            Add
+            Add tenancy
           </Button>
         </Stack>
 
         {list.length === 0 ? (
           <Typography variant="body2" color="text.secondary">
-            No tenancies recorded. Add one to enable rental income capture and tax-year reporting.
+            No tenancies recorded. Add one — the rent amount and date range you enter become the source of truth for the tax-year report.
           </Typography>
         ) : (
-          <Table size="small">
-            <TableHead>
-              <TableRow>
-                <TableCell>Tenant(s)</TableCell>
-                <TableCell>Start</TableCell>
-                <TableCell>End</TableCell>
-                <TableCell align="right">Rent</TableCell>
-                <TableCell>Status</TableCell>
-                <TableCell align="right" />
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {list.map(t => (
-                <TableRow key={t.id}>
-                  <TableCell>{t.tenantName}</TableCell>
-                  <TableCell>{t.startDate}</TableCell>
-                  <TableCell>{t.endDate ?? '—'}</TableCell>
-                  <TableCell align="right">
-                    {formatCurrency(t.rentAmount)} {FREQ_LABEL[t.rentFrequency] ?? ''}
-                  </TableCell>
-                  <TableCell>
-                    {isCurrent(t, today) ? (
-                      <Chip size="small" color="success" label="Current" />
-                    ) : t.endDate && t.endDate < today ? (
-                      <Chip size="small" label="Past" />
-                    ) : (
-                      <Chip size="small" label="Future" />
-                    )}
-                  </TableCell>
-                  <TableCell align="right">
-                    <IconButton
-                      size="small"
-                      onClick={() => {
-                        setEditing(t);
-                        setDialogOpen(true);
-                      }}
-                    >
-                      <EditIcon fontSize="small" />
-                    </IconButton>
-                    <IconButton size="small" onClick={() => handleDelete(t.id)}>
-                      <DeleteIcon fontSize="small" />
-                    </IconButton>
-                  </TableCell>
+          <>
+            <Stack direction="row" spacing={4} sx={{ mb: 2 }}>
+              <Box>
+                <Typography variant="caption" color="text.secondary">
+                  Gross this tax year ({thisTaxYear.label})
+                </Typography>
+                <Typography variant="h6">{formatCurrency(thisYearTotal)}</Typography>
+              </Box>
+              <Box>
+                <Typography variant="caption" color="text.secondary">
+                  Gross last tax year ({lastTaxYear.label})
+                </Typography>
+                <Typography variant="h6">{formatCurrency(lastYearTotal)}</Typography>
+              </Box>
+            </Stack>
+            <Table size="small">
+              <TableHead>
+                <TableRow>
+                  <TableCell>Tenant(s)</TableCell>
+                  <TableCell>Start</TableCell>
+                  <TableCell>End</TableCell>
+                  <TableCell align="right">Rent</TableCell>
+                  <TableCell>Status</TableCell>
+                  <TableCell align="right" />
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+              </TableHead>
+              <TableBody>
+                {list.map(t => (
+                  <TableRow key={t.id}>
+                    <TableCell>{t.tenantName}</TableCell>
+                    <TableCell>{t.startDate}</TableCell>
+                    <TableCell>{t.endDate ?? '—'}</TableCell>
+                    <TableCell align="right">
+                      {formatCurrency(t.rentAmount)} {FREQ_LABEL[t.rentFrequency] ?? ''}
+                    </TableCell>
+                    <TableCell>
+                      {isCurrent(t, today) ? (
+                        <Chip size="small" color="success" label="Current" />
+                      ) : t.endDate && t.endDate < today ? (
+                        <Chip size="small" label="Past" />
+                      ) : (
+                        <Chip size="small" label="Future" />
+                      )}
+                    </TableCell>
+                    <TableCell align="right">
+                      <IconButton
+                        size="small"
+                        onClick={() => {
+                          setEditing(t);
+                          setDialogOpen(true);
+                        }}
+                      >
+                        <EditIcon fontSize="small" />
+                      </IconButton>
+                      <IconButton size="small" onClick={() => handleDelete(t.id)}>
+                        <DeleteIcon fontSize="small" />
+                      </IconButton>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </>
         )}
       </CardContent>
 

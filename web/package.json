@@ -10,13 +10,14 @@
     "db:migrate": "node scripts/migrate.mjs"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.72.1",
+    "@ai-sdk/gateway": "^1.0.0",
     "@emotion/cache": "^11.14.0",
     "@emotion/react": "^11.14.0",
     "@emotion/styled": "^11.14.1",
     "@mui/icons-material": "^7.3.7",
     "@mui/material": "^7.3.7",
     "@neondatabase/serverless": "^1.0.2",
+    "ai": "^5.0.0",
     "date-fns": "^4.1.0",
     "decimal.js": "^10.6.0",
     "drizzle-orm": "^0.45.1",

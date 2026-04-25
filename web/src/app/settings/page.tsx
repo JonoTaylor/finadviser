@@ -29,11 +29,12 @@ export default function SettingsPage() {
           title="API Configuration"
         >
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-            <Typography variant="body2" color="text.secondary">Anthropic API Key:</Typography>
+            <Typography variant="body2" color="text.secondary">AI Gateway:</Typography>
             <Chip label="Configured server-side" size="small" color="info" variant="outlined" />
           </Box>
           <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
-            Set ANTHROPIC_API_KEY in your Vercel environment variables.
+            Set AI_GATEWAY_API_KEY in your Vercel environment variables. Override the model with MODEL_ID
+            (e.g. <code>anthropic/claude-sonnet-4-5</code>, <code>openai/gpt-5</code>).
           </Typography>
         </SettingsCard>
 
@@ -87,7 +88,7 @@ export default function SettingsPage() {
           </Typography>
           <Divider sx={{ my: 1 }} />
           <Typography variant="caption" color="text.secondary">
-            Built with Next.js, Material UI, Drizzle ORM, and Anthropic Claude.
+            Built with Next.js, Material UI, Drizzle ORM, and the Vercel AI Gateway.
           </Typography>
         </SettingsCard>
       </Stack>

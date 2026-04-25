@@ -1,4 +1,5 @@
-import Anthropic from '@anthropic-ai/sdk';
+import { generateText } from 'ai';
+import { gateway } from '@ai-sdk/gateway';
 import type { RawTransaction } from '@/lib/types';
 import crypto from 'crypto';
 
@@ -23,6 +24,8 @@ If you cannot find any transactions, return an empty array [].
 Bank statement text:
 `;
 
+const DEFAULT_MODEL_ID = 'anthropic/claude-sonnet-4-5';
+
 async function extractTextFromPDF(fileBuffer: Buffer): Promise<string> {
   // Dynamic import — pdf-parse v1.x is a simple function(buffer) => { text }
   const pdfParse = (await import('pdf-parse')).default;
@@ -37,30 +40,18 @@ export async function parsePDF(fileBuffer: Buffer): Promise<RawTransaction[]> {
     throw new Error('Scanned/image-only PDFs are not supported. Please use a text-based PDF or CSV export.');
   }
 
-  // Use Claude to extract structured transactions
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) {
-    throw new Error('ANTHROPIC_API_KEY is required for PDF parsing');
+  // Routes through Vercel AI Gateway — same env (AI_GATEWAY_API_KEY) and
+  // model selection (MODEL_ID) as the rest of the AI surface, so we can
+  // swap providers without touching this file.
+  if (!process.env.AI_GATEWAY_API_KEY) {
+    throw new Error('AI_GATEWAY_API_KEY is required for PDF parsing');
   }
 
-  const client = new Anthropic({ apiKey });
-
-  const message = await client.messages.create({
-    model: 'claude-sonnet-4-20250514',
-    max_tokens: 4096,
-    messages: [
-      {
-        role: 'user',
-        content: PDF_EXTRACTION_PROMPT + text.slice(0, 15000),
-      },
-    ],
+  const { text: responseText } = await generateText({
+    model: gateway(process.env.MODEL_ID ?? DEFAULT_MODEL_ID),
+    prompt: PDF_EXTRACTION_PROMPT + text.slice(0, 15000),
+    maxOutputTokens: 4096,
   });
-
-  // Parse the AI response
-  const responseText = message.content
-    .filter((block): block is Anthropic.Messages.TextBlock => block.type === 'text')
-    .map((block) => block.text)
-    .join('');
 
   let parsed: Array<{
     date: string;

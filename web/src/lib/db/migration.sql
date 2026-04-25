@@ -128,6 +128,78 @@ VALUES
     ('Property Expenses', 'EXPENSE', true, 'Itemised property/BTL expenses (category provides the breakdown on the tax-year report)')
 ON CONFLICT (name) DO UPDATE SET is_system = true;
 
+-- One-shot cleanup of duplicate root categories accumulated by the
+-- pre-PR-6 non-idempotent seed (Postgres ON CONFLICT didn't dedupe rows
+-- where parent_id IS NULL). For each set of same-named root duplicates:
+--   1. Pick the lowest id as the keeper.
+--   2. For each duplicate-root's children, either re-parent to the keeper
+--      (if no name-match exists yet) or re-point FK refs to the keeper's
+--      same-named child and delete the duplicate-child.
+--   3. Re-point any direct journal_entries / categorization_rules FKs
+--      from the duplicate roots to the keeper.
+--   4. Delete the duplicate roots.
+-- Idempotent: once deduplicated, the outer SELECT returns no rows and the
+-- DO block is a no-op.
+DO $$
+DECLARE
+    dup_root RECORD;
+    dup_child RECORD;
+    keeper_root_id INTEGER;
+    keeper_child_id INTEGER;
+BEGIN
+    FOR dup_root IN
+        SELECT name,
+               MIN(id) AS keeper_id,
+               ARRAY_REMOVE(ARRAY_AGG(id ORDER BY id), MIN(id)) AS dup_ids
+          FROM categories
+         WHERE parent_id IS NULL
+         GROUP BY name
+        HAVING COUNT(*) > 1
+    LOOP
+        keeper_root_id := dup_root.keeper_id;
+
+        FOR dup_child IN
+            SELECT id, name
+              FROM categories
+             WHERE parent_id = ANY(dup_root.dup_ids)
+        LOOP
+            SELECT id INTO keeper_child_id
+              FROM categories
+             WHERE parent_id = keeper_root_id AND name = dup_child.name
+             LIMIT 1;
+
+            IF keeper_child_id IS NULL THEN
+                -- Re-parent this child onto the keeper root; safe because
+                -- (name, keeper_root_id) doesn't currently exist.
+                UPDATE categories SET parent_id = keeper_root_id WHERE id = dup_child.id;
+            ELSE
+                -- Re-point FK references to the canonical child, then drop
+                -- the duplicate child.
+                UPDATE journal_entries SET category_id = keeper_child_id WHERE category_id = dup_child.id;
+                UPDATE categorization_rules SET category_id = keeper_child_id WHERE category_id = dup_child.id;
+                DELETE FROM categories WHERE id = dup_child.id;
+            END IF;
+        END LOOP;
+
+        -- Re-point any root-level FK references from the duplicates to the
+        -- keeper, then delete the duplicate roots.
+        UPDATE journal_entries
+           SET category_id = keeper_root_id
+         WHERE category_id = ANY(dup_root.dup_ids);
+        UPDATE categorization_rules
+           SET category_id = keeper_root_id
+         WHERE category_id = ANY(dup_root.dup_ids);
+        DELETE FROM categories WHERE id = ANY(dup_root.dup_ids);
+    END LOOP;
+END $$;
+
+-- Belt-and-braces: a partial unique index that prevents new duplicate
+-- roots from being created even if some future code path bypasses the
+-- NOT EXISTS seed. Safe to add only after the cleanup above runs.
+CREATE UNIQUE INDEX IF NOT EXISTS unique_root_category_name
+    ON categories(name)
+    WHERE parent_id IS NULL;
+
 -- Default top-level categories.
 -- Note: the (name, parent_id) UNIQUE constraint on `categories` treats NULLs
 -- as distinct (Postgres default), so ON CONFLICT (name, parent_id) doesn't

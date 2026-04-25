@@ -1,4 +1,4 @@
-import { eq, sql } from 'drizzle-orm';
+import { and, asc, eq, isNull, sql } from 'drizzle-orm';
 import { getDb, schema } from '@/lib/db';
 
 const { categories, categorizationRules } = schema;
@@ -38,23 +38,30 @@ export const categoryRepo = {
    * Return the children of a category by parent name. Used by the property
    * expense dialog to populate its category dropdown with just the BTL
    * itemised categories (children of 'Property expenses').
+   *
+   * Uses the Drizzle query builder so the rows come back in the same
+   * camelCase shape as listAll() — callers don't have to know which
+   * filter form they used.
    */
   async listChildrenOfNamed(parentName: string) {
     const db = getDb();
-    const rows = await db.execute(sql`
-      SELECT c.id, c.name, c.parent_id, c.is_system, c.created_at
-        FROM categories c
-        JOIN categories p ON p.id = c.parent_id
-       WHERE p.name = ${parentName} AND p.parent_id IS NULL
-       ORDER BY c.name
-    `);
-    return rows.rows as Array<{
-      id: number;
-      name: string;
-      parent_id: number;
-      is_system: boolean;
-      created_at: string;
-    }>;
+
+    // Defensive: there can be more than one root with the same name in
+    // legacy data because Postgres unique constraints treat NULLs as
+    // distinct. Pick the lowest id.
+    const [parent] = await db
+      .select({ id: categories.id })
+      .from(categories)
+      .where(and(eq(categories.name, parentName), isNull(categories.parentId)))
+      .orderBy(asc(categories.id))
+      .limit(1);
+    if (!parent) return [];
+
+    return db
+      .select()
+      .from(categories)
+      .where(eq(categories.parentId, parent.id))
+      .orderBy(asc(categories.name));
   },
 
   async addRule(data: {

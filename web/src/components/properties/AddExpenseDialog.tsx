@@ -16,7 +16,7 @@ import {
 } from '@mui/material';
 import { londonTodayIso } from '@/lib/dates/today';
 
-interface Account { id: number; name: string; account_type: string }
+interface Account { id: number; name: string; accountType: string }
 interface Category { id: number; name: string }
 
 const fetcher = (url: string) => fetch(url).then(r => r.json());

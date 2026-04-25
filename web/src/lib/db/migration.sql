@@ -128,29 +128,42 @@ VALUES
     ('Property Expenses', 'EXPENSE', true, 'Itemised property/BTL expenses (category provides the breakdown on the tax-year report)')
 ON CONFLICT (name) DO UPDATE SET is_system = true;
 
--- Default categories
+-- Default top-level categories.
+-- Note: the (name, parent_id) UNIQUE constraint on `categories` treats NULLs
+-- as distinct (Postgres default), so ON CONFLICT (name, parent_id) doesn't
+-- dedupe rows where parent_id IS NULL. We use INSERT ... SELECT ... WHERE
+-- NOT EXISTS to make this seed truly idempotent across builds.
 INSERT INTO categories (name, is_system)
-VALUES
-    ('Groceries', true),
-    ('Dining', true),
-    ('Transport', true),
-    ('Utilities', true),
-    ('Rent/Mortgage', true),
-    ('Entertainment', true),
-    ('Healthcare', true),
-    ('Shopping', true),
-    ('Income', true),
-    ('Transfer', true),
-    ('Uncategorized', true),
-    ('Property expenses', true)
-ON CONFLICT (name, parent_id) DO NOTHING;
+SELECT v.name, true
+  FROM (VALUES
+    ('Groceries'),
+    ('Dining'),
+    ('Transport'),
+    ('Utilities'),
+    ('Rent/Mortgage'),
+    ('Entertainment'),
+    ('Healthcare'),
+    ('Shopping'),
+    ('Income'),
+    ('Transfer'),
+    ('Uncategorized'),
+    ('Property expenses')
+  ) AS v(name)
+ WHERE NOT EXISTS (
+   SELECT 1 FROM categories c
+    WHERE c.name = v.name AND c.parent_id IS NULL
+ );
 
--- Itemised UK BTL deductible expense categories (children of 'Property expenses').
--- Mortgage interest is intentionally NOT seeded here: under S.24 it's not an
--- ordinary deductible expense and it's already isolated as its own EXPENSE
--- account ('Mortgage Interest') with is_system = true above.
+-- Itemised UK BTL deductible expense categories (children of 'Property
+-- expenses'). Mortgage interest is intentionally NOT seeded here: under
+-- S.24 it's not an ordinary deductible expense and it's already isolated
+-- as its own EXPENSE account ('Mortgage Interest') with is_system = true.
+--
+-- Pin to the lowest-id 'Property expenses' root so any historical NULL-
+-- parent duplicates don't multiply the children. ON CONFLICT works for
+-- children because their parent_id is non-null.
 INSERT INTO categories (name, parent_id, is_system)
-SELECT child_name, p.id, true
+SELECT child.child_name, p.id, true
   FROM (VALUES
     ('Repairs & maintenance'),
     ('Letting agent fees'),
@@ -164,5 +177,9 @@ SELECT child_name, p.id, true
     ('Travel for property management'),
     ('Other property expenses')
   ) AS child(child_name)
-  JOIN categories p ON p.name = 'Property expenses' AND p.parent_id IS NULL
+ CROSS JOIN (
+   SELECT id FROM categories
+    WHERE name = 'Property expenses' AND parent_id IS NULL
+    ORDER BY id ASC LIMIT 1
+ ) AS p
 ON CONFLICT (name, parent_id) DO NOTHING;

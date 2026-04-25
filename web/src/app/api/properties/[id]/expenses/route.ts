@@ -21,12 +21,22 @@ export async function POST(
       );
     }
 
+    const fromAccountId = parseInt(body.fromAccountId, 10);
+    if (Number.isNaN(fromAccountId)) {
+      return NextResponse.json({ error: 'Invalid fromAccountId' }, { status: 400 });
+    }
+
+    const categoryId = body.categoryId ? parseInt(body.categoryId, 10) : null;
+    if (categoryId !== null && Number.isNaN(categoryId)) {
+      return NextResponse.json({ error: 'Invalid categoryId' }, { status: 400 });
+    }
+
     const journalId = await recordPropertyExpense({
       propertyId,
       date: body.date,
       amount: body.amount,
-      fromAccountId: parseInt(body.fromAccountId, 10),
-      categoryId: body.categoryId ? parseInt(body.categoryId, 10) : null,
+      fromAccountId,
+      categoryId,
       description: body.description,
       reference: body.reference ?? null,
     });

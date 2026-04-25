@@ -22,6 +22,7 @@ const fetcher = (url: string) => fetch(url).then(r => r.json());
 
 export default function PropertyDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
+  const propertyId = parseInt(id, 10);
   const { data: property, isLoading, mutate } = useSWR(`/api/properties/${id}`, fetcher);
   const { data: equity, mutate: mutateEquity } = useSWR(`/api/properties/${id}/equity`, fetcher);
   const [valuationOpen, setValuationOpen] = useState(false);
@@ -82,9 +83,9 @@ export default function PropertyDetailPage({ params }: { params: Promise<{ id: s
             </CardContent>
           </Card>
 
-          <TenanciesCard propertyId={parseInt(id)} />
+          <TenanciesCard propertyId={propertyId} />
 
-          <ExpensesCard propertyId={parseInt(id)} />
+          <ExpensesCard propertyId={propertyId} />
 
           <ValuationHistory valuations={property.valuations ?? []} />
         </Grid>
@@ -111,11 +112,11 @@ export default function PropertyDetailPage({ params }: { params: Promise<{ id: s
           </Card>
 
           {property.mortgages?.map((m: { id: number; lender: string; originalAmount: string; startDate: string; termMonths: number }) => (
-            <MortgageCard key={m.id} mortgage={m} propertyId={parseInt(id)} />
+            <MortgageCard key={m.id} mortgage={m} propertyId={propertyId} />
           ))}
 
           {property.mortgages?.length > 0 && (
-            <MortgageInterestSummary propertyId={parseInt(id)} />
+            <MortgageInterestSummary propertyId={propertyId} />
           )}
 
           <Stack direction="row" spacing={1} sx={{ mt: 2 }} flexWrap="wrap" useFlexGap>

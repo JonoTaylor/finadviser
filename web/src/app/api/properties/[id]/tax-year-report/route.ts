@@ -22,6 +22,7 @@ export async function GET(
     const { searchParams } = new URL(request.url);
     const yearParam = searchParams.get('year');
     const ownerParam = searchParams.get('ownerId');
+    const summary = searchParams.get('summary') === 'true';
 
     const range = yearParam ? taxYearRange(yearParam) : currentTaxYear();
     const ownerId = ownerParam ? parseInt(ownerParam, 10) : null;
@@ -35,6 +36,19 @@ export async function GET(
       endDate: range.endDate,
       ownerId,
     });
+
+    // Compact response shape for callers that only need totals (e.g.
+    // MortgageInterestSummary card on the property page). Same compute,
+    // smaller payload.
+    if (summary) {
+      const { income: _i, otherIncome: _oi, expenses: _e, mortgageInterest: _mi, ...rest } = report;
+      void _i; void _oi; void _e; void _mi;
+      return NextResponse.json({
+        property: { id: property.id, name: property.name, address: property.address },
+        taxYear: range,
+        ...rest,
+      });
+    }
 
     return NextResponse.json({
       property: { id: property.id, name: property.name, address: property.address },

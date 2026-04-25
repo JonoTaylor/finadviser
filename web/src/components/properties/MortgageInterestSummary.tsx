@@ -39,12 +39,14 @@ export default function MortgageInterestSummary({ propertyId }: { propertyId: nu
   const thisYear = currentTaxYear();
   const lastYear = taxYearRange(thisYear.startYear - 1);
 
+  // summary=true returns just the totals — line arrays are stripped from
+  // the response since this card only needs `mortgageInterest`.
   const { data: thisYearReport, error: thisError, isLoading: thisLoading } = useSWR<ReportResponse>(
-    `/api/properties/${propertyId}/tax-year-report?year=${thisYear.label}`,
+    `/api/properties/${propertyId}/tax-year-report?year=${thisYear.label}&summary=true`,
     fetcher,
   );
   const { data: lastYearReport, error: lastError, isLoading: lastLoading } = useSWR<ReportResponse>(
-    `/api/properties/${propertyId}/tax-year-report?year=${lastYear.label}`,
+    `/api/properties/${propertyId}/tax-year-report?year=${lastYear.label}&summary=true`,
     fetcher,
   );
 

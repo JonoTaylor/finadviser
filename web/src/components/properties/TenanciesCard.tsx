@@ -19,8 +19,10 @@ import {
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/Delete';
 import AddIcon from '@mui/icons-material/Add';
+import PaymentsIcon from '@mui/icons-material/Payments';
 import { formatCurrency } from '@/lib/utils/formatting';
 import TenancyDialog, { TenancyFormValues } from './TenancyDialog';
+import RecordRentDialog from './RecordRentDialog';
 
 interface Tenancy {
   id: number;
@@ -57,6 +59,7 @@ export default function TenanciesCard({ propertyId }: { propertyId: number }) {
   );
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<Tenancy | null>(null);
+  const [rentDialogOpen, setRentDialogOpen] = useState(false);
 
   const handleSave = async (data: TenancyFormValues) => {
     const payload = {
@@ -99,17 +102,28 @@ export default function TenanciesCard({ propertyId }: { propertyId: number }) {
       <CardContent>
         <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 1 }}>
           <Typography variant="h6">Tenancies</Typography>
-          <Button
-            startIcon={<AddIcon />}
-            size="small"
-            variant="outlined"
-            onClick={() => {
-              setEditing(null);
-              setDialogOpen(true);
-            }}
-          >
-            Add
-          </Button>
+          <Stack direction="row" spacing={1}>
+            <Button
+              startIcon={<PaymentsIcon />}
+              size="small"
+              variant="contained"
+              disabled={list.length === 0}
+              onClick={() => setRentDialogOpen(true)}
+            >
+              Record rent
+            </Button>
+            <Button
+              startIcon={<AddIcon />}
+              size="small"
+              variant="outlined"
+              onClick={() => {
+                setEditing(null);
+                setDialogOpen(true);
+              }}
+            >
+              Add tenancy
+            </Button>
+          </Stack>
         </Stack>
 
         {list.length === 0 ? (
@@ -166,6 +180,13 @@ export default function TenanciesCard({ propertyId }: { propertyId: number }) {
           </Table>
         )}
       </CardContent>
+
+      <RecordRentDialog
+        open={rentDialogOpen}
+        propertyId={propertyId}
+        onClose={() => setRentDialogOpen(false)}
+        onSaved={() => mutate()}
+      />
 
       <TenancyDialog
         open={dialogOpen}

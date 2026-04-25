@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import {
   Dialog,
   DialogTitle,
@@ -45,11 +45,15 @@ export default function TenancyDialog({
   onSave: (data: TenancyFormValues) => void;
   title?: string;
 }) {
-  const [form, setForm] = useState<TenancyFormValues>(empty);
+  const [form, setForm] = useState<TenancyFormValues>(() => ({ ...empty, ...(initial ?? {}) }));
+  const [prevOpen, setPrevOpen] = useState(open);
 
-  useEffect(() => {
+  // Reset form when dialog transitions to open. Adjusting state during render
+  // is the React-19 idiomatic alternative to setState-in-effect.
+  if (open !== prevOpen) {
+    setPrevOpen(open);
     if (open) setForm({ ...empty, ...(initial ?? {}) });
-  }, [open, initial]);
+  }
 
   const valid = form.tenantName && form.startDate && form.rentAmount;
 

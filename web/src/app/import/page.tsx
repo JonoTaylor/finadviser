@@ -9,6 +9,9 @@ import useSWR from 'swr';
 import FileUploadStep from '@/components/import/FileUploadStep';
 import ConfigStep from '@/components/import/ConfigStep';
 import PreviewTable from '@/components/import/PreviewTable';
+import ImportProgress from '@/components/import/ImportProgress';
+import { consumeNdjsonImport } from '@/lib/import/stream-client';
+import type { ProgressEvent } from '@/lib/import/stream';
 
 const fetcher = (url: string) => fetch(url).then(r => r.json());
 
@@ -23,7 +26,9 @@ export default function ImportPage() {
   const [bankConfig, setBankConfig] = useState('generic-csv');
   const [accountName, setAccountName] = useState('Bank');
   const [preview, setPreview] = useState<Array<Record<string, unknown>> | null>(null);
+  const [previewing, setPreviewing] = useState(false);
   const [importing, setImporting] = useState(false);
+  const [progress, setProgress] = useState<ProgressEvent | null>(null);
   const [result, setResult] = useState<{ importedCount: number; duplicateCount: number; totalCount: number } | null>(null);
   const [error, setError] = useState('');
 
@@ -40,22 +45,26 @@ export default function ImportPage() {
 
     if (isPdf) {
       // PDF: skip config, go straight to preview via AI parsing
+      setPreviewing(true);
+      setProgress(null);
       try {
         const formData = new FormData();
         formData.append('file', f);
         formData.append('bankConfig', 'pdf');
         formData.append('accountName', accountName);
 
-        const res = await fetch('/api/import/preview', { method: 'POST', body: formData });
-        if (!res.ok) {
-          const err = await res.json();
-          throw new Error(err.error || 'PDF preview failed');
-        }
-        const data = await res.json();
+        const data = await consumeNdjsonImport<Array<Record<string, unknown>>>(
+          '/api/import/preview',
+          { method: 'POST', body: formData },
+          setProgress,
+        );
         setPreview(data);
         setActiveStep(1); // PDF step 1 = Preview
       } catch (e) {
         setError(e instanceof Error ? e.message : 'Failed to parse PDF');
+      } finally {
+        setPreviewing(false);
+        setProgress(null);
       }
     } else {
       // CSV: read content and go to config step
@@ -68,55 +77,57 @@ export default function ImportPage() {
   const handleConfigure = useCallback(async () => {
     if (!file) return;
     setError('');
+    setPreviewing(true);
+    setProgress(null);
     try {
       const formData = new FormData();
       formData.append('file', file);
       formData.append('bankConfig', bankConfig);
       formData.append('accountName', accountName);
 
-      const res = await fetch('/api/import/preview', { method: 'POST', body: formData });
-      if (!res.ok) {
-        const err = await res.json();
-        throw new Error(err.error || 'Preview failed');
-      }
-      const data = await res.json();
+      const data = await consumeNdjsonImport<Array<Record<string, unknown>>>(
+        '/api/import/preview',
+        { method: 'POST', body: formData },
+        setProgress,
+      );
       setPreview(data);
       setActiveStep(2);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Preview failed');
+    } finally {
+      setPreviewing(false);
+      setProgress(null);
     }
   }, [file, bankConfig, accountName]);
 
   const handleImport = useCallback(async () => {
     setImporting(true);
     setError('');
+    setProgress(null);
     try {
-      let res: Response;
-      if (fileType === 'pdf') {
-        // PDF: send pre-parsed transactions
-        res = await fetch('/api/import/confirm', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ parsedTransactions: preview, accountName }),
-        });
-      } else {
-        // CSV: send raw content for server-side parsing
-        res = await fetch('/api/import/confirm', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ csvContent, bankConfig, accountName }),
-        });
-      }
-      if (!res.ok) {
-        const err = await res.json();
-        throw new Error(err.error || 'Import failed');
-      }
-      const data = await res.json();
+      const init: RequestInit = fileType === 'pdf'
+        ? {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ parsedTransactions: preview, accountName }),
+          }
+        : {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ csvContent, bankConfig, accountName }),
+          };
+
+      const data = await consumeNdjsonImport<{ importedCount: number; duplicateCount: number; totalCount: number }>(
+        '/api/import/confirm',
+        init,
+        setProgress,
+      );
       setResult(data);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Import failed');
     } finally {
       setImporting(false);
+      setProgress(null);
     }
   }, [fileType, csvContent, bankConfig, accountName, preview]);
 
@@ -128,6 +139,7 @@ export default function ImportPage() {
     setPreview(null);
     setResult(null);
     setError('');
+    setProgress(null);
   };
 
   // Determine if we're on the preview step
@@ -149,6 +161,8 @@ export default function ImportPage() {
       </Stepper>
 
       {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
+
+      {(previewing || importing) && <ImportProgress event={progress} />}
 
       {result ? (
         <Card>
@@ -176,6 +190,7 @@ export default function ImportPage() {
               onAccountNameChange={setAccountName}
               onNext={handleConfigure}
               onBack={() => setActiveStep(0)}
+              busy={previewing}
             />
           )}
 
@@ -183,9 +198,9 @@ export default function ImportPage() {
             <Box>
               <PreviewTable transactions={preview} />
               <Stack direction="row" spacing={2} sx={{ mt: 2 }}>
-                <Button onClick={() => { setActiveStep(0); setPreview(null); }}>Back</Button>
+                <Button onClick={() => { setActiveStep(0); setPreview(null); }} disabled={importing}>Back</Button>
                 <Button variant="contained" onClick={handleImport} disabled={importing}>
-                  {importing ? 'Importing...' : 'Confirm Import'}
+                  {importing ? 'Importing…' : 'Confirm Import'}
                 </Button>
               </Stack>
             </Box>

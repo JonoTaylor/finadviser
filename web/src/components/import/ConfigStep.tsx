@@ -24,6 +24,7 @@ export default function ConfigStep({
   onAccountNameChange,
   onNext,
   onBack,
+  busy = false,
 }: {
   bankConfig: string;
   accountName: string;
@@ -33,12 +34,13 @@ export default function ConfigStep({
   onAccountNameChange: (v: string) => void;
   onNext: () => void;
   onBack: () => void;
+  busy?: boolean;
 }) {
   return (
     <Card>
       <CardContent>
         <Stack spacing={3}>
-          <FormControl fullWidth>
+          <FormControl fullWidth disabled={busy}>
             <InputLabel>Bank Format</InputLabel>
             <Select value={bankConfig} label="Bank Format" onChange={e => onBankConfigChange(e.target.value)}>
               {Object.entries(bankConfigs).map(([key, cfg]) => (
@@ -49,6 +51,7 @@ export default function ConfigStep({
 
           <Autocomplete
             freeSolo
+            disabled={busy}
             options={accounts.map(a => a.name)}
             value={accountName}
             onInputChange={(_, v) => onAccountNameChange(v)}
@@ -56,8 +59,10 @@ export default function ConfigStep({
           />
 
           <Stack direction="row" spacing={2}>
-            <Button onClick={onBack}>Back</Button>
-            <Button variant="contained" onClick={onNext}>Preview</Button>
+            <Button onClick={onBack} disabled={busy}>Back</Button>
+            <Button variant="contained" onClick={onNext} disabled={busy}>
+              {busy ? 'Working…' : 'Preview'}
+            </Button>
           </Stack>
         </Stack>
       </CardContent>

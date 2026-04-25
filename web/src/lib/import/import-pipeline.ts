@@ -30,6 +30,7 @@ export async function executeImport(
   csvContent: string,
   bankConfigName: string,
   accountName: string,
+  onProgress?: (processed: number, total: number) => void,
 ): Promise<ImportResult> {
   const config = getBankConfig(bankConfigName);
   if (!config) throw new Error(`Unknown bank config: ${bankConfigName}`);
@@ -40,12 +41,13 @@ export async function executeImport(
   transactions = await checkDuplicates(transactions, account.id);
   transactions = await categorizeTransactions(transactions);
 
-  return importTransactions(transactions, account.id, bankConfigName, 'upload.csv');
+  return importTransactions(transactions, account.id, bankConfigName, 'upload.csv', onProgress);
 }
 
 export async function executeImportFromParsed(
   parsedTransactions: RawTransaction[],
   accountName: string,
+  onProgress?: (processed: number, total: number) => void,
 ): Promise<ImportResult> {
   const account = await accountRepo.getOrCreate(accountName, 'ASSET');
 
@@ -53,7 +55,7 @@ export async function executeImportFromParsed(
   let transactions = await checkDuplicates(parsedTransactions, account.id);
   transactions = await categorizeTransactions(transactions);
 
-  return importTransactions(transactions, account.id, 'pdf', 'upload.pdf');
+  return importTransactions(transactions, account.id, 'pdf', 'upload.pdf', onProgress);
 }
 
 async function importTransactions(
@@ -61,6 +63,7 @@ async function importTransactions(
   accountId: number,
   bankConfig: string,
   filename: string,
+  onProgress?: (processed: number, total: number) => void,
 ): Promise<ImportResult> {
   // Create import batch
   const batch = await importBatchRepo.create({
@@ -73,6 +76,19 @@ async function importTransactions(
   let imported = 0;
   let duplicates = 0;
 
+  // Collect fingerprint inserts so we can bulk-write them at the end
+  // instead of one round-trip per row. Journal creation has to be one
+  // call per row (the balance trigger validates the journal during
+  // INSERT) so we batch what we can.
+  const fingerprintRows: Array<{ fingerprint: string; accountId: number; journalEntryId: number }> = [];
+
+  // Total of non-duplicate rows for progress reporting; matches what we
+  // actually save, not the input length. Throttle progress events so a
+  // huge import doesn't flood the stream — at most ~100 events.
+  const total = transactions.filter(t => !t.isDuplicate).length;
+  let processed = 0;
+  const progressEvery = Math.max(1, Math.floor(total / 100));
+
   for (const txn of transactions) {
     if (txn.isDuplicate) {
       duplicates++;
@@ -80,14 +96,19 @@ async function importTransactions(
     }
 
     const journalId = await createJournalEntry(txn, accountId, batch.id);
-    await fingerprintRepo.create({
+    fingerprintRows.push({
       fingerprint: txn.fingerprint,
       accountId,
       journalEntryId: journalId,
     });
     imported++;
+    processed++;
+    if (onProgress && (processed % progressEvery === 0 || processed === total)) {
+      onProgress(processed, total);
+    }
   }
 
+  await fingerprintRepo.createMany(fingerprintRows);
   await importBatchRepo.updateCounts(batch.id, imported, duplicates);
 
   return {

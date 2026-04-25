@@ -1,16 +1,23 @@
 import { fingerprintRepo } from '@/lib/repos';
 import type { RawTransaction } from '@/lib/types';
 
+/**
+ * Mark transactions as duplicates if their fingerprint already exists for
+ * this account, or appears more than once within the same batch.
+ *
+ * One bulk DB lookup instead of one-per-row — for a 500-row import that's
+ * the difference between 500 round-trips and 1.
+ */
 export async function checkDuplicates(
   transactions: RawTransaction[],
   accountId: number,
 ): Promise<RawTransaction[]> {
-  const seenInBatch = new Set<string>();
+  const fingerprints = transactions.map(t => t.fingerprint);
+  const existingInDb = await fingerprintRepo.findExisting(fingerprints, accountId);
 
+  const seenInBatch = new Set<string>();
   for (const txn of transactions) {
-    if (await fingerprintRepo.exists(txn.fingerprint, accountId)) {
-      txn.isDuplicate = true;
-    } else if (seenInBatch.has(txn.fingerprint)) {
+    if (existingInDb.has(txn.fingerprint) || seenInBatch.has(txn.fingerprint)) {
       txn.isDuplicate = true;
     } else {
       seenInBatch.add(txn.fingerprint);

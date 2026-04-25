@@ -35,18 +35,25 @@ export async function recordPropertyExpense(input: RecordPropertyExpenseInput): 
 
   const expenseAccount = await accountRepo.getOrCreate('Property Expenses', 'EXPENSE');
 
-  const amount = new Decimal(input.amount);
+  // Decimal throws on garbage input; turn that into a 400 instead of a 500.
+  let amount: Decimal;
+  try {
+    amount = new Decimal(input.amount);
+  } catch {
+    throw new ClientError(`Invalid amount: ${input.amount}`);
+  }
   if (amount.isNeg() || amount.isZero()) {
     throw new ClientError('Property expense amount must be positive');
   }
 
   const description = (input.description ?? '').trim() || 'Property expense';
+  const reference = input.reference?.trim() || null;
 
   return journalRepo.createEntry(
     {
       date: input.date,
       description,
-      reference: input.reference ?? null,
+      reference,
       categoryId: input.categoryId ?? null,
       propertyId: input.propertyId,
     },

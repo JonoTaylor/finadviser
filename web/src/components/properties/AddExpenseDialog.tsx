@@ -65,7 +65,11 @@ export default function AddExpenseDialog({
     fetcher,
   );
 
-  const valid = date && amount && fromAccountId !== '';
+  // Disable submit on non-numeric or non-positive amounts so the server's
+  // ClientError path doesn't have to catch obvious user-input mistakes.
+  const parsedAmount = parseFloat(amount);
+  const validAmount = amount !== '' && Number.isFinite(parsedAmount) && parsedAmount > 0;
+  const valid = Boolean(date) && validAmount && fromAccountId !== '';
 
   const handleSave = async () => {
     setError(null);

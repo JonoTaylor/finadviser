@@ -2,7 +2,7 @@ import Decimal from 'decimal.js';
 import { propertyRepo } from './property.repo';
 import { rentalReportRepo, type RentalReportTotals } from './rental-report.repo';
 import { taxYearRange, type TaxYearRange } from '@/lib/tax/ukTaxYear';
-import { ClientError } from '@/lib/errors';
+import { NotFoundError } from '@/lib/errors';
 
 export interface OwnerPropertySummary {
   propertyId: number;
@@ -40,7 +40,7 @@ export const ownerReportRepo = {
     const { ownerId, year } = params;
 
     const owner = await propertyRepo.getOwner(ownerId);
-    if (!owner) throw new ClientError(`Owner ${ownerId} not found`);
+    if (!owner) throw new NotFoundError(`Owner ${ownerId} not found`);
 
     const range = taxYearRange(year);
     const properties = await propertyRepo.listPropertiesByOwner(ownerId);

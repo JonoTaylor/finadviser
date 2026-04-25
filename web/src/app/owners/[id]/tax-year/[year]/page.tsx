@@ -46,7 +46,12 @@ interface OwnerReport {
 
 const fetcher = async (url: string): Promise<OwnerReport> => {
   const res = await fetch(url);
-  if (!res.ok) throw new Error(`Failed to fetch ${url} (HTTP ${res.status})`);
+  if (!res.ok) {
+    // Surface the API's { error } body so the user sees an actionable
+    // message ("Owner 99 not found") rather than a generic failure.
+    const body = await res.json().catch(() => ({} as { error?: string }));
+    throw new Error(body.error || `HTTP ${res.status}`);
+  }
   return res.json();
 };
 
@@ -62,7 +67,9 @@ export default function OwnerTaxYearReportPage({
   );
 
   if (isLoading) return <Skeleton variant="rounded" height={400} />;
-  if (error || !report) return <Alert severity="error">Failed to load report</Alert>;
+  if (error || !report) {
+    return <Alert severity="error">{error?.message ?? 'Failed to load report'}</Alert>;
+  }
 
   return (
     <Box>

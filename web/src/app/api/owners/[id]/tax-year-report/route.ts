@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { ownerReportRepo } from '@/lib/repos';
 import { currentTaxYear } from '@/lib/tax/ukTaxYear';
-import { ClientError } from '@/lib/errors';
+import { ClientError, NotFoundError } from '@/lib/errors';
 
 export async function GET(
   request: NextRequest,
@@ -20,7 +20,7 @@ export async function GET(
     const report = await ownerReportRepo.getTaxYearReport({ ownerId, year });
     return NextResponse.json(report);
   } catch (error) {
-    if (error instanceof ClientError) {
+    if (error instanceof ClientError || error instanceof NotFoundError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }
     const message = error instanceof Error ? error.message : 'Failed to build report';

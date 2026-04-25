@@ -120,7 +120,7 @@ export default function OwnerTaxYearReportPage({
                 {report.properties.map(p => (
                   <TableRow key={p.propertyId}>
                     <TableCell>{p.propertyName}</TableCell>
-                    <TableCell align="right">{p.allocationPct}%</TableCell>
+                    <TableCell align="right">{parseFloat(p.allocationPct)}%</TableCell>
                     <TableCell align="right">{formatCurrency(p.totals.grossIncome)}</TableCell>
                     <TableCell align="right">{formatCurrency(p.totals.totalExpenses)}</TableCell>
                     <TableCell align="right">{formatCurrency(p.totals.mortgageInterest)}</TableCell>

@@ -45,32 +45,37 @@ export const ownerReportRepo = {
     const range = taxYearRange(year);
     const properties = await propertyRepo.listPropertiesByOwner(ownerId);
 
-    const propertySummaries: OwnerPropertySummary[] = [];
+    // Fan out the per-property reports in parallel — sequential would mean
+    // one round-trip to Neon per property, and the queries are independent.
+    const propertySummaries: OwnerPropertySummary[] = await Promise.all(
+      properties.map(async (p) => {
+        const report = await rentalReportRepo.getTaxYearReport({
+          propertyId: p.id,
+          startDate: range.startDate,
+          endDate: range.endDate,
+          ownerId,
+        });
+        // totalsForOwner is the sum of per-line allocated values, which is
+        // the figure we want here. Fall back to the (un-allocated) totals
+        // if no allocation was applied — shouldn't happen in this code path
+        // but defend against it.
+        const totals = report.totalsForOwner ?? report.totals;
+        return {
+          propertyId: p.id,
+          propertyName: p.name,
+          allocationPct: report.allocationPct,
+          totals,
+        };
+      }),
+    );
+
     let gross = new Decimal(0);
     let expenses = new Decimal(0);
     let interest = new Decimal(0);
-
-    for (const p of properties) {
-      const report = await rentalReportRepo.getTaxYearReport({
-        propertyId: p.id,
-        startDate: range.startDate,
-        endDate: range.endDate,
-        ownerId,
-      });
-      // totalsForOwner is the sum of per-line allocated values, which is
-      // the figure we want here. Fall back to the (un-allocated) totals
-      // if no allocation was applied — shouldn't happen in this code path
-      // but defend against it.
-      const totals = report.totalsForOwner ?? report.totals;
-      propertySummaries.push({
-        propertyId: p.id,
-        propertyName: p.name,
-        allocationPct: report.allocationPct,
-        totals,
-      });
-      gross = gross.plus(totals.grossIncome);
-      expenses = expenses.plus(totals.totalExpenses);
-      interest = interest.plus(totals.mortgageInterest);
+    for (const summary of propertySummaries) {
+      gross = gross.plus(summary.totals.grossIncome);
+      expenses = expenses.plus(summary.totals.totalExpenses);
+      interest = interest.plus(summary.totals.mortgageInterest);
     }
 
     const combined: RentalReportTotals = properties.length === 0 ? ZERO_TOTALS : {

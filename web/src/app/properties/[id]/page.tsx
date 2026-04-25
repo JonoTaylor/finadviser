@@ -13,6 +13,7 @@ import ValuationHistory from '@/components/properties/ValuationHistory';
 import AddValuationDialog from '@/components/properties/AddValuationDialog';
 import RecordPaymentDialog from '@/components/properties/RecordPaymentDialog';
 import TenanciesCard from '@/components/properties/TenanciesCard';
+import ExpensesCard from '@/components/properties/ExpensesCard';
 import ReceiptLongIcon from '@mui/icons-material/ReceiptLong';
 import { currentTaxYear } from '@/lib/tax/ukTaxYear';
 
@@ -81,6 +82,8 @@ export default function PropertyDetailPage({ params }: { params: Promise<{ id: s
           </Card>
 
           <TenanciesCard propertyId={parseInt(id)} />
+
+          <ExpensesCard propertyId={parseInt(id)} />
 
           <ValuationHistory valuations={property.valuations ?? []} />
         </Grid>

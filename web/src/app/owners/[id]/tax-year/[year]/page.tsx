@@ -19,6 +19,7 @@ import {
 } from '@mui/material';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import OpenInNewIcon from '@mui/icons-material/OpenInNew';
+import DownloadIcon from '@mui/icons-material/Download';
 import Link from 'next/link';
 import useSWR from 'swr';
 import { formatCurrency } from '@/lib/utils/formatting';
@@ -78,10 +79,22 @@ export default function OwnerTaxYearReportPage({
       </Button>
 
       <Typography variant="h4">{report.owner.name}</Typography>
-      <Typography variant="subtitle1" color="text.secondary" sx={{ mb: 3 }}>
-        UK tax year {report.taxYear.label} ({report.taxYear.startDate} to {report.taxYear.endDate})
-        — owner share across all properties
-      </Typography>
+      <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" alignItems={{ sm: 'center' }} spacing={1} sx={{ mb: 3 }}>
+        <Typography variant="subtitle1" color="text.secondary">
+          UK tax year {report.taxYear.label} ({report.taxYear.startDate} to {report.taxYear.endDate})
+          — owner share across all properties
+        </Typography>
+        <Button
+          variant="contained"
+          size="small"
+          startIcon={<DownloadIcon />}
+          component="a"
+          href={`/api/owners/${id}/tax-year-export?year=${report.taxYear.label}`}
+          disabled={report.properties.length === 0}
+        >
+          Download accountant pack
+        </Button>
+      </Stack>
 
       <Card sx={{ mb: 3 }}>
         <CardContent>

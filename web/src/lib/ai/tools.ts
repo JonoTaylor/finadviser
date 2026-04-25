@@ -501,7 +501,8 @@ async function executeAutoCategorize() {
   }
 
   let aiCategorized = 0;
-  if (unmatched.length > 0 && process.env.ANTHROPIC_API_KEY) {
+  // Gateway-backed: AI_GATEWAY_API_KEY replaced ANTHROPIC_API_KEY in PR #17.
+  if (unmatched.length > 0 && process.env.AI_GATEWAY_API_KEY) {
     const categoryNames = categories.map((c) => c.name);
     const descriptions = unmatched.map((e) => e.description);
     const aiResults = await categorizeBatch(descriptions, categoryNames);

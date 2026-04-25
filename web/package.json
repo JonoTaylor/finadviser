@@ -10,7 +10,7 @@
     "db:migrate": "node scripts/migrate.mjs"
   },
   "dependencies": {
-    "@ai-sdk/gateway": "^1.0.0",
+    "@ai-sdk/gateway": "^2.0.0",
     "@emotion/cache": "^11.14.0",
     "@emotion/react": "^11.14.0",
     "@emotion/styled": "^11.14.1",

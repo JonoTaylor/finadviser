@@ -102,8 +102,12 @@ export async function categorizeBatch(
         // fall through
       }
     }
+    // Don't log the response text — categorisation prompts include
+    // transaction descriptions that count as PII / financial data, and
+    // the response can echo them back verbatim. Length is enough to
+    // tell us whether the model returned anything at all.
     console.warn('[categorizeBatch] AI returned non-JSON response, returning empty result.', {
-      excerpt: text.slice(0, 200),
+      responseLength: text.length,
     });
     return {};
   }

@@ -14,6 +14,7 @@ import AddValuationDialog from '@/components/properties/AddValuationDialog';
 import RecordPaymentDialog from '@/components/properties/RecordPaymentDialog';
 import TenanciesCard from '@/components/properties/TenanciesCard';
 import ExpensesCard from '@/components/properties/ExpensesCard';
+import MortgageInterestSummary from '@/components/properties/MortgageInterestSummary';
 import ReceiptLongIcon from '@mui/icons-material/ReceiptLong';
 import { currentTaxYear } from '@/lib/tax/ukTaxYear';
 
@@ -112,6 +113,10 @@ export default function PropertyDetailPage({ params }: { params: Promise<{ id: s
           {property.mortgages?.map((m: { id: number; lender: string; originalAmount: string; startDate: string; termMonths: number }) => (
             <MortgageCard key={m.id} mortgage={m} propertyId={parseInt(id)} />
           ))}
+
+          {property.mortgages?.length > 0 && (
+            <MortgageInterestSummary propertyId={parseInt(id)} />
+          )}
 
           <Stack direction="row" spacing={1} sx={{ mt: 2 }} flexWrap="wrap" useFlexGap>
             <Button variant="outlined" size="small" onClick={() => setValuationOpen(true)}>

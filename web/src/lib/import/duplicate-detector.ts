@@ -12,7 +12,11 @@ export async function checkDuplicates(
   transactions: RawTransaction[],
   accountId: number,
 ): Promise<RawTransaction[]> {
-  const fingerprints = transactions.map(t => t.fingerprint);
+  // De-duplicate the fingerprint list before the IN(...) lookup —
+  // shrinks parameter count and query size for large imports without
+  // changing behaviour (a fingerprint either exists for the account or
+  // it doesn't).
+  const fingerprints = [...new Set(transactions.map(t => t.fingerprint))];
   const existingInDb = await fingerprintRepo.findExisting(fingerprints, accountId);
 
   const seenInBatch = new Set<string>();

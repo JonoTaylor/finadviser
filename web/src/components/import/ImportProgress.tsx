@@ -12,8 +12,12 @@ import type { ProgressEvent } from '@/lib/import/stream';
 export default function ImportProgress({ event }: { event: ProgressEvent | null }) {
   if (!event) return null;
 
-  const isMeasurable = event.phase === 'saving';
-  const value = event.phase === 'saving' && event.total > 0
+  // Determinate only when we actually have a total > 0. If every row in
+  // the batch is a duplicate, total is 0 and we'd otherwise pass an
+  // undefined value to a determinate LinearProgress, which warns and
+  // renders broken styling. Show indeterminate in that edge case.
+  const isMeasurable = event.phase === 'saving' && event.total > 0;
+  const value = isMeasurable && event.phase === 'saving'
     ? Math.min(100, Math.round((event.processed / event.total) * 100))
     : undefined;
 

@@ -50,12 +50,22 @@ export const fingerprintRepo = {
 
   /**
    * Bulk insert. Same Order(rows) → Order(1) round-trip win as findExisting.
-   * No-op for empty input. Returns the number of rows inserted.
+   * No-op for empty input. Returns the number of rows actually inserted
+   * (existing rows are skipped via ON CONFLICT — concurrent imports or
+   * a partial retry can hit the (fingerprint, accountId) unique index;
+   * skipping is preferable to letting one collision blow up the whole
+   * statement).
    */
   async createMany(rows: Array<{ fingerprint: string; accountId: number; journalEntryId: number }>): Promise<number> {
     if (rows.length === 0) return 0;
     const db = getDb();
-    await db.insert(transactionFingerprints).values(rows);
-    return rows.length;
+    const inserted = await db
+      .insert(transactionFingerprints)
+      .values(rows)
+      .onConflictDoNothing({
+        target: [transactionFingerprints.fingerprint, transactionFingerprints.accountId],
+      })
+      .returning({ id: transactionFingerprints.id });
+    return inserted.length;
   },
 };

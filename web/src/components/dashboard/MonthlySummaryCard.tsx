@@ -23,30 +23,41 @@ interface Balance {
   balance: string;
 }
 
+/**
+ * "This Month" panel.
+ *
+ * Income figure must come from THIS-MONTH journal entries, not the
+ * cumulative INCOME account balance — `balances` is the lifetime sum and
+ * was producing a wildly inflated figure (e.g. £140k when the user's
+ * actual monthly income is a fraction of that). The v_monthly_spending
+ * view now includes INCOME rows alongside EXPENSE; we derive both
+ * figures from it.
+ *
+ * Income posts to INCOME accounts as credits (negative book-entry sums)
+ * and expenses post to EXPENSE accounts as debits (positive). We display
+ * both as positive magnitudes — sign is implied by the bucket.
+ */
 export default function MonthlySummaryCard({
   spending,
-  balances,
+  balances: _balances,
 }: {
   spending: SpendingRow[];
+  // Kept for API parity with the dashboard page; no longer used here
+  // because lifetime balances aren't a meaningful "this month" income
+  // figure.
   balances: Balance[];
 }) {
+  void _balances;
+
   const now = new Date();
   const currentMonth = format(now, 'yyyy-MM');
   const prevMonth = format(subMonths(now, 1), 'yyyy-MM');
 
-  const monthExpenses = spending
-    .filter(s => s.month === currentMonth)
-    .reduce((sum, s) => sum.plus(new Decimal(s.total).abs()), new Decimal(0));
+  const monthExpenses = sumByMonthAndType(spending, currentMonth, 'EXPENSE');
+  const prevMonthExpenses = sumByMonthAndType(spending, prevMonth, 'EXPENSE');
+  const monthIncome = sumByMonthAndType(spending, currentMonth, 'INCOME');
 
-  const prevMonthExpenses = spending
-    .filter(s => s.month === prevMonth)
-    .reduce((sum, s) => sum.plus(new Decimal(s.total).abs()), new Decimal(0));
-
-  const incomeTotal = balances
-    .filter(b => b.account_type === 'INCOME')
-    .reduce((sum, b) => sum.plus(new Decimal(b.balance).abs()), new Decimal(0));
-
-  const net = incomeTotal.minus(monthExpenses);
+  const net = monthIncome.minus(monthExpenses);
 
   const trendPct = prevMonthExpenses.gt(0)
     ? monthExpenses.minus(prevMonthExpenses).div(prevMonthExpenses).mul(100).toNumber()
@@ -97,7 +108,7 @@ export default function MonthlySummaryCard({
         </Box>
 
         <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.25 }}>
-          <Row label="Income" value={formatCurrency(incomeTotal.toString())} color="success.main" />
+          <Row label="Income" value={formatCurrency(monthIncome.toString())} color="success.main" />
           <Row label="Expenses" value={formatCurrency(monthExpenses.toString())} color="error.main" />
           <Box
             sx={{
@@ -115,6 +126,21 @@ export default function MonthlySummaryCard({
       </CardContent>
     </Card>
   );
+}
+
+function sumByMonthAndType(
+  spending: SpendingRow[],
+  month: string,
+  accountType: 'INCOME' | 'EXPENSE',
+): Decimal {
+  // EXPENSE entries are stored as positive (debit) — sum and take abs
+  //   in case any contra entry slipped in negative.
+  // INCOME entries are stored as negative (credit) — abs gives the
+  //   positive magnitude we want to display.
+  // Either way abs() yields the right "headline" figure for this card.
+  return spending
+    .filter(s => s.month === month && s.account_type === accountType)
+    .reduce((sum, s) => sum.plus(new Decimal(s.total).abs()), new Decimal(0));
 }
 
 function Row({ label, value, color, bold }: { label: string; value: string; color: string; bold?: boolean }) {

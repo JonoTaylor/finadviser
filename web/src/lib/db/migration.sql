@@ -124,7 +124,8 @@ VALUES
     ('Cash', 'ASSET', true, 'Cash on hand'),
     ('Uncategorized Income', 'INCOME', true, 'Default income account'),
     ('Uncategorized Expense', 'EXPENSE', true, 'Default expense account'),
-    ('Mortgage Interest', 'EXPENSE', true, 'Mortgage interest paid (S.24 — basic-rate relief only, reported separately on tax-year report)')
+    ('Mortgage Interest', 'EXPENSE', true, 'Mortgage interest paid (S.24 — basic-rate relief only, reported separately on tax-year report)'),
+    ('Property Expenses', 'EXPENSE', true, 'Itemised property/BTL expenses (category provides the breakdown on the tax-year report)')
 ON CONFLICT (name) DO UPDATE SET is_system = true;
 
 -- Default categories
@@ -140,5 +141,28 @@ VALUES
     ('Shopping', true),
     ('Income', true),
     ('Transfer', true),
-    ('Uncategorized', true)
+    ('Uncategorized', true),
+    ('Property expenses', true)
+ON CONFLICT (name, parent_id) DO NOTHING;
+
+-- Itemised UK BTL deductible expense categories (children of 'Property expenses').
+-- Mortgage interest is intentionally NOT seeded here: under S.24 it's not an
+-- ordinary deductible expense and it's already isolated as its own EXPENSE
+-- account ('Mortgage Interest') with is_system = true above.
+INSERT INTO categories (name, parent_id, is_system)
+SELECT child_name, p.id, true
+  FROM (VALUES
+    ('Repairs & maintenance'),
+    ('Letting agent fees'),
+    ('Property insurance'),
+    ('Ground rent / service charges'),
+    ('Council tax (void periods)'),
+    ('Utilities (void periods)'),
+    ('Legal & professional fees'),
+    ('Accountancy'),
+    ('Advertising for tenants'),
+    ('Travel for property management'),
+    ('Other property expenses')
+  ) AS child(child_name)
+  JOIN categories p ON p.name = 'Property expenses' AND p.parent_id IS NULL
 ON CONFLICT (name, parent_id) DO NOTHING;

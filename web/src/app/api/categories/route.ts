@@ -1,12 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { categoryRepo } from '@/lib/repos';
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
+    const parent = request.nextUrl.searchParams.get('parent');
+    if (parent) {
+      const data = await categoryRepo.listChildrenOfNamed(parent);
+      return NextResponse.json(data);
+    }
     const data = await categoryRepo.listAll();
     return NextResponse.json(data);
   } catch (error) {
-    return NextResponse.json({ error: 'Failed to fetch categories' }, { status: 500 });
+    const message = error instanceof Error ? error.message : 'Failed to fetch categories';
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }
 

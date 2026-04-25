@@ -34,6 +34,29 @@ export const categoryRepo = {
     return db.select().from(categories).orderBy(categories.name);
   },
 
+  /**
+   * Return the children of a category by parent name. Used by the property
+   * expense dialog to populate its category dropdown with just the BTL
+   * itemised categories (children of 'Property expenses').
+   */
+  async listChildrenOfNamed(parentName: string) {
+    const db = getDb();
+    const rows = await db.execute(sql`
+      SELECT c.id, c.name, c.parent_id, c.is_system, c.created_at
+        FROM categories c
+        JOIN categories p ON p.id = c.parent_id
+       WHERE p.name = ${parentName} AND p.parent_id IS NULL
+       ORDER BY c.name
+    `);
+    return rows.rows as Array<{
+      id: number;
+      name: string;
+      parent_id: number;
+      is_system: boolean;
+      created_at: string;
+    }>;
+  },
+
   async addRule(data: {
     pattern: string;
     categoryId: number;

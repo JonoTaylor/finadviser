@@ -16,25 +16,53 @@ interface ReportResponse {
   totals: ReportTotals;
 }
 
-const fetcher = (url: string) => fetch(url).then(r => r.json());
+// Throw on non-OK so SWR puts the failure into `error` instead of letting
+// the response body render as a "successful" zero figure.
+const fetcher = async (url: string): Promise<ReportResponse> => {
+  const res = await fetch(url);
+  if (!res.ok) {
+    throw new Error(`Failed to fetch ${url} (HTTP ${res.status})`);
+  }
+  return res.json();
+};
 
 /**
  * Compact card showing mortgage interest paid this and last UK tax year for
  * a property. The figure goes through the same tax-year report endpoint as
  * the full report so totals can never drift between the two views.
+ *
+ * On a failed fetch we render an em-dash, not £0.00 — a zero balance is a
+ * legitimate value (the property may genuinely have had no interest charged
+ * this year) and we don't want to mislead the user.
  */
 export default function MortgageInterestSummary({ propertyId }: { propertyId: number }) {
   const thisYear = currentTaxYear();
   const lastYear = taxYearRange(thisYear.startYear - 1);
 
-  const { data: thisYearReport, isLoading: thisLoading } = useSWR<ReportResponse>(
+  const { data: thisYearReport, error: thisError, isLoading: thisLoading } = useSWR<ReportResponse>(
     `/api/properties/${propertyId}/tax-year-report?year=${thisYear.label}`,
     fetcher,
   );
-  const { data: lastYearReport, isLoading: lastLoading } = useSWR<ReportResponse>(
+  const { data: lastYearReport, error: lastError, isLoading: lastLoading } = useSWR<ReportResponse>(
     `/api/properties/${propertyId}/tax-year-report?year=${lastYear.label}`,
     fetcher,
   );
+
+  const renderAmount = (
+    loading: boolean,
+    err: unknown,
+    value: string | undefined,
+  ) => {
+    if (loading) return <Skeleton width={80} height={28} />;
+    if (err) {
+      return (
+        <Typography variant="h6" color="text.disabled" title="Could not load">
+          —
+        </Typography>
+      );
+    }
+    return <Typography variant="h6">{formatCurrency(value ?? '0')}</Typography>;
+  };
 
   return (
     <Card sx={{ mb: 3 }}>
@@ -46,25 +74,13 @@ export default function MortgageInterestSummary({ propertyId }: { propertyId: nu
             <Typography variant="caption" color="text.secondary">
               This tax year ({thisYear.label})
             </Typography>
-            {thisLoading ? (
-              <Skeleton width={80} height={28} />
-            ) : (
-              <Typography variant="h6">
-                {formatCurrency(thisYearReport?.totals?.mortgageInterest ?? '0')}
-              </Typography>
-            )}
+            {renderAmount(thisLoading, thisError, thisYearReport?.totals?.mortgageInterest)}
           </Box>
           <Box flex={1}>
             <Typography variant="caption" color="text.secondary">
               Last tax year ({lastYear.label})
             </Typography>
-            {lastLoading ? (
-              <Skeleton width={80} height={28} />
-            ) : (
-              <Typography variant="h6">
-                {formatCurrency(lastYearReport?.totals?.mortgageInterest ?? '0')}
-              </Typography>
-            )}
+            {renderAmount(lastLoading, lastError, lastYearReport?.totals?.mortgageInterest)}
           </Box>
         </Stack>
 

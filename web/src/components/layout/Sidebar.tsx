@@ -23,6 +23,7 @@ import ShowChartRoundedIcon from '@mui/icons-material/ShowChartRounded';
 import useMediaQuery from '@mui/material/useMediaQuery';
 import { useTheme, alpha } from '@mui/material/styles';
 import { glassCard } from '@/theme/theme';
+import LogoutButton from '@/components/auth/LogoutButton';
 
 const DRAWER_WIDTH = 260;
 
@@ -40,6 +41,11 @@ export default function Sidebar({ children }: { children: React.ReactNode }) {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
   const [mobileOpen, setMobileOpen] = useState(false);
+
+  // Auth pages render full-bleed without the navigation drawer or header.
+  if (pathname === '/login') {
+    return <>{children}</>;
+  }
 
   const drawerContent = (
     <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%', py: 1.5 }}>
@@ -110,10 +116,11 @@ export default function Sidebar({ children }: { children: React.ReactNode }) {
       </List>
 
       {/* ── Footer ───────────────────────────────────── */}
-      <Box sx={{ px: 2.5, py: 1.5 }}>
+      <Box sx={{ px: 2.5, py: 1.5, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <Typography variant="caption" sx={{ opacity: 0.4 }}>
           v0.1.0
         </Typography>
+        <LogoutButton />
       </Box>
     </Box>
   );

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { rentalReportRepo, propertyRepo } from '@/lib/repos';
 import { taxYearRange, currentTaxYear } from '@/lib/tax/ukTaxYear';
+import { ClientError } from '@/lib/errors';
 
 export async function GET(
   request: NextRequest,
@@ -41,6 +42,9 @@ export async function GET(
       ...report,
     });
   } catch (error) {
+    if (error instanceof ClientError) {
+      return NextResponse.json({ error: error.message }, { status: error.status });
+    }
     const message = error instanceof Error ? error.message : 'Failed to build report';
     return NextResponse.json({ error: message }, { status: 500 });
   }

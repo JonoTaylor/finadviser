@@ -77,8 +77,9 @@ VALUES
     ('Bank', 'ASSET', true, 'Default bank account'),
     ('Cash', 'ASSET', true, 'Cash on hand'),
     ('Uncategorized Income', 'INCOME', true, 'Default income account'),
-    ('Uncategorized Expense', 'EXPENSE', true, 'Default expense account')
-ON CONFLICT (name) DO NOTHING;
+    ('Uncategorized Expense', 'EXPENSE', true, 'Default expense account'),
+    ('Mortgage Interest', 'EXPENSE', true, 'Mortgage interest paid (S.24 — basic-rate relief only, reported separately on tax-year report)')
+ON CONFLICT (name) DO UPDATE SET is_system = true;
 
 -- Default categories
 INSERT INTO categories (name, is_system)

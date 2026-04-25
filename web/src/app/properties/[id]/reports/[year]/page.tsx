@@ -28,6 +28,7 @@ import { formatCurrency } from '@/lib/utils/formatting';
 const fetcher = (url: string) => fetch(url).then(r => r.json());
 
 interface ReportLine {
+  bookEntryId: number;
   journalId: number;
   date: string;
   description: string;
@@ -227,7 +228,7 @@ function ReportSection({
             </TableHead>
             <TableBody>
               {rows.map(r => (
-                <TableRow key={r.journalId}>
+                <TableRow key={r.bookEntryId}>
                   <TableCell>{r.date}</TableCell>
                   <TableCell>{r.description}</TableCell>
                   <TableCell>{r.category ?? '—'}</TableCell>

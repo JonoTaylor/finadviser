@@ -1,14 +1,26 @@
 import { sql } from 'drizzle-orm';
 import Decimal from 'decimal.js';
 import { getDb } from '@/lib/db';
+import { ClientError } from '@/lib/errors';
 
 export interface RentalReportLine {
+  bookEntryId: number;
   journalId: number;
   date: string;
   description: string;
   reference: string | null;
   category: string | null;
   account: string;
+  /**
+   * Signed amount as a string (decimal). Income credits and expense debits
+   * are represented in their natural sign so contra entries (refunds,
+   * reversals) reduce the bucket totals correctly when summed.
+   *
+   * For income lines, posted amounts are credits (negative book entries) —
+   * we negate at read time so the value is positive for normal income and
+   * negative for refunds. For expenses, debits are positive and credits
+   * (refunds) are negative.
+   */
   amount: string;
 }
 
@@ -32,18 +44,20 @@ export interface RentalReportResult {
   totalsForOwner: RentalReportTotals | null;
 }
 
-const MORTGAGE_INTEREST_ACCOUNT = 'Mortgage Interest';
+const MORTGAGE_INTEREST_ACCOUNT_NAME = 'Mortgage Interest';
 
 export const rentalReportRepo = {
   /**
    * Build a tax-year report for one property.
    *
-   * Income:    credits (negative book entries) on INCOME accounts where the
-   *            journal is tagged with this property_id.
-   * Expenses:  debits (positive) on EXPENSE accounts, excluding the
-   *            'Mortgage Interest' account (reported separately because
-   *            interest gets restricted basic-rate relief, not full deduction).
-   * Mortgage interest: same shape, isolated, so accountants can apply S.24.
+   * Income:    INCOME-account credits, sign-flipped so positive = income,
+   *            negative = refund/reversal.
+   * Expenses:  EXPENSE-account debits, excluding the protected system
+   *            'Mortgage Interest' account (S.24 — basic-rate relief only,
+   *            not deducted as an ordinary expense).
+   * Mortgage interest: same shape, isolated. Identified by name AND
+   *            is_system = true so a user-renamed account can't shadow or
+   *            replace it.
    *
    * If ownerId is supplied, totals are also returned at the allocated share
    * (looked up in expense_allocation_rules, falling back to equal split).
@@ -58,13 +72,15 @@ export const rentalReportRepo = {
     const { propertyId, startDate, endDate, ownerId = null } = params;
 
     const rows = await db.execute(sql`
-      SELECT je.id           AS journal_id,
+      SELECT be.id           AS book_entry_id,
+             je.id           AS journal_id,
              je.date         AS date,
              je.description  AS description,
              je.reference    AS reference,
              c.name          AS category,
              a.name          AS account,
              a.account_type  AS account_type,
+             a.is_system     AS account_is_system,
              be.amount::numeric AS amount
       FROM journal_entries je
       JOIN book_entries be ON be.journal_entry_id = je.id
@@ -74,7 +90,7 @@ export const rentalReportRepo = {
         AND je.date >= ${startDate}
         AND je.date <= ${endDate}
         AND a.account_type IN ('INCOME', 'EXPENSE')
-      ORDER BY je.date ASC, je.id ASC
+      ORDER BY je.date ASC, je.id ASC, be.id ASC
     `);
 
     const income: RentalReportLine[] = [];
@@ -82,25 +98,29 @@ export const rentalReportRepo = {
     const mortgageInterest: RentalReportLine[] = [];
 
     for (const r of rows.rows as Array<Record<string, unknown>>) {
-      const amount = new Decimal((r.amount as string | number).toString());
+      const raw = new Decimal((r.amount as string | number).toString());
       const accountType = r.account_type as string;
       const account = r.account as string;
+      const isSystem = Boolean(r.account_is_system);
+
+      // Income posts as a credit (negative); flip so positive represents
+      // income received and negative represents a refund / reversal.
+      const signed = accountType === 'INCOME' ? raw.neg() : raw;
 
       const line: RentalReportLine = {
+        bookEntryId: r.book_entry_id as number,
         journalId: r.journal_id as number,
         date: r.date as string,
         description: r.description as string,
         reference: (r.reference as string | null) ?? null,
         category: (r.category as string | null) ?? null,
         account,
-        // Income posts as a credit (negative); expenses as a debit (positive).
-        // Report as positive magnitudes — sign is implied by the bucket.
-        amount: amount.abs().toFixed(2),
+        amount: signed.toFixed(2),
       };
 
       if (accountType === 'INCOME') {
         income.push(line);
-      } else if (account === MORTGAGE_INTEREST_ACCOUNT) {
+      } else if (account === MORTGAGE_INTEREST_ACCOUNT_NAME && isSystem) {
         mortgageInterest.push(line);
       } else {
         expenses.push(line);
@@ -176,7 +196,7 @@ async function resolveAllocationPct(propertyId: number, ownerId: number): Promis
   const n = (ownerRows.rows[0]?.n as number) ?? 0;
   const belongs = (ownerRows.rows[0]?.belongs as number) ?? 0;
   if (n === 0 || belongs === 0) {
-    throw new Error(`Owner ${ownerId} is not an owner of property ${propertyId}`);
+    throw new ClientError(`Owner ${ownerId} is not an owner of property ${propertyId}`);
   }
   return new Decimal(100).div(n);
 }

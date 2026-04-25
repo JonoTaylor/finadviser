@@ -4,6 +4,8 @@
  * for tax-year boundaries used across rental, MTD-IT, and reporting.
  */
 
+import { ClientError } from '@/lib/errors';
+
 export type TaxYearLabel = `${number}-${number}`;
 
 export interface TaxYearRange {
@@ -17,12 +19,12 @@ const LABEL_RE = /^(\d{4})-(\d{2})$/;
 
 export function parseTaxYearLabel(label: string): number {
   const m = LABEL_RE.exec(label);
-  if (!m) throw new Error(`Invalid tax year label: ${label} (expected YYYY-YY, e.g. 2024-25)`);
+  if (!m) throw new ClientError(`Invalid tax year label: ${label} (expected YYYY-YY, e.g. 2024-25)`);
   const startYear = parseInt(m[1], 10);
   const endShort = parseInt(m[2], 10);
   const expectedEnd = (startYear + 1) % 100;
   if (endShort !== expectedEnd) {
-    throw new Error(`Invalid tax year label: ${label} (end year must be ${String(expectedEnd).padStart(2, '0')})`);
+    throw new ClientError(`Invalid tax year label: ${label} (end year must be ${String(expectedEnd).padStart(2, '0')})`);
   }
   return startYear;
 }
@@ -39,16 +41,40 @@ export function taxYearRange(input: number | string): TaxYearRange {
   };
 }
 
+/**
+ * UK tax-year boundaries are based on the UK calendar date, not UTC. Around
+ * midnight (and during BST) UTC parts can disagree with the local date and
+ * misattribute the tax year, so we read the date parts in Europe/London.
+ */
+function londonDateParts(date: Date): { year: number; month: number; day: number } {
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Europe/London',
+    year: 'numeric',
+    month: 'numeric',
+    day: 'numeric',
+  }).formatToParts(date);
+  const year = Number(parts.find(p => p.type === 'year')?.value);
+  const month = Number(parts.find(p => p.type === 'month')?.value);
+  const day = Number(parts.find(p => p.type === 'day')?.value);
+  if (!Number.isInteger(year) || !Number.isInteger(month) || !Number.isInteger(day)) {
+    throw new Error('Unable to derive Europe/London date parts');
+  }
+  return { year, month, day };
+}
+
 export function currentTaxYear(now: Date = new Date()): TaxYearRange {
-  const year = now.getUTCFullYear();
-  const month = now.getUTCMonth() + 1;
-  const day = now.getUTCDate();
+  const { year, month, day } = londonDateParts(now);
   const beforeApril6 = month < 4 || (month === 4 && day < 6);
   return taxYearRange(beforeApril6 ? year - 1 : year);
 }
 
 export function taxYearForDate(isoDate: string): TaxYearRange {
-  const d = new Date(`${isoDate}T00:00:00Z`);
-  if (Number.isNaN(d.getTime())) throw new Error(`Invalid ISO date: ${isoDate}`);
-  return currentTaxYear(d);
+  // Treat the input as a calendar date (no timezone math).
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(isoDate);
+  if (!m) throw new ClientError(`Invalid ISO date: ${isoDate} (expected YYYY-MM-DD)`);
+  const year = parseInt(m[1], 10);
+  const month = parseInt(m[2], 10);
+  const day = parseInt(m[3], 10);
+  const beforeApril6 = month < 4 || (month === 4 && day < 6);
+  return taxYearRange(beforeApril6 ? year - 1 : year);
 }

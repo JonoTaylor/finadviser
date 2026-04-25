@@ -87,7 +87,7 @@ FROM book_entries be
 JOIN journal_entries je ON je.id = be.journal_entry_id
 JOIN accounts a ON a.id = be.account_id
 LEFT JOIN categories c ON c.id = je.category_id
-WHERE a.account_type = 'EXPENSE'
+WHERE a.account_type IN ('EXPENSE', 'INCOME')
 GROUP BY to_char(je.date::date, 'YYYY-MM'), c.name, a.account_type
 ORDER BY month DESC;
 

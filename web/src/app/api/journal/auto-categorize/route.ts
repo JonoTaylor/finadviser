@@ -29,42 +29,64 @@ export async function POST() {
     }
 
     let aiCategorized = 0;
+    let aiNoMatch = 0;
+    // Tells the UI whether the AI step ran at all and why if not. Without
+    // this the user sees "0 by AI" with no explanation when
+    // AI_GATEWAY_API_KEY is missing or when the gateway call fails — the
+    // previous version silently swallowed both.
+    let aiSkippedReason: string | null = null;
 
-    // AI fallback for unmatched entries
-    // Gateway-backed: AI_GATEWAY_API_KEY replaced ANTHROPIC_API_KEY in PR #17.
-    if (unmatched.length > 0 && process.env.AI_GATEWAY_API_KEY) {
-      const categories = await categoryRepo.listAll();
-      const categoryNames = categories.map((c) => c.name);
+    if (unmatched.length > 0) {
+      // Gateway-backed: AI_GATEWAY_API_KEY replaced ANTHROPIC_API_KEY in PR #17.
+      if (!process.env.AI_GATEWAY_API_KEY) {
+        aiSkippedReason = 'AI categorisation unavailable: AI_GATEWAY_API_KEY not set on the server.';
+      } else {
+        try {
+          const categories = await categoryRepo.listAll();
+          const categoryNames = categories.map((c) => c.name);
+          const descriptions = unmatched.map((e) => e.description);
+          const aiResults = await categorizeBatch(descriptions, categoryNames);
 
-      const descriptions = unmatched.map((e) => e.description);
-      const aiResults = await categorizeBatch(descriptions, categoryNames);
+          const nameToId = new Map(categories.map((c) => [c.name.toLowerCase(), c.id]));
 
-      // Build name->id lookup
-      const nameToId = new Map(categories.map((c) => [c.name.toLowerCase(), c.id]));
+          for (const entry of unmatched) {
+            const suggestedName = aiResults[entry.description];
+            if (!suggestedName) {
+              aiNoMatch++;
+              continue;
+            }
+            const categoryId = nameToId.get(suggestedName.toLowerCase());
+            if (!categoryId) {
+              // AI suggested a name that doesn't match any existing
+              // category — count it as no-match rather than silently
+              // dropping it.
+              aiNoMatch++;
+              continue;
+            }
 
-      for (const entry of unmatched) {
-        const suggestedName = aiResults[entry.description];
-        if (!suggestedName) continue;
+            await journalRepo.updateCategory(entry.id, categoryId);
+            aiCategorized++;
 
-        const categoryId = nameToId.get(suggestedName.toLowerCase());
-        if (!categoryId) continue;
-
-        await journalRepo.updateCategory(entry.id, categoryId);
-        aiCategorized++;
-
-        // Create AI-sourced rule for this mapping
-        const existingRules = rules.filter(
-          (r) =>
-            r.pattern.toLowerCase() === entry.description.toLowerCase() &&
-            r.categoryId === categoryId,
-        );
-        if (existingRules.length === 0) {
-          await categoryRepo.addRule({
-            pattern: entry.description,
-            categoryId,
-            matchType: 'contains',
-            source: 'ai',
-          });
+            // Create AI-sourced rule for this mapping
+            const existingRules = rules.filter(
+              (r) =>
+                r.pattern.toLowerCase() === entry.description.toLowerCase() &&
+                r.categoryId === categoryId,
+            );
+            if (existingRules.length === 0) {
+              await categoryRepo.addRule({
+                pattern: entry.description,
+                categoryId,
+                matchType: 'contains',
+                source: 'ai',
+              });
+            }
+          }
+        } catch (aiError) {
+          console.error('Auto-categorize AI step failed:', aiError);
+          aiSkippedReason = aiError instanceof Error
+            ? `AI categorisation failed: ${aiError.message}`
+            : 'AI categorisation failed.';
         }
       }
     }
@@ -74,10 +96,13 @@ export async function POST() {
       total: uncategorized.length,
       ruleBased: ruleMatched.length,
       aiCategorized,
+      aiNoMatch,
+      aiSkippedReason,
       remaining,
     });
   } catch (error) {
     console.error('Auto-categorize error:', error);
-    return NextResponse.json({ error: 'Failed to auto-categorize' }, { status: 500 });
+    const message = error instanceof Error ? error.message : 'Failed to auto-categorize';
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }

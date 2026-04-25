@@ -22,7 +22,7 @@ export default function TransactionsPage() {
   const [pageSize, setPageSize] = useState(25);
   const [editEntry, setEditEntry] = useState<{ id: number; categoryId: number | null; description: string } | null>(null);
   const [autoCategorizing, setAutoCategorizing] = useState(false);
-  const [snackbar, setSnackbar] = useState<{ open: boolean; message: string; severity: 'success' | 'info' | 'error' }>({
+  const [snackbar, setSnackbar] = useState<{ open: boolean; message: string; severity: 'success' | 'info' | 'warning' | 'error' }>({
     open: false,
     message: '',
     severity: 'success',
@@ -70,11 +70,22 @@ export default function TransactionsPage() {
         if (result.ruleBased > 0) parts.push(`${result.ruleBased} by rules`);
         if (result.aiCategorized > 0) parts.push(`${result.aiCategorized} by AI`);
         if (result.remaining > 0) parts.push(`${result.remaining} remaining`);
-        setSnackbar({
-          open: true,
-          message: `Categorized ${result.ruleBased + result.aiCategorized} of ${result.total} transactions: ${parts.join(', ')}`,
-          severity: 'success',
-        });
+
+        const summary = `Categorized ${result.ruleBased + result.aiCategorized} of ${result.total} transactions: ${parts.join(', ')}`;
+
+        // Surface why AI didn't help — used to be invisible. Common
+        // reasons: AI_GATEWAY_API_KEY not set in prod, or the gateway
+        // call failed at runtime. The route now returns aiSkippedReason
+        // explaining either case.
+        if (result.aiSkippedReason) {
+          setSnackbar({
+            open: true,
+            message: `${summary}. ${result.aiSkippedReason}`,
+            severity: 'warning',
+          });
+        } else {
+          setSnackbar({ open: true, message: summary, severity: 'success' });
+        }
         mutate();
       }
     } catch {

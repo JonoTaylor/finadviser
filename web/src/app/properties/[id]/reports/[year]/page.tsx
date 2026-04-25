@@ -27,7 +27,16 @@ import { formatCurrency } from '@/lib/utils/formatting';
 
 const fetcher = (url: string) => fetch(url).then(r => r.json());
 
-interface ReportLine {
+interface IncomeLine {
+  tenancyId: number;
+  tenantName: string;
+  dueDate: string;
+  periodStart: string;
+  periodEnd: string;
+  amount: string;
+}
+
+interface ExpenseLine {
   journalId: number;
   date: string;
   description: string;
@@ -49,26 +58,19 @@ interface ReportResponse {
   taxYear: { label: string; startDate: string; endDate: string };
   allocationPct: string;
   ownerId: number | null;
-  income: ReportLine[];
-  expenses: ReportLine[];
-  mortgageInterest: ReportLine[];
+  income: IncomeLine[];
+  incomeSource: 'tenancy_schedule';
+  expenses: ExpenseLine[];
+  mortgageInterest: ExpenseLine[];
   totals: ReportTotals;
   totalsForOwner: ReportTotals | null;
 }
 
 interface OwnerRow { owner_id: number; owner_name: string }
 
-function downloadCsv(filename: string, rows: ReportLine[]) {
-  const header = ['Date', 'Description', 'Category', 'Account', 'Reference', 'Amount'];
-  const escape = (s: string) => `"${s.replace(/"/g, '""')}"`;
-  const body = rows.map(r => [
-    r.date,
-    escape(r.description),
-    escape(r.category ?? ''),
-    escape(r.account),
-    escape(r.reference ?? ''),
-    r.amount,
-  ].join(','));
+function downloadCsv(filename: string, header: string[], rows: string[][]) {
+  const escape = (s: string) => `"${(s ?? '').replace(/"/g, '""')}"`;
+  const body = rows.map(r => r.map(escape).join(','));
   const csv = [header.join(','), ...body].join('\n');
   const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
   const url = URL.createObjectURL(blob);
@@ -92,6 +94,10 @@ export default function TaxYearReportPage({
   const { data: property } = useSWR<{ ownership: OwnerRow[] }>(`/api/properties/${id}`, fetcher);
 
   const owners = useMemo(() => property?.ownership ?? [], [property]);
+  const factor = useMemo(() => {
+    if (!ownerId || !report) return 1;
+    return Number(report.allocationPct) / 100;
+  }, [ownerId, report]);
   const totals = (ownerId && report?.totalsForOwner) ? report.totalsForOwner : report?.totals;
 
   if (isLoading) return <Skeleton variant="rounded" height={400} />;
@@ -101,6 +107,9 @@ export default function TaxYearReportPage({
   if ('error' in report) {
     return <Alert severity="error">{(report as unknown as { error: string }).error}</Alert>;
   }
+
+  const fileBase = `${report.property.name.replace(/\W+/g, '-')}-${report.taxYear.label}`;
+  const ownerSuffix = ownerId ? `-share-${report.allocationPct}pct` : '';
 
   return (
     <Box>
@@ -125,7 +134,7 @@ export default function TaxYearReportPage({
             <ToggleButton value="full">Full property (100%)</ToggleButton>
             {owners.map(o => (
               <ToggleButton key={o.owner_id} value={o.owner_id}>
-                {o.owner_name} ({ownerShareLabel(report, o.owner_id)})
+                {o.owner_name}
               </ToggleButton>
             ))}
           </ToggleButtonGroup>
@@ -151,34 +160,99 @@ export default function TaxYearReportPage({
         </CardContent>
       </Card>
 
-      <ReportSection
-        title="Gross income (paid by tenant, before any agent fees)"
-        rows={report.income}
-        emptyHint="No rental income recorded for this property in this tax year. Once rental income capture is wired up (Sprint 1 PR 1.3), entries will appear here."
-        onDownload={() => downloadCsv(`income-${report.property.name}-${report.taxYear.label}.csv`, report.income)}
-      />
+      <Card sx={{ mb: 3 }}>
+        <CardContent>
+          <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 1 }}>
+            <Box>
+              <Typography variant="h6">Gross income (computed from tenancy contracts)</Typography>
+              <Typography variant="caption" color="text.secondary">
+                Source: tenancy contracts on this property. To change figures, edit the tenancy.
+              </Typography>
+            </Box>
+            <Button
+              size="small"
+              startIcon={<DownloadIcon />}
+              disabled={report.income.length === 0}
+              onClick={() => downloadCsv(
+                `income-${fileBase}${ownerSuffix}.csv`,
+                ['Due date', 'Period start', 'Period end', 'Tenant', 'Amount'],
+                report.income.map(i => [
+                  i.dueDate,
+                  i.periodStart,
+                  i.periodEnd,
+                  i.tenantName,
+                  applyShare(i.amount, factor),
+                ]),
+              )}
+            >
+              CSV
+            </Button>
+          </Stack>
+          {report.income.length === 0 ? (
+            <Typography variant="body2" color="text.secondary">
+              No tenancy active in this tax year. Add a tenancy with start/end dates and rent on the property page.
+            </Typography>
+          ) : (
+            <Table size="small">
+              <TableHead>
+                <TableRow>
+                  <TableCell>Due date</TableCell>
+                  <TableCell>Period</TableCell>
+                  <TableCell>Tenant</TableCell>
+                  <TableCell align="right">Amount</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {report.income.map((i, idx) => (
+                  <TableRow key={`${i.tenancyId}-${idx}`}>
+                    <TableCell>{i.dueDate}</TableCell>
+                    <TableCell>{i.periodStart} → {i.periodEnd}</TableCell>
+                    <TableCell>{i.tenantName}</TableCell>
+                    <TableCell align="right">{formatCurrency(applyShare(i.amount, factor))}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
+        </CardContent>
+      </Card>
 
-      <ReportSection
+      <ExpenseSection
         title="Itemised deductible expenses"
         rows={report.expenses}
-        emptyHint="No expenses recorded for this property in this tax year."
-        onDownload={() => downloadCsv(`expenses-${report.property.name}-${report.taxYear.label}.csv`, report.expenses)}
+        emptyHint="No expenses recorded for this property in this tax year. (Expense capture UI lands in Sprint 2.)"
+        factor={factor}
+        onDownload={() => downloadCsv(
+          `expenses-${fileBase}${ownerSuffix}.csv`,
+          ['Date', 'Description', 'Category', 'Account', 'Reference', 'Amount'],
+          report.expenses.map(r => [
+            r.date, r.description, r.category ?? '', r.account, r.reference ?? '',
+            applyShare(r.amount, factor),
+          ]),
+        )}
       />
 
-      <ReportSection
+      <ExpenseSection
         title="Mortgage interest (separate — restricted to basic-rate relief under S.24)"
         rows={report.mortgageInterest}
-        emptyHint="No mortgage interest recorded for this property in this tax year."
-        onDownload={() => downloadCsv(`mortgage-interest-${report.property.name}-${report.taxYear.label}.csv`, report.mortgageInterest)}
+        emptyHint="No mortgage interest recorded for this property in this tax year. (Mortgage payments need to be tagged with the property — Sprint 2.)"
+        factor={factor}
+        onDownload={() => downloadCsv(
+          `mortgage-interest-${fileBase}${ownerSuffix}.csv`,
+          ['Date', 'Description', 'Category', 'Account', 'Reference', 'Amount'],
+          report.mortgageInterest.map(r => [
+            r.date, r.description, r.category ?? '', r.account, r.reference ?? '',
+            applyShare(r.amount, factor),
+          ]),
+        )}
       />
     </Box>
   );
 }
 
-function ownerShareLabel(report: ReportResponse, ownerId: number): string {
-  // We only know the active owner's allocation pct from the response.
-  // For inactive toggles we show a neutral label; user can click to load.
-  return ownerId === report.ownerId ? `${report.allocationPct}%` : 'share';
+function applyShare(amount: string, factor: number): string {
+  if (factor === 1) return amount;
+  return (Number(amount) * factor).toFixed(2);
 }
 
 function SummaryItem({ label, value, bold = false }: { label: string; value: string; bold?: boolean }) {
@@ -192,15 +266,17 @@ function SummaryItem({ label, value, bold = false }: { label: string; value: str
   );
 }
 
-function ReportSection({
+function ExpenseSection({
   title,
   rows,
   emptyHint,
+  factor,
   onDownload,
 }: {
   title: string;
-  rows: ReportLine[];
+  rows: ExpenseLine[];
   emptyHint: string;
+  factor: number;
   onDownload: () => void;
 }) {
   return (
@@ -232,7 +308,7 @@ function ReportSection({
                   <TableCell>{r.description}</TableCell>
                   <TableCell>{r.category ?? '—'}</TableCell>
                   <TableCell>{r.account}</TableCell>
-                  <TableCell align="right">{formatCurrency(r.amount)}</TableCell>
+                  <TableCell align="right">{formatCurrency(applyShare(r.amount, factor))}</TableCell>
                 </TableRow>
               ))}
             </TableBody>

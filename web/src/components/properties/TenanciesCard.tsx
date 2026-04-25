@@ -15,14 +15,15 @@ import {
   TableBody,
   IconButton,
   Chip,
+  Box,
 } from '@mui/material';
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/Delete';
 import AddIcon from '@mui/icons-material/Add';
-import PaymentsIcon from '@mui/icons-material/Payments';
 import { formatCurrency } from '@/lib/utils/formatting';
+import { currentTaxYear, taxYearRange } from '@/lib/tax/ukTaxYear';
+import { expandTenancies, totalScheduled, type RentFrequency } from '@/lib/properties/rent-schedule';
 import TenancyDialog, { TenancyFormValues } from './TenancyDialog';
-import RecordRentDialog from './RecordRentDialog';
 
 interface Tenancy {
   id: number;
@@ -59,7 +60,6 @@ export default function TenanciesCard({ propertyId }: { propertyId: number }) {
   );
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<Tenancy | null>(null);
-  const [rentDialogOpen, setRentDialogOpen] = useState(false);
 
   const handleSave = async (data: TenancyFormValues) => {
     const payload = {
@@ -90,103 +90,121 @@ export default function TenanciesCard({ propertyId }: { propertyId: number }) {
   };
 
   const handleDelete = async (id: number) => {
-    if (!confirm('Delete this tenancy? Recorded rental income journal entries are kept.')) return;
+    if (!confirm('Delete this tenancy?')) return;
     await fetch(`/api/tenancies/${id}`, { method: 'DELETE' });
     mutate();
   };
 
   const list = tenancies ?? [];
 
+  // Compute "expected gross this tax year" preview from contracts.
+  const thisTaxYear = currentTaxYear();
+  const lastTaxYear = taxYearRange(thisTaxYear.startYear - 1);
+  const scheduleForRange = (range: { startDate: string; endDate: string }) =>
+    expandTenancies(
+      list.map(t => ({
+        id: t.id,
+        tenantName: t.tenantName,
+        startDate: t.startDate,
+        endDate: t.endDate,
+        rentAmount: t.rentAmount,
+        rentFrequency: t.rentFrequency as RentFrequency,
+      })),
+      range.startDate,
+      range.endDate,
+    );
+
+  const thisYearTotal = totalScheduled(scheduleForRange(thisTaxYear));
+  const lastYearTotal = totalScheduled(scheduleForRange(lastTaxYear));
+
   return (
     <Card sx={{ mb: 3 }}>
       <CardContent>
         <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 1 }}>
           <Typography variant="h6">Tenancies</Typography>
-          <Stack direction="row" spacing={1}>
-            <Button
-              startIcon={<PaymentsIcon />}
-              size="small"
-              variant="contained"
-              disabled={list.length === 0}
-              onClick={() => setRentDialogOpen(true)}
-            >
-              Record rent
-            </Button>
-            <Button
-              startIcon={<AddIcon />}
-              size="small"
-              variant="outlined"
-              onClick={() => {
-                setEditing(null);
-                setDialogOpen(true);
-              }}
-            >
-              Add tenancy
-            </Button>
-          </Stack>
+          <Button
+            startIcon={<AddIcon />}
+            size="small"
+            variant="outlined"
+            onClick={() => {
+              setEditing(null);
+              setDialogOpen(true);
+            }}
+          >
+            Add tenancy
+          </Button>
         </Stack>
 
         {list.length === 0 ? (
           <Typography variant="body2" color="text.secondary">
-            No tenancies recorded. Add one to enable rental income capture and tax-year reporting.
+            No tenancies recorded. Add one — the rent amount and date range you enter become the source of truth for the tax-year report.
           </Typography>
         ) : (
-          <Table size="small">
-            <TableHead>
-              <TableRow>
-                <TableCell>Tenant(s)</TableCell>
-                <TableCell>Start</TableCell>
-                <TableCell>End</TableCell>
-                <TableCell align="right">Rent</TableCell>
-                <TableCell>Status</TableCell>
-                <TableCell align="right" />
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {list.map(t => (
-                <TableRow key={t.id}>
-                  <TableCell>{t.tenantName}</TableCell>
-                  <TableCell>{t.startDate}</TableCell>
-                  <TableCell>{t.endDate ?? '—'}</TableCell>
-                  <TableCell align="right">
-                    {formatCurrency(t.rentAmount)} {FREQ_LABEL[t.rentFrequency] ?? ''}
-                  </TableCell>
-                  <TableCell>
-                    {isCurrent(t) ? (
-                      <Chip size="small" color="success" label="Current" />
-                    ) : t.endDate && t.endDate < new Date().toISOString().slice(0, 10) ? (
-                      <Chip size="small" label="Past" />
-                    ) : (
-                      <Chip size="small" label="Future" />
-                    )}
-                  </TableCell>
-                  <TableCell align="right">
-                    <IconButton
-                      size="small"
-                      onClick={() => {
-                        setEditing(t);
-                        setDialogOpen(true);
-                      }}
-                    >
-                      <EditIcon fontSize="small" />
-                    </IconButton>
-                    <IconButton size="small" onClick={() => handleDelete(t.id)}>
-                      <DeleteIcon fontSize="small" />
-                    </IconButton>
-                  </TableCell>
+          <>
+            <Stack direction="row" spacing={4} sx={{ mb: 2 }}>
+              <Box>
+                <Typography variant="caption" color="text.secondary">
+                  Gross this tax year ({thisTaxYear.label})
+                </Typography>
+                <Typography variant="h6">{formatCurrency(thisYearTotal)}</Typography>
+              </Box>
+              <Box>
+                <Typography variant="caption" color="text.secondary">
+                  Gross last tax year ({lastTaxYear.label})
+                </Typography>
+                <Typography variant="h6">{formatCurrency(lastYearTotal)}</Typography>
+              </Box>
+            </Stack>
+            <Table size="small">
+              <TableHead>
+                <TableRow>
+                  <TableCell>Tenant(s)</TableCell>
+                  <TableCell>Start</TableCell>
+                  <TableCell>End</TableCell>
+                  <TableCell align="right">Rent</TableCell>
+                  <TableCell>Status</TableCell>
+                  <TableCell align="right" />
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+              </TableHead>
+              <TableBody>
+                {list.map(t => (
+                  <TableRow key={t.id}>
+                    <TableCell>{t.tenantName}</TableCell>
+                    <TableCell>{t.startDate}</TableCell>
+                    <TableCell>{t.endDate ?? '—'}</TableCell>
+                    <TableCell align="right">
+                      {formatCurrency(t.rentAmount)} {FREQ_LABEL[t.rentFrequency] ?? ''}
+                    </TableCell>
+                    <TableCell>
+                      {isCurrent(t) ? (
+                        <Chip size="small" color="success" label="Current" />
+                      ) : t.endDate && t.endDate < new Date().toISOString().slice(0, 10) ? (
+                        <Chip size="small" label="Past" />
+                      ) : (
+                        <Chip size="small" label="Future" />
+                      )}
+                    </TableCell>
+                    <TableCell align="right">
+                      <IconButton
+                        size="small"
+                        onClick={() => {
+                          setEditing(t);
+                          setDialogOpen(true);
+                        }}
+                      >
+                        <EditIcon fontSize="small" />
+                      </IconButton>
+                      <IconButton size="small" onClick={() => handleDelete(t.id)}>
+                        <DeleteIcon fontSize="small" />
+                      </IconButton>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </>
         )}
       </CardContent>
-
-      <RecordRentDialog
-        open={rentDialogOpen}
-        propertyId={propertyId}
-        onClose={() => setRentDialogOpen(false)}
-        onSaved={() => mutate()}
-      />
 
       <TenancyDialog
         open={dialogOpen}

@@ -1,14 +1,25 @@
 import { sql } from 'drizzle-orm';
 import Decimal from 'decimal.js';
 import { getDb } from '@/lib/db';
+import { tenancyRepo } from './tenancy.repo';
+import { expandTenancies, totalScheduled, type RentFrequency, type ScheduleLine } from '@/lib/properties/rent-schedule';
 
-export interface RentalReportLine {
+export interface RentalExpenseLine {
   journalId: number;
   date: string;
   description: string;
   reference: string | null;
   category: string | null;
   account: string;
+  amount: string;
+}
+
+export interface RentalIncomeLine {
+  tenancyId: number;
+  tenantName: string;
+  dueDate: string;
+  periodStart: string;
+  periodEnd: string;
   amount: string;
 }
 
@@ -25,28 +36,37 @@ export interface RentalReportResult {
   endDate: string;
   ownerId: number | null;
   allocationPct: string;
-  income: RentalReportLine[];
-  expenses: RentalReportLine[];
-  mortgageInterest: RentalReportLine[];
+  income: RentalIncomeLine[];
+  incomeSource: 'tenancy_schedule';
+  expenses: RentalExpenseLine[];
+  mortgageInterest: RentalExpenseLine[];
   totals: RentalReportTotals;
   totalsForOwner: RentalReportTotals | null;
 }
 
 const MORTGAGE_INTEREST_ACCOUNT = 'Mortgage Interest';
 
+interface TenancyRow {
+  id: number;
+  tenantName: string;
+  startDate: string;
+  endDate: string | null;
+  rentAmount: string;
+  rentFrequency: string;
+}
+
 export const rentalReportRepo = {
   /**
    * Build a tax-year report for one property.
    *
-   * Income:    credits (negative book entries) on INCOME accounts where the
-   *            journal is tagged with this property_id.
-   * Expenses:  debits (positive) on EXPENSE accounts, excluding the
-   *            'Mortgage Interest' account (reported separately because
-   *            interest gets restricted basic-rate relief, not full deduction).
+   * Income:    derived from tenancy contracts (start/end/rent/frequency) —
+   *            the user told us the contractual rent and assured it was
+   *            consistently received, so we don't require per-receipt entry.
+   * Expenses:  debits on EXPENSE accounts (excluding 'Mortgage Interest')
+   *            on journals tagged with this property_id.
    * Mortgage interest: same shape, isolated, so accountants can apply S.24.
    *
-   * If ownerId is supplied, totals are also returned at the allocated share
-   * (looked up in expense_allocation_rules, falling back to equal split).
+   * Optional ownerId applies the expense_allocation_rules share.
    */
   async getTaxYearReport(params: {
     propertyId: number;
@@ -54,65 +74,27 @@ export const rentalReportRepo = {
     endDate: string;
     ownerId?: number | null;
   }): Promise<RentalReportResult> {
-    const db = getDb();
     const { propertyId, startDate, endDate, ownerId = null } = params;
 
-    const rows = await db.execute(sql`
-      SELECT je.id           AS journal_id,
-             je.date         AS date,
-             je.description  AS description,
-             je.reference    AS reference,
-             c.name          AS category,
-             a.name          AS account,
-             a.account_type  AS account_type,
-             be.amount::numeric AS amount
-      FROM journal_entries je
-      JOIN book_entries be ON be.journal_entry_id = je.id
-      JOIN accounts a      ON a.id = be.account_id
-      LEFT JOIN categories c ON c.id = je.category_id
-      WHERE je.property_id = ${propertyId}
-        AND je.date >= ${startDate}
-        AND je.date <= ${endDate}
-        AND a.account_type IN ('INCOME', 'EXPENSE')
-      ORDER BY je.date ASC, je.id ASC
-    `);
+    const tenancies = (await tenancyRepo.listByProperty(propertyId)) as TenancyRow[];
+    const schedule = expandTenancies(
+      tenancies.map(t => ({
+        id: t.id,
+        tenantName: t.tenantName,
+        startDate: t.startDate,
+        endDate: t.endDate,
+        rentAmount: t.rentAmount,
+        rentFrequency: t.rentFrequency as RentFrequency,
+      })),
+      startDate,
+      endDate,
+    );
 
-    const income: RentalReportLine[] = [];
-    const expenses: RentalReportLine[] = [];
-    const mortgageInterest: RentalReportLine[] = [];
+    const { expenses, mortgageInterest } = await fetchPropertyExpenses(propertyId, startDate, endDate);
 
-    for (const r of rows.rows as Array<Record<string, unknown>>) {
-      const amount = new Decimal((r.amount as string | number).toString());
-      const accountType = r.account_type as string;
-      const account = r.account as string;
-
-      const line: RentalReportLine = {
-        journalId: r.journal_id as number,
-        date: r.date as string,
-        description: r.description as string,
-        reference: (r.reference as string | null) ?? null,
-        category: (r.category as string | null) ?? null,
-        account,
-        // Income posts as a credit (negative); expenses as a debit (positive).
-        // Report as positive magnitudes — sign is implied by the bucket.
-        amount: amount.abs().toFixed(2),
-      };
-
-      if (accountType === 'INCOME') {
-        income.push(line);
-      } else if (account === MORTGAGE_INTEREST_ACCOUNT) {
-        mortgageInterest.push(line);
-      } else {
-        expenses.push(line);
-      }
-    }
-
-    const sumLines = (lines: RentalReportLine[]) =>
-      lines.reduce((acc, l) => acc.plus(l.amount), new Decimal(0));
-
-    const grossIncome = sumLines(income);
-    const totalExpenses = sumLines(expenses);
-    const mortgageInterestTotal = sumLines(mortgageInterest);
+    const grossIncome = new Decimal(totalScheduled(schedule));
+    const totalExpenses = expenses.reduce((acc, l) => acc.plus(l.amount), new Decimal(0));
+    const mortgageInterestTotal = mortgageInterest.reduce((acc, l) => acc.plus(l.amount), new Decimal(0));
 
     const totals: RentalReportTotals = {
       grossIncome: grossIncome.toFixed(2),
@@ -141,7 +123,8 @@ export const rentalReportRepo = {
       endDate,
       ownerId,
       allocationPct: allocationPct.toFixed(4),
-      income,
+      income: schedule as RentalIncomeLine[],
+      incomeSource: 'tenancy_schedule',
       expenses,
       mortgageInterest,
       totals,
@@ -149,6 +132,56 @@ export const rentalReportRepo = {
     };
   },
 };
+
+async function fetchPropertyExpenses(
+  propertyId: number,
+  startDate: string,
+  endDate: string,
+): Promise<{ expenses: RentalExpenseLine[]; mortgageInterest: RentalExpenseLine[] }> {
+  const db = getDb();
+  const rows = await db.execute(sql`
+    SELECT je.id           AS journal_id,
+           je.date         AS date,
+           je.description  AS description,
+           je.reference    AS reference,
+           c.name          AS category,
+           a.name          AS account,
+           be.amount::numeric AS amount
+    FROM journal_entries je
+    JOIN book_entries be ON be.journal_entry_id = je.id
+    JOIN accounts a      ON a.id = be.account_id
+    LEFT JOIN categories c ON c.id = je.category_id
+    WHERE je.property_id = ${propertyId}
+      AND je.date >= ${startDate}
+      AND je.date <= ${endDate}
+      AND a.account_type = 'EXPENSE'
+    ORDER BY je.date ASC, je.id ASC
+  `);
+
+  const expenses: RentalExpenseLine[] = [];
+  const mortgageInterest: RentalExpenseLine[] = [];
+
+  for (const r of rows.rows as Array<Record<string, unknown>>) {
+    const amount = new Decimal((r.amount as string | number).toString()).abs().toFixed(2);
+    const account = r.account as string;
+    const line: RentalExpenseLine = {
+      journalId: r.journal_id as number,
+      date: r.date as string,
+      description: r.description as string,
+      reference: (r.reference as string | null) ?? null,
+      category: (r.category as string | null) ?? null,
+      account,
+      amount,
+    };
+    if (account === MORTGAGE_INTEREST_ACCOUNT) {
+      mortgageInterest.push(line);
+    } else {
+      expenses.push(line);
+    }
+  }
+
+  return { expenses, mortgageInterest };
+}
 
 async function resolveAllocationPct(propertyId: number, ownerId: number): Promise<Decimal> {
   const db = getDb();
@@ -180,3 +213,6 @@ async function resolveAllocationPct(propertyId: number, ownerId: number): Promis
   }
   return new Decimal(100).div(n);
 }
+
+// Re-export for callers that want a typed handle on the lines.
+export type { ScheduleLine };

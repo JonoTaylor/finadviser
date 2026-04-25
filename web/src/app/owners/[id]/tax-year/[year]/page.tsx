@@ -23,6 +23,7 @@ import DownloadIcon from '@mui/icons-material/Download';
 import Link from 'next/link';
 import useSWR from 'swr';
 import { formatCurrency } from '@/lib/utils/formatting';
+import MtdQuarterlyCard from '@/components/owners/MtdQuarterlyCard';
 
 interface Totals {
   grossIncome: string;
@@ -115,6 +116,8 @@ export default function OwnerTaxYearReportPage({
           </Typography>
         </CardContent>
       </Card>
+
+      <MtdQuarterlyCard ownerId={id} year={report.taxYear.label} />
 
       <Card sx={{ mb: 3 }}>
         <CardContent>

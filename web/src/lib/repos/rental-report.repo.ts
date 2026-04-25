@@ -276,7 +276,7 @@ async function fetchPropertyJournalLines(
   return { otherIncome, expenses, mortgageInterest };
 }
 
-async function resolveAllocationPct(propertyId: number, ownerId: number): Promise<Decimal> {
+export async function resolveAllocationPct(propertyId: number, ownerId: number): Promise<Decimal> {
   const db = getDb();
 
   const ruleRows = await db.execute(sql`

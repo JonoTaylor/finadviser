@@ -1,12 +1,10 @@
 'use client';
 
 import { useState } from 'react';
-import { useRouter } from 'next/navigation';
 import { Button } from '@mui/material';
 import LogoutIcon from '@mui/icons-material/Logout';
 
 export default function LogoutButton({ size = 'small' }: { size?: 'small' | 'medium' | 'large' }) {
-  const router = useRouter();
   const [submitting, setSubmitting] = useState(false);
 
   const handle = async () => {

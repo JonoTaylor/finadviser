@@ -13,10 +13,26 @@ import {
   Stack,
 } from '@mui/material';
 
+/**
+ * Only accept same-origin relative paths in ?next. Reject:
+ *   - protocol/host URLs (https://attacker.tld) — open redirect
+ *   - protocol-relative (//attacker.tld) — open redirect via host coercion
+ *   - paths starting with '\' which some browsers normalise to '/'
+ *   - anything not starting with a single '/'
+ * Fall back to '/' for anything dodgy.
+ */
+function sanitiseNext(value: string | null): string {
+  if (!value) return '/';
+  if (!value.startsWith('/')) return '/';
+  if (value.startsWith('//') || value.startsWith('/\\')) return '/';
+  if (value.includes('\\')) return '/';
+  return value;
+}
+
 export default function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const next = searchParams.get('next') || '/';
+  const next = sanitiseNext(searchParams.get('next'));
 
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);

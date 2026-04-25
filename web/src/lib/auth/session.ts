@@ -42,27 +42,37 @@ export function isAuthEnabled(cfg: AuthConfig = readAuthConfig()): boolean {
 
 const enc = new TextEncoder();
 
-async function hmacSign(secret: string, data: string): Promise<string> {
-  const key = await crypto.subtle.importKey(
+// Module-scope cache so we don't re-importKey on every request. Keyed by
+// secret string to handle any (uncommon) case where SESSION_SECRET changes
+// without a process restart.
+let cachedKey: { secret: string; promise: Promise<CryptoKey> } | null = null;
+
+function getHmacKey(secret: string): Promise<CryptoKey> {
+  if (cachedKey && cachedKey.secret === secret) return cachedKey.promise;
+  const promise = crypto.subtle.importKey(
     'raw',
     enc.encode(secret),
     { name: 'HMAC', hash: 'SHA-256' },
     false,
     ['sign'],
   );
+  cachedKey = { secret, promise };
+  return promise;
+}
+
+async function hmacSign(secret: string, data: string): Promise<string> {
+  const key = await getHmacKey(secret);
   const sig = await crypto.subtle.sign('HMAC', key, enc.encode(data));
   return bufToHex(sig);
 }
 
 async function hmacVerify(secret: string, data: string, hex: string): Promise<boolean> {
   // Recompute and compare in constant time to prevent timing attacks.
+  // Loop over the maximum length and fold the length difference into
+  // diff so unequal-length inputs still fail without an early return
+  // that leaks length via timing.
   const expected = await hmacSign(secret, data);
-  if (expected.length !== hex.length) return false;
-  let diff = 0;
-  for (let i = 0; i < expected.length; i += 1) {
-    diff |= expected.charCodeAt(i) ^ hex.charCodeAt(i);
-  }
-  return diff === 0;
+  return constantTimeEqual(expected, hex);
 }
 
 function bufToHex(buf: ArrayBuffer): string {
@@ -98,14 +108,23 @@ export async function verifySessionCookie(
 }
 
 /**
- * Constant-time string equality for password comparison. Prevents timing
- * attacks even though there's only one user — costs nothing to do right.
+ * Constant-time string equality. Always loops over the longer length and
+ * folds the length difference into the diff accumulator, so runtime no
+ * longer depends on whether inputs match in length (a length mismatch
+ * still yields a non-zero diff and returns false).
+ *
+ * JS strings are 16-bit UTF-16 codeunits — for ASCII passwords / hex
+ * digests this is fine. We're comparing fixed-shape values (HMAC hex,
+ * password) so we don't need surrogate-pair-aware equality.
  */
 export function constantTimeEqual(a: string, b: string): boolean {
-  if (a.length !== b.length) return false;
-  let diff = 0;
-  for (let i = 0; i < a.length; i += 1) {
-    diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  const len = Math.max(a.length, b.length);
+  let diff = a.length ^ b.length;
+  for (let i = 0; i < len; i += 1) {
+    // charCodeAt out of range returns NaN; bitwise coerces NaN to 0.
+    const ai = i < a.length ? a.charCodeAt(i) : 0;
+    const bi = i < b.length ? b.charCodeAt(i) : 0;
+    diff |= ai ^ bi;
   }
   return diff === 0;
 }

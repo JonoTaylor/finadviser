@@ -30,21 +30,25 @@ const PUBLIC_PATHS = new Set([
 export async function middleware(req: NextRequest) {
   const { pathname, search } = req.nextUrl;
 
-  if (PUBLIC_PATHS.has(pathname)) {
-    return NextResponse.next();
-  }
-
   const cfg = readAuthConfig();
+
   if (!isAuthEnabled(cfg)) {
     // Local dev with no creds set — let everything through.
     return NextResponse.next();
   }
   if (!cfg.password || !cfg.secret) {
-    // Production missing env vars: deny everything until they're configured.
+    // Production missing env vars: fail closed before bypassing PUBLIC_PATHS.
+    // Otherwise a misconfigured deploy would still serve /login (looking
+    // legit) but every login attempt would 503, which is more confusing
+    // than seeing the config error directly.
     return new NextResponse(
       JSON.stringify({ error: 'Auth not configured: set APP_PASSWORD and SESSION_SECRET in Vercel env.' }),
       { status: 503, headers: { 'Content-Type': 'application/json' } },
     );
+  }
+
+  if (PUBLIC_PATHS.has(pathname)) {
+    return NextResponse.next();
   }
 
   const cookie = req.cookies.get(SESSION_COOKIE_NAME)?.value;

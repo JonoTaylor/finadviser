@@ -15,13 +15,14 @@ CREATE INDEX IF NOT EXISTS idx_book_entries_account_id
 CREATE INDEX IF NOT EXISTS idx_book_entries_journal_entry_id
     ON book_entries(journal_entry_id);
 
--- Backfill property_id on historical mortgage payment journals so they show
--- up in the tax-year report. Identifies them by the mortgage liability
--- account they touch (the only account that ties a journal to a specific
--- property for these legacy entries). Self-limiting and idempotent: only
--- candidates are journals that already join to a mortgage AND still have a
--- NULL property_id, so subsequent deploys are essentially no-ops once
--- backfilled.
+-- Backfill property_id on any historical journal that touches a mortgage
+-- liability account — this covers monthly payments, the initial loan
+-- set-up entry, and any future balance adjustments, all of which belong
+-- to the same property. The mortgage liability account is the only thing
+-- that ties these legacy journals to a specific property. Self-limiting
+-- and idempotent: candidates are journals that already join to a mortgage
+-- AND still have NULL property_id, so subsequent deploys do effectively
+-- nothing once backfilled.
 UPDATE journal_entries je
    SET property_id = m.property_id
   FROM mortgages m

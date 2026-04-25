@@ -49,6 +49,72 @@ export const journalRepo = {
     return je.id;
   },
 
+  /**
+   * Bulk-insert N journals + their book entries in two SQL statements
+   * total, regardless of N. Replaces N×3 round-trips (one journal + two
+   * book entries each) with two multi-row INSERTs — the difference
+   * between a 1,000-row import taking 5 minutes and 5 seconds.
+   *
+   * Each item must have entries that sum to zero (validated client-side
+   * before we hit the DB; the trigger enforces it server-side too).
+   * Returns journal IDs in input order.
+   */
+  async createEntriesBulk(
+    items: Array<{
+      journal: {
+        date: string;
+        description: string;
+        reference?: string | null;
+        categoryId?: number | null;
+        importBatchId?: number | null;
+        propertyId?: number | null;
+      };
+      entries: Array<{ accountId: number; amount: string }>;
+    }>,
+  ): Promise<number[]> {
+    if (items.length === 0) return [];
+    const db = getDb();
+
+    for (const [i, item] of items.entries()) {
+      if (!item.entries || item.entries.length < 2) {
+        throw new Error(`Item ${i}: a journal entry requires at least 2 book entries`);
+      }
+      const total = item.entries.reduce((sum, e) => sum + parseFloat(e.amount), 0);
+      if (Math.round(total * 100) !== 0) {
+        throw new Error(`Item ${i}: book entries must sum to zero, got ${total}`);
+      }
+    }
+
+    const journalRows = items.map(item => ({
+      date: item.journal.date,
+      description: item.journal.description,
+      reference: item.journal.reference ?? null,
+      categoryId: item.journal.categoryId ?? null,
+      importBatchId: item.journal.importBatchId ?? null,
+      propertyId: item.journal.propertyId ?? null,
+    }));
+    const journals = await db
+      .insert(journalEntries)
+      .values(journalRows)
+      .returning({ id: journalEntries.id });
+
+    const bookRows: Array<{ journalEntryId: number; accountId: number; amount: string }> = [];
+    items.forEach((item, i) => {
+      for (const entry of item.entries) {
+        bookRows.push({
+          journalEntryId: journals[i].id,
+          accountId: entry.accountId,
+          amount: entry.amount,
+        });
+      }
+    });
+    if (bookRows.length > 0) {
+      await db.insert(bookEntries).values(bookRows);
+    }
+
+    return journals.map(j => j.id);
+  },
+
   async getEntry(journalId: number) {
     const db = getDb();
     const [row] = await db

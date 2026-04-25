@@ -30,6 +30,7 @@ export async function executeImport(
   csvContent: string,
   bankConfigName: string,
   accountName: string,
+  onProgress?: (processed: number, total: number) => void,
 ): Promise<ImportResult> {
   const config = getBankConfig(bankConfigName);
   if (!config) throw new Error(`Unknown bank config: ${bankConfigName}`);
@@ -40,12 +41,13 @@ export async function executeImport(
   transactions = await checkDuplicates(transactions, account.id);
   transactions = await categorizeTransactions(transactions);
 
-  return importTransactions(transactions, account.id, bankConfigName, 'upload.csv');
+  return importTransactions(transactions, account.id, bankConfigName, 'upload.csv', onProgress);
 }
 
 export async function executeImportFromParsed(
   parsedTransactions: RawTransaction[],
   accountName: string,
+  onProgress?: (processed: number, total: number) => void,
 ): Promise<ImportResult> {
   const account = await accountRepo.getOrCreate(accountName, 'ASSET');
 
@@ -53,14 +55,22 @@ export async function executeImportFromParsed(
   let transactions = await checkDuplicates(parsedTransactions, account.id);
   transactions = await categorizeTransactions(transactions);
 
-  return importTransactions(transactions, account.id, 'pdf', 'upload.pdf');
+  return importTransactions(transactions, account.id, 'pdf', 'upload.pdf', onProgress);
 }
+
+// Chunk size for bulk inserts. Postgres' parameter limit (~65k) is way
+// above this; the limit here is more about memory + giving the user
+// progress updates that aren't too lumpy. 100 rows per chunk → 4 SQL
+// inserts per chunk (1 journal-bulk + 1 book-entry-bulk + 1 fingerprint-
+// bulk + the per-chunk progress event) ≈ ~600ms per 100 rows on Neon.
+const CHUNK_SIZE = 100;
 
 async function importTransactions(
   transactions: RawTransaction[],
   accountId: number,
   bankConfig: string,
   filename: string,
+  onProgress?: (processed: number, total: number) => void,
 ): Promise<ImportResult> {
   // Create import batch
   const batch = await importBatchRepo.create({
@@ -70,22 +80,57 @@ async function importTransactions(
     rowCount: transactions.length,
   });
 
+  // Pre-fetch the two system accounts ONCE. Previously these were
+  // looked up via accountRepo.getOrCreate inside every row, which was
+  // ~2 round-trips per row and the dominant cause of the 300s timeout
+  // we saw on a real import.
+  const [incomeAccount, expenseAccount] = await Promise.all([
+    accountRepo.getOrCreate('Uncategorized Income', 'INCOME'),
+    accountRepo.getOrCreate('Uncategorized Expense', 'EXPENSE'),
+  ]);
+
+  const nonDup = transactions.filter(t => !t.isDuplicate);
+  const total = nonDup.length;
+  const duplicates = transactions.length - nonDup.length;
   let imported = 0;
-  let duplicates = 0;
 
-  for (const txn of transactions) {
-    if (txn.isDuplicate) {
-      duplicates++;
-      continue;
-    }
+  // Emit a 0/total event at the start so the UI shows a determinate
+  // bar from the moment saving begins, not after the first chunk.
+  onProgress?.(0, total);
 
-    const journalId = await createJournalEntry(txn, accountId, batch.id);
-    await fingerprintRepo.create({
-      fingerprint: txn.fingerprint,
-      accountId,
-      journalEntryId: journalId,
+  for (let i = 0; i < nonDup.length; i += CHUNK_SIZE) {
+    const chunk = nonDup.slice(i, i + CHUNK_SIZE);
+
+    const items = chunk.map(txn => {
+      const amount = new Decimal(txn.amount);
+      const otherAccountId = amount.gte(0) ? incomeAccount.id : expenseAccount.id;
+      return {
+        journal: {
+          date: txn.date,
+          description: txn.description,
+          reference: txn.reference,
+          categoryId: txn.suggestedCategoryId,
+          importBatchId: batch.id,
+        },
+        entries: [
+          { accountId, amount: amount.toString() },
+          { accountId: otherAccountId, amount: amount.neg().toString() },
+        ],
+      };
     });
-    imported++;
+
+    const journalIds = await journalRepo.createEntriesBulk(items);
+
+    await fingerprintRepo.createMany(
+      chunk.map((txn, j) => ({
+        fingerprint: txn.fingerprint,
+        accountId,
+        journalEntryId: journalIds[j],
+      })),
+    );
+
+    imported += chunk.length;
+    onProgress?.(imported, total);
   }
 
   await importBatchRepo.updateCounts(batch.id, imported, duplicates);
@@ -96,39 +141,4 @@ async function importTransactions(
     duplicateCount: duplicates,
     totalCount: transactions.length,
   };
-}
-
-async function createJournalEntry(
-  txn: RawTransaction,
-  accountId: number,
-  batchId: number,
-): Promise<number> {
-  const amount = new Decimal(txn.amount);
-
-  let entries: Array<{ accountId: number; amount: string }>;
-
-  if (amount.gte(0)) {
-    const incomeAccount = await accountRepo.getOrCreate('Uncategorized Income', 'INCOME');
-    entries = [
-      { accountId, amount: amount.toString() },
-      { accountId: incomeAccount.id, amount: amount.neg().toString() },
-    ];
-  } else {
-    const expenseAccount = await accountRepo.getOrCreate('Uncategorized Expense', 'EXPENSE');
-    entries = [
-      { accountId, amount: amount.toString() },
-      { accountId: expenseAccount.id, amount: amount.neg().toString() },
-    ];
-  }
-
-  return journalRepo.createEntry(
-    {
-      date: txn.date,
-      description: txn.description,
-      reference: txn.reference,
-      categoryId: txn.suggestedCategoryId,
-      importBatchId: batchId,
-    },
-    entries,
-  );
 }

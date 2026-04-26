@@ -1,4 +1,4 @@
-import { eq, sql } from 'drizzle-orm';
+import { eq, sql, and, inArray } from 'drizzle-orm';
 import { getDb, schema } from '@/lib/db';
 
 const {
@@ -177,6 +177,113 @@ export const propertyRepo = {
       .values({ mortgageId, rate, effectiveDate })
       .returning();
     return row;
+  },
+
+  /**
+   * Atomic update guarded by mortgageId — both the WHERE filter and the
+   * RETURNING clause require the rate row to belong to the given
+   * mortgage. Closes the IDOR vector where /api/mortgages/X/rates/Y
+   * could otherwise update a rate row whose mortgage_id is something
+   * other than X.
+   */
+  async updateMortgageRate(
+    rateId: number,
+    mortgageId: number,
+    patch: { rate?: string; effectiveDate?: string },
+  ) {
+    const db = getDb();
+    const updates: Record<string, unknown> = {};
+    if (patch.rate !== undefined) updates.rate = patch.rate;
+    if (patch.effectiveDate !== undefined) updates.effectiveDate = patch.effectiveDate;
+    if (Object.keys(updates).length === 0) {
+      const [row] = await db
+        .select()
+        .from(mortgageRateHistory)
+        .where(and(
+          eq(mortgageRateHistory.id, rateId),
+          eq(mortgageRateHistory.mortgageId, mortgageId),
+        ));
+      return row ?? null;
+    }
+    const [row] = await db
+      .update(mortgageRateHistory)
+      .set(updates)
+      .where(and(
+        eq(mortgageRateHistory.id, rateId),
+        eq(mortgageRateHistory.mortgageId, mortgageId),
+      ))
+      .returning();
+    return row ?? null;
+  },
+
+  /**
+   * Atomic delete guarded by mortgageId — same IDOR rationale as
+   * updateMortgageRate. Returns true iff a row was deleted, so the
+   * route can return 404 vs 200 correctly.
+   */
+  async deleteMortgageRate(rateId: number, mortgageId: number): Promise<boolean> {
+    const db = getDb();
+    const deleted = await db
+      .delete(mortgageRateHistory)
+      .where(and(
+        eq(mortgageRateHistory.id, rateId),
+        eq(mortgageRateHistory.mortgageId, mortgageId),
+      ))
+      .returning({ id: mortgageRateHistory.id });
+    return deleted.length > 0;
+  },
+
+  /**
+   * Bulk fetch of rate histories for every mortgage on a property.
+   * Replaces the N+1 pattern (one getMortgageRates per mortgage in a
+   * loop) with a single round-trip; the result is keyed by mortgage id
+   * so callers can pluck per-mortgage rate arrays cheaply.
+   */
+  async getRatesForMortgages(mortgageIds: number[]): Promise<Map<number, Array<{ rate: string; effectiveDate: string }>>> {
+    const map = new Map<number, Array<{ rate: string; effectiveDate: string }>>();
+    if (mortgageIds.length === 0) return map;
+    const db = getDb();
+    const rows = await db
+      .select({
+        mortgageId: mortgageRateHistory.mortgageId,
+        rate: mortgageRateHistory.rate,
+        effectiveDate: mortgageRateHistory.effectiveDate,
+      })
+      .from(mortgageRateHistory)
+      .where(inArray(mortgageRateHistory.mortgageId, mortgageIds))
+      .orderBy(sql`effective_date ASC`);
+    for (const r of rows) {
+      const list = map.get(r.mortgageId) ?? [];
+      list.push({ rate: r.rate, effectiveDate: r.effectiveDate });
+      map.set(r.mortgageId, list);
+    }
+    // Pre-populate ids that had no rates so callers can iterate over
+    // the input set without a second .has() check.
+    for (const id of mortgageIds) {
+      if (!map.has(id)) map.set(id, []);
+    }
+    return map;
+  },
+
+  async getMortgage(mortgageId: number) {
+    const db = getDb();
+    const [row] = await db.select().from(mortgages).where(eq(mortgages.id, mortgageId));
+    return row ?? null;
+  },
+
+  async updateMortgage(mortgageId: number, patch: { interestOnly?: boolean }) {
+    const db = getDb();
+    const updates: Record<string, unknown> = {};
+    if (patch.interestOnly !== undefined) updates.interestOnly = patch.interestOnly;
+    if (Object.keys(updates).length === 0) {
+      return this.getMortgage(mortgageId);
+    }
+    const [row] = await db
+      .update(mortgages)
+      .set(updates)
+      .where(eq(mortgages.id, mortgageId))
+      .returning();
+    return row ?? null;
   },
 
   async getMortgageBalance(mortgageId: number): Promise<string> {

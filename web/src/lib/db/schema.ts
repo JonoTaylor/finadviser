@@ -144,6 +144,7 @@ export const mortgages = pgTable('mortgages', {
   originalAmount: numeric('original_amount', { precision: 14, scale: 2 }).notNull(),
   startDate: text('start_date').notNull(),
   termMonths: integer('term_months').notNull(),
+  interestOnly: boolean('interest_only').notNull().default(false),
   liabilityAccountId: integer('liability_account_id').notNull().references(() => accounts.id),
   createdAt: timestamp('created_at').notNull().defaultNow(),
 });

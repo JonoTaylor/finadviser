@@ -30,6 +30,10 @@ export async function GET(
     const taxYearEndExclusive = nextDay(taxYear.endDate);
 
     const mortgages = await propertyRepo.getMortgages(propertyId);
+    // One DB round-trip for ALL rate histories instead of one per
+    // mortgage. Returns a Map keyed by mortgageId with [] for any
+    // mortgage that has no rates yet.
+    const ratesByMortgage = await propertyRepo.getRatesForMortgages(mortgages.map(m => m.id));
 
     let totalInterest = new Decimal(0);
     let totalDays = 0;
@@ -46,13 +50,13 @@ export async function GET(
     }> = [];
 
     for (const m of mortgages) {
-      const rates = await propertyRepo.getMortgageRates(m.id);
+      const rates = ratesByMortgage.get(m.id) ?? [];
       const rangeFrom = taxYear.startDate > m.startDate ? taxYear.startDate : m.startDate;
       const calc = computeInterestForRange({
         principal: m.originalAmount,
         rangeFrom,
         rangeTo: taxYearEndExclusive,
-        rateHistory: rates.map(r => ({ rate: r.rate, effectiveDate: r.effectiveDate })),
+        rateHistory: rates,
       });
       totalInterest = totalInterest.plus(calc.totalInterest);
       totalDays += calc.totalDays;

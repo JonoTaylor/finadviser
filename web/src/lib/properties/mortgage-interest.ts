@@ -25,6 +25,11 @@ export interface InterestPeriod {
   from: string;
   to: string;
   rate: string;
+  /** Principal in effect for this period. Today this is the same for
+   *  every period (interest-only fixed-principal); the field is kept
+   *  per-period so amortisation can vary it later without changing
+   *  monthlyBreakdown's signature. */
+  principal: string;
   days: number;
   interest: string;
 }
@@ -161,6 +166,7 @@ export function computeInterestForRange(params: {
       from: daysToIso(rateStartDays),
       to: daysToIso(rateEndDays),
       rate: sorted[i].rate,
+      principal: principalD.toFixed(2),
       days,
       interest: periodInterest.toFixed(2),
     });
@@ -212,10 +218,15 @@ export function monthlyBreakdown(calc: InterestCalculation): Array<{
       const overlapTo = Math.min(pTo, segEnd);
       if (overlapTo <= overlapFrom) continue;
       const days = overlapTo - overlapFrom;
-      // Recompute on the slice — avoids accumulating rounding from each period.
-      const slice = new Decimal(p.interest)
-        .div(p.days)
-        .mul(days);
+      // Recompute the slice from principal × rate × days / 365 directly,
+      // not from p.interest / p.days × days. The latter would introduce
+      // cumulative rounding error since p.interest is already rounded
+      // to 2dp for display.
+      const slice = new Decimal(p.principal)
+        .mul(p.rate)
+        .div(100)
+        .mul(days)
+        .div(DAYS_PER_YEAR);
       monthInterest = monthInterest.plus(slice);
     }
 

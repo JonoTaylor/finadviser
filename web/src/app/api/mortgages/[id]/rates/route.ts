@@ -32,7 +32,9 @@ export async function POST(
     const mortgage = await propertyRepo.getMortgage(mortgageId);
     if (!mortgage) return NextResponse.json({ error: 'Mortgage not found' }, { status: 404 });
 
-    const body = await request.json().catch(() => ({} as { rate?: unknown; effectiveDate?: unknown }));
+    // `request.json()` returns null for a body of literal `null`; coerce
+    // to `{}` before destructuring so we don't TypeError below.
+    const body = (await request.json().catch(() => ({}))) || {};
     if (typeof body.rate !== 'string' || !RATE_RE.test(body.rate)) {
       return NextResponse.json({ error: 'rate must be a numeric string (percent, e.g. "5.25")' }, { status: 400 });
     }

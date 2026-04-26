@@ -9,11 +9,15 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string; rateId: string }> },
 ) {
   try {
-    const { rateId } = await params;
-    const id = parseInt(rateId, 10);
-    if (Number.isNaN(id)) return NextResponse.json({ error: 'Invalid rate id' }, { status: 400 });
+    const { id: mortgageIdParam, rateId: rateIdParam } = await params;
+    const mortgageId = parseInt(mortgageIdParam, 10);
+    const rateIdNum = parseInt(rateIdParam, 10);
+    if (Number.isNaN(mortgageId)) return NextResponse.json({ error: 'Invalid mortgage id' }, { status: 400 });
+    if (Number.isNaN(rateIdNum)) return NextResponse.json({ error: 'Invalid rate id' }, { status: 400 });
 
-    const body = await request.json().catch(() => ({} as { rate?: unknown; effectiveDate?: unknown }));
+    // `request.json()` returns null for a body of literal `null`; coerce
+    // to `{}` before destructuring so we don't TypeError on `.rate`.
+    const body = (await request.json().catch(() => ({}))) || {};
     const patch: { rate?: string; effectiveDate?: string } = {};
     if (body.rate !== undefined) {
       if (typeof body.rate !== 'string' || !RATE_RE.test(body.rate)) {
@@ -27,8 +31,13 @@ export async function PATCH(
       }
       patch.effectiveDate = body.effectiveDate;
     }
-    const updated = await propertyRepo.updateMortgageRate(id, patch);
-    if (!updated) return NextResponse.json({ error: 'Rate not found' }, { status: 404 });
+    // Guarded update: the WHERE in updateMortgageRate also filters by
+    // mortgageId so a rateId belonging to a different mortgage returns
+    // null (404) instead of silently mutating someone else's row.
+    const updated = await propertyRepo.updateMortgageRate(rateIdNum, mortgageId, patch);
+    if (!updated) {
+      return NextResponse.json({ error: 'Rate not found for this mortgage' }, { status: 404 });
+    }
     return NextResponse.json(updated);
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Failed to update rate';
@@ -41,10 +50,15 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string; rateId: string }> },
 ) {
   try {
-    const { rateId } = await params;
-    const id = parseInt(rateId, 10);
-    if (Number.isNaN(id)) return NextResponse.json({ error: 'Invalid rate id' }, { status: 400 });
-    await propertyRepo.deleteMortgageRate(id);
+    const { id: mortgageIdParam, rateId: rateIdParam } = await params;
+    const mortgageId = parseInt(mortgageIdParam, 10);
+    const rateIdNum = parseInt(rateIdParam, 10);
+    if (Number.isNaN(mortgageId)) return NextResponse.json({ error: 'Invalid mortgage id' }, { status: 400 });
+    if (Number.isNaN(rateIdNum)) return NextResponse.json({ error: 'Invalid rate id' }, { status: 400 });
+    const deleted = await propertyRepo.deleteMortgageRate(rateIdNum, mortgageId);
+    if (!deleted) {
+      return NextResponse.json({ error: 'Rate not found for this mortgage' }, { status: 404 });
+    }
     return NextResponse.json({ ok: true });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Failed to delete rate';

@@ -27,7 +27,9 @@ export async function PATCH(
     const mortgageId = parseInt(id, 10);
     if (Number.isNaN(mortgageId)) return NextResponse.json({ error: 'Invalid mortgage id' }, { status: 400 });
 
-    const body = await request.json().catch(() => ({} as { interestOnly?: unknown }));
+    // `request.json()` returns null for a body of literal `null`; coerce
+    // to `{}` before destructuring so we don't TypeError below.
+    const body = (await request.json().catch(() => ({}))) || {};
     const patch: { interestOnly?: boolean } = {};
     if (body.interestOnly !== undefined) {
       if (typeof body.interestOnly !== 'boolean') {

@@ -1,4 +1,5 @@
 import { sql } from 'drizzle-orm';
+import Decimal from 'decimal.js';
 import { getDb } from '@/lib/db';
 import { parseCSV } from './csv-parser';
 import { getBankConfig } from '@/lib/config/bank-configs';
@@ -134,11 +135,28 @@ export async function backfillMetadata(
 
   // Fingerprint key built from the same triple the legacy fingerprint
   // helper hashed: date, normalised description, amount.
+  //
+  // Amount is normalised through Decimal.toString() on both sides so
+  // a Postgres `numeric::text` cast (which preserves trailing zeros —
+  // "10.00") matches a CSV-derived value that doesn't ("10").
+  //
+  // Multiple journals can share the same triple (e.g. two identical
+  // coffee purchases on the same day) — the map value is therefore a
+  // list of candidate journal ids. Each backfilled CSV row claims one
+  // entry off the list via shift() so duplicates aren't all collapsed
+  // onto the same journal.
   type Triple = string;
-  const triple = (date: string, description: string, amount: string): Triple =>
-    `${date}|${description.toLowerCase().trim()}|${amount}`;
+  const triple = (date: string, description: string, amount: string): Triple => {
+    let normalisedAmount: string;
+    try {
+      normalisedAmount = new Decimal(amount).toString();
+    } catch {
+      normalisedAmount = amount;
+    }
+    return `${date}|${description.toLowerCase().trim()}|${normalisedAmount}`;
+  };
 
-  const tripleMatches = new Map<Triple, number>();
+  const tripleMatches = new Map<Triple, number[]>();
   if (unresolved.length > 0) {
     const dates = Array.from(new Set(unresolved.map(t => t.date)));
     const candidateRows = await db.execute(sql`
@@ -150,7 +168,9 @@ export async function backfillMetadata(
     `);
     for (const r of candidateRows.rows) {
       const key = triple(r.date as string, r.description as string, r.amount as string);
-      tripleMatches.set(key, r.id as number);
+      const list = tripleMatches.get(key) ?? [];
+      list.push(r.id as number);
+      tripleMatches.set(key, list);
     }
   }
 
@@ -165,8 +185,11 @@ export async function backfillMetadata(
       if (found !== undefined) journalId = found;
     }
     if (journalId === null) {
-      const found = tripleMatches.get(triple(txn.date, txn.description, txn.amount));
-      if (found !== undefined) journalId = found;
+      // shift() so each journal id is claimed by at most one CSV row —
+      // protects the duplicate-transaction-on-same-day case from
+      // silently collapsing onto a single journal.
+      const list = tripleMatches.get(triple(txn.date, txn.description, txn.amount));
+      if (list && list.length > 0) journalId = list.shift()!;
     }
 
     if (journalId === null) {

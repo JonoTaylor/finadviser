@@ -1,7 +1,7 @@
 import Papa from 'papaparse';
 import Decimal from 'decimal.js';
 import { parse, format } from 'date-fns';
-import { BankConfig } from '@/lib/config/bank-configs';
+import type { BankConfig, ColumnMapping } from '@/lib/config/bank-configs';
 import { transactionFingerprint } from '@/lib/utils/hashing';
 import type { RawTransaction, RawTransactionMetadata } from '@/lib/types';
 
@@ -9,7 +9,7 @@ import type { RawTransaction, RawTransactionMetadata } from '@/lib/types';
 // RawTransactionMetadata. Anything in the row NOT listed here flows
 // through to `metadata.raw` so future banks can ride the existing
 // importer without a code change.
-const PROMOTED_COLUMNS = new Set([
+const PROMOTED_COLUMNS = new Set<keyof ColumnMapping>([
   'date', 'description', 'amount', 'debit', 'credit', 'reference',
   'externalId', 'time', 'type', 'merchantName', 'merchantEmoji',
   'bankCategory', 'currency', 'localAmount', 'localCurrency',
@@ -37,6 +37,22 @@ function parseDateFormat(dateStr: string, dateFormat: string): string {
   return format(parsed, 'yyyy-MM-dd');
 }
 
+/**
+ * Compute, once per CSV import, the set of header strings that map to
+ * a "promoted" field. buildMetadata uses this to decide which columns
+ * are passed through to `metadata.raw`. Hoisting this out of the
+ * per-row hot path avoids rebuilding the same Set N times.
+ */
+function buildPromotedHeaderSet(cols: ColumnMapping): Set<string> {
+  const headers = new Set<string>();
+  for (const key of Object.keys(cols) as Array<keyof ColumnMapping>) {
+    if (!PROMOTED_COLUMNS.has(key)) continue;
+    const header = cols[key];
+    if (typeof header === 'string') headers.add(header);
+  }
+  return headers;
+}
+
 export async function parseCSV(
   csvContent: string,
   config: BankConfig,
@@ -50,10 +66,12 @@ export async function parseCSV(
   // Skip configured rows
   const rows = result.data.slice(config.skipRows) as Record<string, string>[];
   const transactions: RawTransaction[] = [];
+  // Precompute once per file — promoted headers don't change per row.
+  const promotedHeaders = buildPromotedHeaderSet(config.columns);
 
   for (const row of rows) {
     try {
-      const txn = await parseRow(row, config);
+      const txn = await parseRow(row, config, promotedHeaders);
       if (txn) transactions.push(txn);
     } catch {
       continue;
@@ -66,6 +84,7 @@ export async function parseCSV(
 async function parseRow(
   row: Record<string, string>,
   config: BankConfig,
+  promotedHeaders: Set<string>,
 ): Promise<RawTransaction | null> {
   const cols = config.columns;
 
@@ -112,15 +131,21 @@ async function parseRow(
 
   // Generate fingerprint. Prefer the bank's own external id when
   // present (Monzo's tx_… is globally unique) — that gives true dedup
-  // regardless of date / amount jitter from edits / refunds.
+  // regardless of date / amount jitter from edits / refunds. We hash
+  // the externalId through the same fingerprint helper so the column's
+  // values are always the same shape (64-char hex) regardless of which
+  // path produced them — keeps any downstream length / format
+  // assumptions on transaction_fingerprints.fingerprint valid.
   const externalId = cols.externalId ? cleanedString(row[cols.externalId]) : null;
-  const fp = externalId ?? (await transactionFingerprint(parsedDate, amount.toString(), description));
+  const fp = externalId
+    ? await transactionFingerprint(parsedDate, amount.toString(), externalId)
+    : await transactionFingerprint(parsedDate, amount.toString(), description);
 
   // Build metadata if the bank config exposes any of the optional
   // columns. We promote known fields onto typed properties; everything
   // else from the row spills into `raw` so future fields are
   // recoverable without a schema change.
-  const metadata = buildMetadata(row, cols);
+  const metadata = buildMetadata(row, cols, promotedHeaders);
 
   return {
     date: parsedDate,
@@ -136,7 +161,8 @@ async function parseRow(
 
 function buildMetadata(
   row: Record<string, string>,
-  cols: import('@/lib/config/bank-configs').ColumnMapping,
+  cols: ColumnMapping,
+  promotedHeaders: Set<string>,
 ): RawTransactionMetadata | null {
   const md: RawTransactionMetadata = {};
   if (cols.externalId)     md.externalId     = cleanedString(row[cols.externalId]);
@@ -154,13 +180,8 @@ function buildMetadata(
 
   // Stash any column we didn't explicitly promote. Lets future banks
   // / future fields ride the existing importer until we're ready to
-  // promote them to typed properties.
-  const promotedHeaders = new Set<string>();
-  for (const key of Object.keys(cols)) {
-    if (!PROMOTED_COLUMNS.has(key)) continue;
-    const header = cols[key as keyof typeof cols];
-    if (typeof header === 'string') promotedHeaders.add(header);
-  }
+  // promote them to typed properties. The `promotedHeaders` set is
+  // computed once per import in parseCSV — don't rebuild here.
   const raw: Record<string, unknown> = {};
   for (const [header, value] of Object.entries(row)) {
     if (!promotedHeaders.has(header)) {

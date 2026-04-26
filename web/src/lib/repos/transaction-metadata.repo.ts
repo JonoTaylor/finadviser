@@ -17,11 +17,18 @@ export const transactionMetadataRepo = {
    * Bulk insert — used by the import pipeline so we don't issue one
    * INSERT per imported row (which would re-introduce the 300s
    * timeout we fixed by chunking journal/book entries).
+   *
+   * Idempotent on `journalEntryId`: a partial-failure retry, or a
+   * concurrent re-run, won't break on the UNIQUE constraint and
+   * won't silently lose metadata for rows that already had it.
    */
   async createMany(items: TransactionMetadataInput[]): Promise<void> {
     if (items.length === 0) return;
     const db = getDb();
-    await db.insert(transactionMetadata).values(items);
+    await db
+      .insert(transactionMetadata)
+      .values(items)
+      .onConflictDoNothing({ target: transactionMetadata.journalEntryId });
   },
 
   async getByJournalId(journalEntryId: number): Promise<TransactionMetadata | null> {

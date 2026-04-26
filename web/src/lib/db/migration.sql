@@ -52,6 +52,16 @@ CREATE TABLE IF NOT EXISTS tenancies (
 CREATE INDEX IF NOT EXISTS idx_tenancies_property_dates
     ON tenancies(property_id, start_date, end_date);
 
+-- Generic key/value table for app-level settings the user can change at
+-- runtime (currently: AI model selection on the Settings page). Keep
+-- columns simple — TEXT values are enough for the small number of
+-- settings we actually need.
+CREATE TABLE IF NOT EXISTS app_settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL,
+    updated_at TIMESTAMP NOT NULL DEFAULT now()
+);
+
 -- Views
 CREATE OR REPLACE VIEW v_account_balances AS
 SELECT

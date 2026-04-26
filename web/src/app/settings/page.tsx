@@ -8,6 +8,7 @@ import CurrencyPoundRoundedIcon from '@mui/icons-material/CurrencyPoundRounded';
 import StorageRoundedIcon from '@mui/icons-material/StorageRounded';
 import InfoRoundedIcon from '@mui/icons-material/InfoRounded';
 import RulesManager from '@/components/settings/RulesManager';
+import AiModelSelector from '@/components/settings/AiModelSelector';
 
 export default function SettingsPage() {
   const handleExportCSV = () => { window.open('/api/export/csv', '_blank'); };
@@ -26,16 +27,15 @@ export default function SettingsPage() {
         <SettingsCard
           icon={<KeyRoundedIcon />}
           iconColor="#60A5FA"
-          title="API Configuration"
+          title="AI Model"
         >
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-            <Typography variant="body2" color="text.secondary">AI Gateway:</Typography>
-            <Chip label="Configured server-side" size="small" color="info" variant="outlined" />
+          <AiModelSelector />
+          <Box sx={{ mt: 2 }}>
+            <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+              Auth: <code>AI_GATEWAY_API_KEY</code> in Vercel env. The selection above persists to
+              the database; <code>MODEL_ID</code> env is the fallback if no row exists.
+            </Typography>
           </Box>
-          <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
-            Set AI_GATEWAY_API_KEY in your Vercel environment variables. Override the model with MODEL_ID
-            (e.g. <code>anthropic/claude-sonnet-4-5</code>, <code>openai/gpt-5</code>).
-          </Typography>
         </SettingsCard>
 
         <SettingsCard

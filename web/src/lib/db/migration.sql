@@ -62,6 +62,34 @@ CREATE TABLE IF NOT EXISTS app_settings (
     updated_at TIMESTAMP NOT NULL DEFAULT now()
 );
 
+-- Document storage. Holds the original binary (BYTEA) plus metadata for
+-- AI-extracted source documents (currently tenancy agreements; the enum
+-- leaves room for more). property_id / tenancy_id are nullable + ON
+-- DELETE SET NULL so the document survives when its links go away.
+DO $$ BEGIN
+    CREATE TYPE document_kind AS ENUM ('tenancy_agreement', 'other');
+EXCEPTION
+    WHEN duplicate_object THEN null;
+END $$;
+
+CREATE TABLE IF NOT EXISTS documents (
+    id SERIAL PRIMARY KEY,
+    kind document_kind NOT NULL,
+    filename TEXT NOT NULL,
+    mime_type TEXT NOT NULL,
+    size_bytes INTEGER NOT NULL,
+    sha256 TEXT NOT NULL UNIQUE,
+    content BYTEA NOT NULL,
+    property_id INTEGER REFERENCES properties(id) ON DELETE SET NULL,
+    tenancy_id INTEGER REFERENCES tenancies(id) ON DELETE SET NULL,
+    notes TEXT,
+    uploaded_at TIMESTAMP NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_documents_property ON documents(property_id) WHERE property_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_documents_tenancy ON documents(tenancy_id) WHERE tenancy_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_documents_kind ON documents(kind);
+
 -- Views
 CREATE OR REPLACE VIEW v_account_balances AS
 SELECT

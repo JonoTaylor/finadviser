@@ -22,12 +22,14 @@ import {
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/Delete';
 import AddIcon from '@mui/icons-material/Add';
+import UploadFileRoundedIcon from '@mui/icons-material/UploadFileRounded';
 import { formatCurrency } from '@/lib/utils/formatting';
 import { londonTodayIso } from '@/lib/dates/today';
 import { currentTaxYear, taxYearRange } from '@/lib/tax/ukTaxYear';
 import { expandTenancies, totalScheduled } from '@/lib/properties/rent-schedule';
 import type { RentFrequency } from '@/lib/repos/tenancy.repo';
 import TenancyDialog, { TenancyFormValues } from './TenancyDialog';
+import TenancyImportDialog from './TenancyImportDialog';
 
 interface Tenancy {
   id: number;
@@ -63,6 +65,7 @@ export default function TenanciesCard({ propertyId }: { propertyId: number }) {
     fetcher,
   );
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
   const [editing, setEditing] = useState<Tenancy | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
@@ -138,17 +141,27 @@ export default function TenanciesCard({ propertyId }: { propertyId: number }) {
       <CardContent>
         <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 1 }}>
           <Typography variant="h6">Tenancies</Typography>
-          <Button
-            startIcon={<AddIcon />}
-            size="small"
-            variant="outlined"
-            onClick={() => {
-              setEditing(null);
-              setDialogOpen(true);
-            }}
-          >
-            Add tenancy
-          </Button>
+          <Stack direction="row" spacing={1}>
+            <Button
+              startIcon={<UploadFileRoundedIcon />}
+              size="small"
+              variant="outlined"
+              onClick={() => setImportOpen(true)}
+            >
+              Import from PDF
+            </Button>
+            <Button
+              startIcon={<AddIcon />}
+              size="small"
+              variant="outlined"
+              onClick={() => {
+                setEditing(null);
+                setDialogOpen(true);
+              }}
+            >
+              Add tenancy
+            </Button>
+          </Stack>
         </Stack>
 
         {list.length === 0 ? (
@@ -221,6 +234,13 @@ export default function TenanciesCard({ propertyId }: { propertyId: number }) {
           </>
         )}
       </CardContent>
+
+      <TenancyImportDialog
+        open={importOpen}
+        propertyId={propertyId}
+        onClose={() => setImportOpen(false)}
+        onCreated={() => mutate()}
+      />
 
       <TenancyDialog
         open={dialogOpen}

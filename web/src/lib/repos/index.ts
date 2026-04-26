@@ -8,6 +8,7 @@ export { importBatchRepo } from './import-batch.repo';
 export { tipRepo } from './tip.repo';
 export { budgetRepo } from './budget.repo';
 export { savingsGoalRepo } from './savings-goal.repo';
+export { appSettingsRepo } from './app-settings.repo';
 export { rentalReportRepo } from './rental-report.repo';
 export { tenancyRepo } from './tenancy.repo';
 export { ownerReportRepo } from './owner-report.repo';

@@ -191,6 +191,12 @@ export const tenancies = pgTable('tenancies', {
 
 export const tipTypeEnum = pgEnum('tip_type', ['tip', 'warning', 'insight']);
 
+export const appSettings = pgTable('app_settings', {
+  key: text('key').primaryKey(),
+  value: text('value').notNull(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+});
+
 export const aiTips = pgTable('ai_tips', {
   id: serial('id').primaryKey(),
   content: text('content').notNull(),

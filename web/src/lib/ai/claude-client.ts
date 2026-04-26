@@ -3,25 +3,24 @@ import { gateway } from '@ai-sdk/gateway';
 import type { ModelMessage, ToolSet } from 'ai';
 import { SYSTEM_PROMPT, CATEGORIZATION_PROMPT, AGENT_SYSTEM_PROMPT } from './prompts';
 import { TOOL_DEFINITIONS, TOOL_LABELS, executeTool } from './tools';
+import { resolveModelId } from './model';
 
 /**
  * AI client backed by Vercel AI Gateway.
  *
- * The previous version called the Anthropic SDK directly with a hard-coded
- * Claude model. Routing through the gateway means we can change the model
- * — or fall back to a different provider — without code changes (set
- * `MODEL_ID` in Vercel env to e.g. 'openai/gpt-5' or 'anthropic/
- * claude-sonnet-4-6'). The gateway handles auth via AI_GATEWAY_API_KEY.
+ * Routing through the gateway means we can change the model — or fall back
+ * to a different provider — at runtime via the Settings page. Resolution
+ * order: app_settings DB row → MODEL_ID env var → default Sonnet. Auth
+ * is via AI_GATEWAY_API_KEY.
  *
  * Public surface (streamChat / chat / categorizeBatch / runAgent) is
  * unchanged so existing callsites need no edits.
  */
 
-const DEFAULT_MODEL_ID = 'anthropic/claude-sonnet-4-5';
-
-function model() {
+async function model() {
+  const { modelId } = await resolveModelId();
   // gateway() returns a LanguageModel for the given 'provider/model' id.
-  return gateway(process.env.MODEL_ID ?? DEFAULT_MODEL_ID);
+  return gateway(modelId);
 }
 
 export type AgentEvent =
@@ -44,7 +43,7 @@ export async function* streamChat(
   ];
 
   const result = streamText({
-    model: model(),
+    model: await model(),
     system: SYSTEM_PROMPT,
     messages,
     maxOutputTokens: 4096,
@@ -76,7 +75,7 @@ export async function categorizeBatch(
     .replace('{transactions}', descriptions.map((d) => `- ${d}`).join('\n'));
 
   const { text } = await generateText({
-    model: model(),
+    model: await model(),
     system: 'You are a financial transaction categorizer. Respond only with valid JSON.',
     prompt,
     maxOutputTokens: 2048,
@@ -155,7 +154,7 @@ export async function* runAgent(
   ];
 
   const result = streamText({
-    model: model(),
+    model: await model(),
     system: AGENT_SYSTEM_PROMPT,
     messages,
     tools: buildAgentTools(),

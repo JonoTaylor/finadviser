@@ -1,6 +1,7 @@
 import { generateText } from 'ai';
 import { gateway } from '@ai-sdk/gateway';
 import type { RawTransaction } from '@/lib/types';
+import { resolveModelId } from '@/lib/ai/model';
 import crypto from 'crypto';
 
 const PDF_EXTRACTION_PROMPT = `You are a financial data extraction assistant. Extract all transactions from this bank statement text.
@@ -24,8 +25,6 @@ If you cannot find any transactions, return an empty array [].
 Bank statement text:
 `;
 
-const DEFAULT_MODEL_ID = 'anthropic/claude-sonnet-4-5';
-
 async function extractTextFromPDF(fileBuffer: Buffer): Promise<string> {
   // Dynamic import — pdf-parse v1.x is a simple function(buffer) => { text }
   const pdfParse = (await import('pdf-parse')).default;
@@ -47,8 +46,9 @@ export async function parsePDF(fileBuffer: Buffer): Promise<RawTransaction[]> {
     throw new Error('AI_GATEWAY_API_KEY is required for PDF parsing');
   }
 
+  const { modelId } = await resolveModelId();
   const { text: responseText } = await generateText({
-    model: gateway(process.env.MODEL_ID ?? DEFAULT_MODEL_ID),
+    model: gateway(modelId),
     prompt: PDF_EXTRACTION_PROMPT + text.slice(0, 15000),
     maxOutputTokens: 4096,
   });

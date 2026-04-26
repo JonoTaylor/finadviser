@@ -10,6 +10,7 @@ import FileUploadStep from '@/components/import/FileUploadStep';
 import ConfigStep from '@/components/import/ConfigStep';
 import PreviewTable from '@/components/import/PreviewTable';
 import ImportProgress from '@/components/import/ImportProgress';
+import BackfillMetadataCard from '@/components/import/BackfillMetadataCard';
 import { consumeNdjsonImport } from '@/lib/import/stream-client';
 import type { ProgressEvent } from '@/lib/import/stream';
 
@@ -207,6 +208,15 @@ export default function ImportPage() {
           )}
         </>
       )}
+
+      {/* Separate flow: enrich existing transactions with new metadata
+          columns instead of importing fresh ones. Lives below the main
+          importer because it's an occasional one-off rather than the
+          common path. */}
+      <BackfillMetadataCard
+        accounts={accounts ?? []}
+        bankConfigs={bankConfigs ?? {}}
+      />
     </Box>
   );
 }

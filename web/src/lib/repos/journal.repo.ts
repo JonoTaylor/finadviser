@@ -215,6 +215,89 @@ export const journalRepo = {
     }>;
   },
 
+  /**
+   * Months that still have one or more uncategorised journal entries,
+   * with the count for each. Used by the AI workflow to find where
+   * categorisation work is needed and pick the next month to review.
+   */
+  async listMonthsNeedingCategorization(): Promise<Array<{ month: string; uncategorizedCount: number }>> {
+    const db = getDb();
+    // `journal_entries.date` is stored as text in YYYY-MM-DD format
+    // (per schema.ts) — extract the YYYY-MM prefix with substring
+    // instead of casting to date + to_char on every row. Avoids the
+    // per-row date-parse cost and the brittle failure mode if any
+    // row ever held a non-ISO value.
+    const rows = await db.execute(sql`
+      SELECT substring(date, 1, 7) AS month, COUNT(*)::int AS uncategorized_count
+      FROM journal_entries
+      WHERE category_id IS NULL
+      GROUP BY substring(date, 1, 7)
+      ORDER BY month DESC
+    `);
+    return rows.rows.map(r => ({
+      month: r.month as string,
+      uncategorizedCount: r.uncategorized_count as number,
+    }));
+  },
+
+  /**
+   * All uncategorised journal entries within a YYYY-MM window, with
+   * the same `entries_summary` shape as `listUncategorizedWithAmounts`.
+   * The AI categorisation workflow uses this when it picks a month to
+   * review.
+   */
+  async listUncategorizedInMonth(month: string, limit = 200): Promise<Array<{ id: number; date: string; description: string; entries_summary: string | null }>> {
+    const db = getDb();
+    // SARGable filter: prefix-match `je.date` (text, ISO YYYY-MM-DD)
+    // with `month + '-%'` instead of wrapping the column in to_char.
+    // Lets Postgres use any index on `je.date` instead of forcing a
+    // full scan + per-row function call. Caller is responsible for
+    // validating `month` against /^\d{4}-\d{2}$/ — done in the
+    // tools.ts executor before reaching this repo.
+    const monthPrefix = `${month}-%`;
+    const rows = await db.execute(sql`
+      SELECT je.id, je.date, je.description,
+             STRING_AGG(a.name || ':' || be.amount, '|' ORDER BY CASE a.account_type WHEN 'ASSET' THEN 0 ELSE 1 END) AS entries_summary
+      FROM journal_entries je
+      LEFT JOIN book_entries be ON be.journal_entry_id = je.id
+      LEFT JOIN accounts a ON a.id = be.account_id
+      WHERE je.category_id IS NULL
+        AND je.date LIKE ${monthPrefix}
+      GROUP BY je.id, je.date, je.description
+      ORDER BY je.date ASC, je.id ASC
+      LIMIT ${limit}
+    `);
+    return rows.rows as Array<{ id: number; date: string; description: string; entries_summary: string | null }>;
+  },
+
+  /**
+   * Apply a category to many journal entries in one statement using a
+   * CASE expression keyed on the journal id. Single round-trip
+   * regardless of N — important when the AI commits a batch of dozens
+   * of categorisations at once.
+   *
+   * The `ELSE category_id` clause is defensive: if the WHERE matched
+   * any row not covered by the WHEN branches (shouldn't happen with
+   * the matching IN list, but it's cheap insurance against a future
+   * input-list bug), we keep the existing value rather than nulling
+   * it out.
+   */
+  async updateCategoryBulk(items: Array<{ journalId: number; categoryId: number }>): Promise<number> {
+    if (items.length === 0) return 0;
+    const db = getDb();
+    const ids = items.map(i => i.journalId);
+    const cases = sql.join(
+      items.map(i => sql`WHEN ${i.journalId} THEN ${i.categoryId}`),
+      sql` `,
+    );
+    const result = await db.execute(sql`
+      UPDATE journal_entries
+         SET category_id = CASE id ${cases} ELSE category_id END
+       WHERE id IN (${sql.join(ids.map(id => sql`${id}`), sql`, `)})
+    `);
+    return result.rowCount ?? 0;
+  },
+
   async listUncategorized(limit = 500) {
     const db = getDb();
     const rows = await db.execute(sql`

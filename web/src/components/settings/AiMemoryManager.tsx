@@ -17,6 +17,7 @@ import {
 } from '@mui/material';
 import DeleteIcon from '@mui/icons-material/Delete';
 import AddIcon from '@mui/icons-material/Add';
+import { AI_MEMORY_MAX_CONTENT_LENGTH } from '@/lib/ai/memory-constants';
 
 interface AiMemory {
   id: number;
@@ -31,7 +32,9 @@ const fetcher = async (url: string): Promise<AiMemory[]> => {
   return res.json();
 };
 
-const MAX_LEN = 4000;
+// Single source of truth shared with the API + repo so the client
+// can't allow content the server will reject.
+const MAX_LEN = AI_MEMORY_MAX_CONTENT_LENGTH;
 
 /**
  * Manage the discrete facts the assistant remembers across

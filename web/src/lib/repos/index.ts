@@ -14,6 +14,9 @@ export { tenancyRepo } from './tenancy.repo';
 export { ownerReportRepo } from './owner-report.repo';
 export { aiMemoryRepo } from './ai-memory.repo';
 export type { AiMemory, AiMemorySource } from './ai-memory.repo';
-export { AI_MEMORY_MAX_CONTENT_LENGTH } from './ai-memory.repo';
+// Re-export the client-safe constant so existing call-sites don't have
+// to know about the split — the source of truth lives in
+// lib/ai/memory-constants.ts (no DB imports, safe for the browser bundle).
+export { AI_MEMORY_MAX_CONTENT_LENGTH } from '@/lib/ai/memory-constants';
 export { documentRepo } from './document.repo';
 export type { DocumentMeta, DocumentKind } from './document.repo';

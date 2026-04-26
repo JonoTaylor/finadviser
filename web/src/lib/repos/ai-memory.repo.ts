@@ -1,12 +1,11 @@
 import { desc, eq } from 'drizzle-orm';
 import { getDb, schema } from '@/lib/db';
+import { AI_MEMORY_MAX_CONTENT_LENGTH } from '@/lib/ai/memory-constants';
 
 const { aiMemories } = schema;
 
 export type AiMemorySource = (typeof schema.aiMemorySourceEnum.enumValues)[number];
 export type AiMemory = typeof aiMemories.$inferSelect;
-
-const MAX_CONTENT_LENGTH = 4000;
 
 export const aiMemoryRepo = {
   async list(): Promise<AiMemory[]> {
@@ -19,8 +18,8 @@ export const aiMemoryRepo = {
     if (trimmed.length === 0) {
       throw new Error('Memory content cannot be empty');
     }
-    if (trimmed.length > MAX_CONTENT_LENGTH) {
-      throw new Error(`Memory content too long (max ${MAX_CONTENT_LENGTH} chars)`);
+    if (trimmed.length > AI_MEMORY_MAX_CONTENT_LENGTH) {
+      throw new Error(`Memory content too long (max ${AI_MEMORY_MAX_CONTENT_LENGTH} chars)`);
     }
     const db = getDb();
     const [row] = await db
@@ -46,7 +45,10 @@ export const aiMemoryRepo = {
    *
    * Soft cap: if the rendered block exceeds `maxChars` we drop the
    * oldest memories until it fits — keeping the most recent learning
-   * is generally more useful than keeping older context.
+   * is generally more useful than keeping older context. If even the
+   * single most recent memory still exceeds the cap, we truncate it
+   * (with an ellipsis) rather than emit a block that overflows the
+   * downstream prompt budget.
    */
   async renderForPrompt(maxChars = 8000): Promise<string | null> {
     const memories = await this.list();
@@ -61,8 +63,12 @@ export const aiMemoryRepo = {
       const removed = lines.pop()!;
       totalLength -= removed.length + 1; // line + the separating newline
     }
+    // Edge case: even the single newest line exceeds the cap. Truncate
+    // it rather than emit something that blows the prompt budget.
+    if (lines.length === 1 && lines[0].length > maxChars) {
+      const ellipsis = '… [truncated]';
+      lines[0] = lines[0].slice(0, Math.max(0, maxChars - ellipsis.length)) + ellipsis;
+    }
     return lines.join('\n');
   },
 };
-
-export { MAX_CONTENT_LENGTH as AI_MEMORY_MAX_CONTENT_LENGTH };

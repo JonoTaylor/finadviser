@@ -21,11 +21,27 @@ export async function GET(
     const wantsDownload = request.nextUrl.searchParams.get('download') === '1';
     const dispositionType = wantsDownload ? 'attachment' : 'inline';
 
-    // Filenames may contain quotes / non-ASCII — encode for the header.
-    const safeFilename = result.meta.filename.replace(/"/g, '');
-    const encoded = encodeURIComponent(result.meta.filename);
+    // Filename comes from user-uploaded metadata. Strip control chars
+    // (CR/LF, NUL, etc.), backslashes, and quotes to prevent header
+    // injection, then fall back to a safe default if nothing is left.
+    const sanitisedFilename = result.meta.filename
+      .replace(/[\p{Cc}"\\]/gu, '')
+      .trim();
+    const safeFilename = sanitisedFilename.length > 0 ? sanitisedFilename : `document-${result.meta.id}.pdf`;
+    const encoded = encodeURIComponent(safeFilename);
 
-    return new NextResponse(new Uint8Array(result.content), {
+    // Zero-copy view onto the Buffer's backing ArrayBuffer. Avoids the
+    // duplicate allocation that `new Uint8Array(buffer)` would do, and
+    // satisfies NextResponse's BodyInit typing (Buffer isn't a direct
+    // member of the BodyInit union, and TS' generic Uint8Array<ArrayBufferLike>
+    // also isn't accepted — the explicit ArrayBuffer cast pins the
+    // generic so the resulting Uint8Array<ArrayBuffer> is BodyInit-compatible).
+    const body = new Uint8Array(
+      result.content.buffer as ArrayBuffer,
+      result.content.byteOffset,
+      result.content.byteLength,
+    );
+    return new NextResponse(body, {
       status: 200,
       headers: {
         'Content-Type': result.meta.mimeType,

@@ -2,6 +2,7 @@ import { generateText } from 'ai';
 import { gateway } from '@ai-sdk/gateway';
 import { resolveModelId } from '@/lib/ai/model';
 import type { RentFrequency } from '@/lib/repos/tenancy.repo';
+import { schema } from '@/lib/db';
 
 /**
  * AI extraction of tenancy fields from a UK AST agreement PDF. Returns
@@ -10,7 +11,8 @@ import type { RentFrequency } from '@/lib/repos/tenancy.repo';
  * UI gives the user a chance to correct each value before commit.
  */
 
-const VALID_FREQUENCIES: RentFrequency[] = ['monthly', 'weekly', 'four_weekly', 'quarterly', 'annual'];
+// Single source of truth: the rent_frequency enum on the schema.
+const VALID_FREQUENCIES = schema.rentFrequencyEnum.enumValues;
 
 export interface ExtractedTenancy {
   tenantName: string | null;

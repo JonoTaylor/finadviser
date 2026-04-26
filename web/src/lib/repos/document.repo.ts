@@ -56,6 +56,43 @@ export const documentRepo = {
     return row;
   },
 
+  /**
+   * Atomic dedup: insert if no row with this sha256 exists, otherwise
+   * return the existing row. Avoids the race where two concurrent
+   * uploads of the same file both see `getBySha256() === null` and one
+   * fails the UNIQUE constraint with a 500.
+   */
+  async getOrCreate(input: DocumentInput): Promise<{ doc: DocumentMeta; created: boolean }> {
+    const db = getDb();
+    const inserted = await db
+      .insert(documents)
+      .values({
+        kind: input.kind,
+        filename: input.filename,
+        mimeType: input.mimeType,
+        sizeBytes: input.sizeBytes,
+        sha256: input.sha256,
+        content: input.content,
+        propertyId: input.propertyId ?? null,
+        tenancyId: input.tenancyId ?? null,
+        notes: input.notes ?? null,
+      })
+      .onConflictDoNothing({ target: documents.sha256 })
+      .returning(META_COLUMNS);
+
+    if (inserted.length > 0) {
+      return { doc: inserted[0], created: true };
+    }
+    const existing = await this.getBySha256(input.sha256);
+    if (!existing) {
+      // Should be unreachable: ON CONFLICT didn't insert AND nothing
+      // matches the sha256 — implies the row was deleted between the
+      // two queries. Treat as a hard error rather than silently retry.
+      throw new Error('Failed to deduplicate document upload (race during delete)');
+    }
+    return { doc: existing, created: false };
+  },
+
   async list(): Promise<DocumentMeta[]> {
     const db = getDb();
     return db.select(META_COLUMNS).from(documents).orderBy(desc(documents.uploadedAt));

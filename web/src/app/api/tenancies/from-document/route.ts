@@ -1,8 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { documentRepo, propertyRepo, tenancyRepo } from '@/lib/repos';
 import type { RentFrequency } from '@/lib/repos/tenancy.repo';
+import { schema } from '@/lib/db';
 
-const VALID_FREQUENCIES: RentFrequency[] = ['monthly', 'weekly', 'four_weekly', 'quarterly', 'annual'];
+// Single source of truth: the rent_frequency enum on the schema. Keeps
+// the API in sync with whatever the DB will actually accept.
+const VALID_FREQUENCIES = schema.rentFrequencyEnum.enumValues;
 
 /**
  * Body:
@@ -49,6 +52,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: `Invalid rentFrequency: ${rentFrequency}` }, { status: 400 });
     }
 
+
     const [doc, property] = await Promise.all([
       documentRepo.getMeta(documentId),
       propertyRepo.getProperty(propertyId),
@@ -69,8 +73,20 @@ export async function POST(request: NextRequest) {
 
     // Link the source document to the new tenancy + property. Best
     // effort: if it fails the tenancy still exists and is usable.
+    //
+    // If the document is already linked to a different tenancy, leave
+    // the existing link alone — the dedup flow can hand back a row
+    // that's already tied to an earlier tenancy and we don't want to
+    // silently break that association. The Documents page can re-link
+    // explicitly later if needed.
     try {
-      await documentRepo.linkTenancy(documentId, created.id);
+      if (doc.tenancyId === null || doc.tenancyId === created.id) {
+        await documentRepo.linkTenancy(documentId, created.id);
+      } else {
+        console.warn(
+          `[tenancy-import] document ${documentId} already linked to tenancy ${doc.tenancyId}; not relinking to ${created.id}`,
+        );
+      }
       if (doc.propertyId !== propertyId) {
         await documentRepo.setProperty(documentId, propertyId);
       }

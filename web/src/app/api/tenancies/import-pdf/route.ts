@@ -28,8 +28,16 @@ export async function POST(request: NextRequest) {
     if (!(file instanceof File)) {
       return NextResponse.json({ error: 'Missing file in form data' }, { status: 400 });
     }
-    if (file.type && file.type !== 'application/pdf') {
-      return NextResponse.json({ error: `Unsupported file type: ${file.type}. Upload a PDF.` }, { status: 400 });
+    // Some browsers / OSes don't populate File.type — fall back to the
+    // extension so we don't accept arbitrary binaries silently.
+    const declaredType = file.type || '';
+    const looksLikePdfByName = (file.name || '').toLowerCase().endsWith('.pdf');
+    const isPdf = declaredType === 'application/pdf' || (declaredType === '' && looksLikePdfByName);
+    if (!isPdf) {
+      return NextResponse.json(
+        { error: `Unsupported file type: ${declaredType || 'unknown'}. Upload a PDF.` },
+        { status: 400 },
+      );
     }
     if (file.size === 0) {
       return NextResponse.json({ error: 'Uploaded file is empty' }, { status: 400 });
@@ -59,40 +67,35 @@ export async function POST(request: NextRequest) {
     const buffer = Buffer.from(arrayBuffer);
     const sha256 = crypto.createHash('sha256').update(buffer).digest('hex');
 
-    // If we've already stored this exact PDF, reuse it instead of
-    // duplicating the BYTEA — but still re-run extraction so the user
-    // gets a fresh preview (the active model may have changed since the
-    // original upload).
-    const existing = await documentRepo.getBySha256(sha256);
-    let documentId: number;
-    if (existing) {
-      documentId = existing.id;
-      // If the upload pinned a property and the existing doc didn't
-      // have one, fill it in. (Don't overwrite an existing link — the
-      // earlier link is more authoritative.)
-      if (propertyId && existing.propertyId === null) {
-        await documentRepo.setProperty(documentId, propertyId);
-      }
-    } else {
-      const created = await documentRepo.create({
-        kind: 'tenancy_agreement',
-        filename: file.name || 'tenancy.pdf',
-        mimeType: file.type || 'application/pdf',
-        sizeBytes: buffer.length,
-        sha256,
-        content: buffer,
-        propertyId,
-        tenancyId: null,
-      });
-      documentId = created.id;
+    // Atomic dedup: get-or-create on sha256. Avoids the race where two
+    // concurrent uploads of the same PDF both miss the cache and one
+    // 500s on the UNIQUE constraint. The extractor still runs every
+    // time so the user gets a fresh preview (the active model may have
+    // changed since the original upload).
+    const { doc, created } = await documentRepo.getOrCreate({
+      kind: 'tenancy_agreement',
+      filename: file.name || 'tenancy.pdf',
+      mimeType: 'application/pdf',
+      sizeBytes: buffer.length,
+      sha256,
+      content: buffer,
+      propertyId,
+      tenancyId: null,
+    });
+
+    // If the upload pinned a property and the existing row didn't have
+    // one, fill it in. Don't overwrite an existing link — the earlier
+    // link is more authoritative.
+    if (!created && propertyId && doc.propertyId === null) {
+      await documentRepo.setProperty(doc.id, propertyId);
     }
 
     const extracted = await parseTenancyPDF(buffer);
 
     return NextResponse.json({
-      documentId,
+      documentId: doc.id,
       extracted,
-      reused: Boolean(existing),
+      reused: !created,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Failed to import tenancy PDF';

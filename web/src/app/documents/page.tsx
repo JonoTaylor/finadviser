@@ -149,6 +149,7 @@ export default function DocumentsPage() {
                         target="_blank"
                         rel="noopener"
                         title="Open"
+                        aria-label={`Open ${doc.filename}`}
                       >
                         <OpenInNewRoundedIcon fontSize="small" />
                       </IconButton>
@@ -157,10 +158,16 @@ export default function DocumentsPage() {
                         component="a"
                         href={`/api/documents/${doc.id}/file?download=1`}
                         title="Download"
+                        aria-label={`Download ${doc.filename}`}
                       >
                         <DownloadRoundedIcon fontSize="small" />
                       </IconButton>
-                      <IconButton size="small" onClick={() => handleDelete(doc)} title="Delete">
+                      <IconButton
+                        size="small"
+                        onClick={() => handleDelete(doc)}
+                        title="Delete"
+                        aria-label={`Delete ${doc.filename}`}
+                      >
                         <DeleteIcon fontSize="small" />
                       </IconButton>
                     </TableCell>

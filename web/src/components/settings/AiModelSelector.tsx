@@ -155,8 +155,10 @@ export default function AiModelSelector() {
         </Stack>
 
         <FormControl fullWidth size="small">
-          <InputLabel>AI model</InputLabel>
+          <InputLabel id="ai-model-select-label" htmlFor="ai-model-select">AI model</InputLabel>
           <Select
+            id="ai-model-select"
+            labelId="ai-model-select-label"
             label="AI model"
             value={selected}
             onChange={(e) => setPending(e.target.value)}

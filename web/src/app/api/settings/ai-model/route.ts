@@ -36,6 +36,18 @@ export async function PUT(request: NextRequest) {
         { status: 400 },
       );
     }
+    // Membership check against the live gateway list so we don't persist
+    // an id the gateway can't actually serve (which would break every
+    // subsequent AI call). getAvailableModels() falls back to a static
+    // list if the gateway is down — that's the source of truth in either
+    // case for what we'll actually try to invoke.
+    const options = await getAvailableModels();
+    if (!options.some((m) => m.id === body.modelId)) {
+      return NextResponse.json(
+        { error: `modelId "${body.modelId}" is not available in the configured gateway.` },
+        { status: 400 },
+      );
+    }
     await appSettingsRepo.set(MODEL_SETTING_KEY, body.modelId);
     return NextResponse.json({ ok: true, modelId: body.modelId });
   } catch (error) {

@@ -2,6 +2,13 @@
 ALTER TABLE journal_entries
     ADD COLUMN IF NOT EXISTS property_id INTEGER REFERENCES properties(id);
 
+-- Interest-only flag on mortgages. When true, principal is treated as
+-- constant at original_amount for interest calculations (no
+-- amortisation). Defaults false so existing rows keep their current
+-- behaviour (manual principal/interest split on every payment).
+ALTER TABLE mortgages
+    ADD COLUMN IF NOT EXISTS interest_only BOOLEAN NOT NULL DEFAULT FALSE;
+
 CREATE INDEX IF NOT EXISTS idx_journal_entries_property_date
     ON journal_entries(property_id, date)
     WHERE property_id IS NOT NULL;

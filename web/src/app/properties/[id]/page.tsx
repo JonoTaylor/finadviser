@@ -9,6 +9,7 @@ import { formatCurrency, formatPercentage } from '@/lib/utils/formatting';
 import EquityBar from '@/components/properties/EquityBar';
 import OwnershipTable from '@/components/properties/OwnershipTable';
 import MortgageCard from '@/components/properties/MortgageCard';
+import MortgageRateHistoryCard from '@/components/properties/MortgageRateHistoryCard';
 import ValuationHistory from '@/components/properties/ValuationHistory';
 import AddValuationDialog from '@/components/properties/AddValuationDialog';
 import RecordPaymentDialog from '@/components/properties/RecordPaymentDialog';
@@ -87,6 +88,10 @@ export default function PropertyDetailPage({ params }: { params: Promise<{ id: s
 
           <ExpensesCard propertyId={propertyId} />
 
+          {property.mortgages?.map((m: { id: number; lender: string }) => (
+            <MortgageRateHistoryCard key={`rates-${m.id}`} mortgageId={m.id} lender={m.lender} />
+          ))}
+
           <ValuationHistory valuations={property.valuations ?? []} />
         </Grid>
 
@@ -111,8 +116,8 @@ export default function PropertyDetailPage({ params }: { params: Promise<{ id: s
             </CardContent>
           </Card>
 
-          {property.mortgages?.map((m: { id: number; lender: string; originalAmount: string; startDate: string; termMonths: number }) => (
-            <MortgageCard key={m.id} mortgage={m} propertyId={propertyId} />
+          {property.mortgages?.map((m: { id: number; lender: string; originalAmount: string; startDate: string; termMonths: number; interestOnly?: boolean }) => (
+            <MortgageCard key={m.id} mortgage={m} onChange={() => mutate()} />
           ))}
 
           {property.mortgages?.length > 0 && (

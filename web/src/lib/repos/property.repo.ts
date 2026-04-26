@@ -179,6 +179,49 @@ export const propertyRepo = {
     return row;
   },
 
+  async updateMortgageRate(rateId: number, patch: { rate?: string; effectiveDate?: string }) {
+    const db = getDb();
+    const updates: Record<string, unknown> = {};
+    if (patch.rate !== undefined) updates.rate = patch.rate;
+    if (patch.effectiveDate !== undefined) updates.effectiveDate = patch.effectiveDate;
+    if (Object.keys(updates).length === 0) {
+      const [row] = await db.select().from(mortgageRateHistory).where(eq(mortgageRateHistory.id, rateId));
+      return row ?? null;
+    }
+    const [row] = await db
+      .update(mortgageRateHistory)
+      .set(updates)
+      .where(eq(mortgageRateHistory.id, rateId))
+      .returning();
+    return row ?? null;
+  },
+
+  async deleteMortgageRate(rateId: number) {
+    const db = getDb();
+    await db.delete(mortgageRateHistory).where(eq(mortgageRateHistory.id, rateId));
+  },
+
+  async getMortgage(mortgageId: number) {
+    const db = getDb();
+    const [row] = await db.select().from(mortgages).where(eq(mortgages.id, mortgageId));
+    return row ?? null;
+  },
+
+  async updateMortgage(mortgageId: number, patch: { interestOnly?: boolean }) {
+    const db = getDb();
+    const updates: Record<string, unknown> = {};
+    if (patch.interestOnly !== undefined) updates.interestOnly = patch.interestOnly;
+    if (Object.keys(updates).length === 0) {
+      return this.getMortgage(mortgageId);
+    }
+    const [row] = await db
+      .update(mortgages)
+      .set(updates)
+      .where(eq(mortgages.id, mortgageId))
+      .returning();
+    return row ?? null;
+  },
+
   async getMortgageBalance(mortgageId: number): Promise<string> {
     const db = getDb();
     const rows = await db.execute(sql`

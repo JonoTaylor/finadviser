@@ -16,6 +16,7 @@ import DashboardRoundedIcon from '@mui/icons-material/DashboardRounded';
 import ReceiptLongRoundedIcon from '@mui/icons-material/ReceiptLongRounded';
 import FileUploadRoundedIcon from '@mui/icons-material/FileUploadRounded';
 import HomeWorkRoundedIcon from '@mui/icons-material/HomeWorkRounded';
+import FolderRoundedIcon from '@mui/icons-material/FolderRounded';
 import AutoAwesomeRoundedIcon from '@mui/icons-material/AutoAwesomeRounded';
 import TuneRoundedIcon from '@mui/icons-material/TuneRounded';
 import MenuRoundedIcon from '@mui/icons-material/MenuRounded';
@@ -32,6 +33,7 @@ const navItems = [
   { label: 'Transactions', href: '/transactions',  icon: <ReceiptLongRoundedIcon /> },
   { label: 'Import',       href: '/import',        icon: <FileUploadRoundedIcon /> },
   { label: 'Properties',   href: '/properties',    icon: <HomeWorkRoundedIcon /> },
+  { label: 'Documents',    href: '/documents',     icon: <FolderRoundedIcon /> },
   { label: 'AI Chat',      href: '/chat',          icon: <AutoAwesomeRoundedIcon /> },
   { label: 'Settings',     href: '/settings',      icon: <TuneRoundedIcon /> },
 ];

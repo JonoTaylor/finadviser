@@ -8,8 +8,32 @@ import {
   numeric,
   timestamp,
   unique,
+  customType,
   type AnyPgColumn,
 } from 'drizzle-orm/pg-core';
+
+// Custom Postgres BYTEA mapped to Buffer in/out. Drizzle pg-core doesn't
+// ship a binary type and Neon's HTTP driver serialises parameters as
+// JSON, so we explicitly convert Buffer ↔ Postgres hex format ('\xHEX')
+// instead of trusting the driver's binary encoding.
+const bytea = customType<{ data: Buffer; default: false }>({
+  dataType() {
+    return 'bytea';
+  },
+  toDriver(value: Buffer): string {
+    return '\\x' + value.toString('hex');
+  },
+  fromDriver(value: unknown): Buffer {
+    if (Buffer.isBuffer(value)) return value;
+    if (value instanceof Uint8Array) return Buffer.from(value);
+    if (typeof value === 'string') {
+      // Postgres returns BYTEA in hex format prefixed with '\x'.
+      const hex = value.startsWith('\\x') ? value.slice(2) : value;
+      return Buffer.from(hex, 'hex');
+    }
+    throw new Error(`Unsupported BYTEA driver value type: ${typeof value}`);
+  },
+});
 
 // Enums
 export const accountTypeEnum = pgEnum('account_type', ['ASSET', 'LIABILITY', 'EQUITY', 'INCOME', 'EXPENSE']);
@@ -231,6 +255,30 @@ export const budgets = pgTable('budgets', {
 });
 
 export const savingsGoalStatusEnum = pgEnum('savings_goal_status', ['active', 'completed', 'cancelled']);
+
+export const documentKindEnum = pgEnum('document_kind', ['tenancy_agreement', 'other']);
+
+// Stores the original PDF (or future binary docs) alongside structured
+// metadata. Linked optionally to a property + tenancy so the Documents
+// page can group by property and the tenancy view can show its source
+// agreement. BYTEA keeps everything in Postgres — fine for the
+// expected volume (a handful per tenancy, tens overall) and avoids
+// adding a separate object-storage env. Revisit if document count or
+// average size grows materially.
+export const documents = pgTable('documents', {
+  id: serial('id').primaryKey(),
+  kind: documentKindEnum('kind').notNull(),
+  filename: text('filename').notNull(),
+  mimeType: text('mime_type').notNull(),
+  sizeBytes: integer('size_bytes').notNull(),
+  // Hex-encoded SHA-256 of the file contents — used for dedup on upload.
+  sha256: text('sha256').notNull().unique(),
+  content: bytea('content').notNull(),
+  propertyId: integer('property_id').references(() => properties.id, { onDelete: 'set null' }),
+  tenancyId: integer('tenancy_id').references(() => tenancies.id, { onDelete: 'set null' }),
+  notes: text('notes'),
+  uploadedAt: timestamp('uploaded_at').notNull().defaultNow(),
+});
 
 export const savingsGoals = pgTable('savings_goals', {
   id: serial('id').primaryKey(),

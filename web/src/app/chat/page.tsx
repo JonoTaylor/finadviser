@@ -22,8 +22,27 @@ import MemoryRoundedIcon from '@mui/icons-material/MemoryRounded';
 import HistoryRoundedIcon from '@mui/icons-material/HistoryRounded';
 import useSWR from 'swr';
 import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 
 const fetcher = (url: string) => fetch(url).then(r => r.json());
+
+// Stable plugin reference so ReactMarkdown doesn't re-process content
+// on every render (a fresh array literal would invalidate its memo).
+const REMARK_PLUGINS = [remarkGfm];
+
+// Custom renderers — keep tables horizontally scrollable so a wide
+// breakdown doesn't blow out the chat bubble on narrow viewports.
+// `node` (a hast Element from react-markdown) is destructured out so
+// it isn't spread onto the native <table> as an unknown DOM attr.
+// Bottom margin lives on `& table` in markdownSx; don't double it here.
+const markdownComponents = {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  table: ({ node: _node, ...props }: { node?: unknown } & React.HTMLAttributes<HTMLTableElement>) => (
+    <Box sx={{ overflowX: 'auto' }}>
+      <table {...props} />
+    </Box>
+  ),
+};
 
 const markdownSx = {
   '& p': { m: 0, mb: 1.5, lineHeight: 1.7, '&:last-child': { mb: 0 } },
@@ -269,7 +288,9 @@ export default function ChatPage() {
                 >
                   {msg.role === 'assistant' ? (
                     <Box sx={markdownSx}>
-                      <ReactMarkdown>{msg.content}</ReactMarkdown>
+                      <ReactMarkdown remarkPlugins={REMARK_PLUGINS} components={markdownComponents}>
+                        {msg.content}
+                      </ReactMarkdown>
                     </Box>
                   ) : (
                     <Typography>{msg.content}</Typography>
@@ -306,7 +327,9 @@ export default function ChatPage() {
                   }}
                 >
                   <Box sx={markdownSx}>
-                    <ReactMarkdown>{streamingContent}</ReactMarkdown>
+                    <ReactMarkdown remarkPlugins={REMARK_PLUGINS} components={markdownComponents}>
+                      {streamingContent}
+                    </ReactMarkdown>
                   </Box>
                 </Paper>
               )}

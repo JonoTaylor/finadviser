@@ -52,14 +52,16 @@ export const aiMemoryRepo = {
     const memories = await this.list();
     if (memories.length === 0) return null;
 
-    // Most-recent-first; trim oldest until under cap.
+    // Most-recent-first; trim oldest until under cap. Track running
+    // length explicitly so we don't re-join the whole array on each
+    // pop (which would make this O(N²)).
     const lines = memories.map(m => `- (${m.source}, ${m.createdAt.toISOString().slice(0, 10)}) ${m.content}`);
-    let block = lines.join('\n');
-    while (block.length > maxChars && lines.length > 1) {
-      lines.pop();
-      block = lines.join('\n');
+    let totalLength = lines.reduce((acc, line) => acc + line.length, 0) + Math.max(0, lines.length - 1);
+    while (totalLength > maxChars && lines.length > 1) {
+      const removed = lines.pop()!;
+      totalLength -= removed.length + 1; // line + the separating newline
     }
-    return block;
+    return lines.join('\n');
   },
 };
 

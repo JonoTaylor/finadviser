@@ -21,12 +21,13 @@ export const appSettingsRepo = {
 
   async set(key: string, value: string): Promise<void> {
     const db = getDb();
-    await db.execute(sql`
-      INSERT INTO app_settings (key, value, updated_at)
-      VALUES (${key}, ${value}, now())
-      ON CONFLICT (key) DO UPDATE
-        SET value = EXCLUDED.value, updated_at = EXCLUDED.updated_at
-    `);
+    await db
+      .insert(appSettings)
+      .values({ key, value })
+      .onConflictDoUpdate({
+        target: appSettings.key,
+        set: { value, updatedAt: sql`now()` },
+      });
   },
 
   async clear(key: string): Promise<void> {

@@ -42,15 +42,21 @@ const FALLBACK_MODELS: AvailableModel[] = [
 ];
 
 const MODEL_LIST_TTL_MS = 5 * 60 * 1000;
-let cachedModels: { fetchedAt: number; models: AvailableModel[] } | null = null;
+// Shorter TTL for fallback responses so we recover quickly once the
+// gateway is healthy again, but long enough that a flapping gateway
+// doesn't slow every Settings page load.
+const FALLBACK_TTL_MS = 60 * 1000;
+let cachedModels: { fetchedAt: number; ttlMs: number; models: AvailableModel[] } | null = null;
 
 /**
  * Fetch the live list of models the configured AI Gateway exposes.
- * 5-minute in-memory cache; falls back to FALLBACK_MODELS on error so the
+ * 5-minute in-memory cache on success, 1-minute cache on failure (so a
+ * misconfigured / unreachable gateway doesn't make every settings render
+ * pay the full timeout). Falls back to FALLBACK_MODELS on error so the
  * Settings page never shows an empty dropdown.
  */
 export async function getAvailableModels(): Promise<AvailableModel[]> {
-  if (cachedModels && Date.now() - cachedModels.fetchedAt < MODEL_LIST_TTL_MS) {
+  if (cachedModels && Date.now() - cachedModels.fetchedAt < cachedModels.ttlMs) {
     return cachedModels.models;
   }
   try {
@@ -64,12 +70,14 @@ export async function getAvailableModels(): Promise<AvailableModel[]> {
     }));
     if (models.length === 0) {
       console.warn('[model] gateway returned empty model list; using fallback');
+      cachedModels = { fetchedAt: Date.now(), ttlMs: FALLBACK_TTL_MS, models: FALLBACK_MODELS };
       return FALLBACK_MODELS;
     }
-    cachedModels = { fetchedAt: Date.now(), models };
+    cachedModels = { fetchedAt: Date.now(), ttlMs: MODEL_LIST_TTL_MS, models };
     return models;
   } catch (err) {
     console.warn('[model] getAvailableModels failed; using fallback list:', err instanceof Error ? err.message : err);
+    cachedModels = { fetchedAt: Date.now(), ttlMs: FALLBACK_TTL_MS, models: FALLBACK_MODELS };
     return FALLBACK_MODELS;
   }
 }
@@ -87,13 +95,14 @@ export async function resolveModelId(): Promise<{ modelId: string; source: Model
 }
 
 /**
- * Lightweight validation for the dropdown POST. Allow any string that
- * looks like 'provider/model' — exact membership is checked against the
- * gateway's live list separately so future models work without code
- * changes.
+ * Lightweight validation for the dropdown POST. Allow either
+ * 'provider/model' or a bare 'model' id — the gateway sometimes returns
+ * provider-less ids, and the dropdown can surface them, so the validator
+ * must accept what the dropdown shows. Exact membership is checked
+ * against the gateway's live list separately.
  */
 export function isValidModelId(value: unknown): value is string {
   if (typeof value !== 'string') return false;
   if (value.length === 0 || value.length > 200) return false;
-  return /^[a-z0-9-]+\/[a-z0-9._-]+$/i.test(value);
+  return /^[a-z0-9._-]+(\/[a-z0-9._-]+)?$/i.test(value);
 }

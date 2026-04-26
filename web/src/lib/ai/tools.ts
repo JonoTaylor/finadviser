@@ -113,6 +113,52 @@ export const TOOL_DEFINITIONS: Tool[] = [
     },
   },
   {
+    name: 'list_months_needing_categorization',
+    description:
+      'List every month that still has uncategorised journal entries, with the count for each. Use this as the first step of a backward categorisation pass: pick the most recent month with uncategorised work and review that first, then move on to the previous month.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {},
+      required: [],
+    },
+  },
+  {
+    name: 'list_uncategorized_in_month',
+    description:
+      'List uncategorised journal entries within a specific YYYY-MM month, with their id / date / description / amount. Use after picking a month from list_months_needing_categorization to see exactly what needs review.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        month: { type: 'string', description: 'Month in YYYY-MM format (e.g. "2026-03").' },
+        limit: { type: 'number', description: 'Max results (default 200).' },
+      },
+      required: ['month'],
+    },
+  },
+  {
+    name: 'apply_categorizations_bulk',
+    description:
+      'Apply many categorisations to journal entries in a single round-trip. Use after the user has confirmed a batch of suggested categorisations rather than calling categorize_transaction in a loop.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        items: {
+          type: 'array',
+          description: 'Array of {journal_id, category_id} pairs.',
+          items: {
+            type: 'object',
+            properties: {
+              journal_id: { type: 'number' },
+              category_id: { type: 'number' },
+            },
+            required: ['journal_id', 'category_id'],
+          },
+        },
+      },
+      required: ['items'],
+    },
+  },
+  {
     name: 'auto_categorize',
     description:
       'Bulk auto-categorise all uncategorised transactions using rules and AI. Returns a summary of how many were categorised, plus details of each categorisation (id, description, category, method).',
@@ -323,6 +369,9 @@ export const TOOL_LABELS: Record<string, string> = {
   get_property_summary: 'Loading property data',
   categorize_transaction: 'Categorising transaction',
   list_uncategorized: 'Finding uncategorized transactions',
+  list_months_needing_categorization: 'Scanning months for uncategorized work',
+  list_uncategorized_in_month: 'Reading uncategorized for the month',
+  apply_categorizations_bulk: 'Applying categorisations',
   auto_categorize: 'Auto-categorising transactions',
   create_category: 'Creating category',
   add_categorization_rule: 'Adding categorisation rule',
@@ -366,6 +415,12 @@ export async function executeTool(
       return executeListUncategorized(input);
     case 'auto_categorize':
       return executeAutoCategorize();
+    case 'list_months_needing_categorization':
+      return executeListMonthsNeedingCategorization();
+    case 'list_uncategorized_in_month':
+      return executeListUncategorizedInMonth(input);
+    case 'apply_categorizations_bulk':
+      return executeApplyCategorizationsBulk(input);
     case 'create_category':
       return executeCreateCategory(input);
     case 'add_categorization_rule':
@@ -531,6 +586,55 @@ async function executeCategorizeTransaction(input: Record<string, unknown>) {
   const categoryId = input.category_id as number;
   await journalRepo.updateCategory(journalId, categoryId);
   return { success: true, journalId, categoryId };
+}
+
+async function executeListMonthsNeedingCategorization() {
+  const months = await journalRepo.listMonthsNeedingCategorization();
+  return {
+    months,
+    totalMonths: months.length,
+    totalUncategorized: months.reduce((sum, m) => sum + m.uncategorizedCount, 0),
+  };
+}
+
+async function executeListUncategorizedInMonth(input: Record<string, unknown>) {
+  const month = input.month;
+  if (typeof month !== 'string' || !/^\d{4}-\d{2}$/.test(month)) {
+    return { error: 'month must be a string in YYYY-MM format' };
+  }
+  const limit = (input.limit as number) || 200;
+  const entries = await journalRepo.listUncategorizedInMonth(month, limit);
+  return {
+    month,
+    count: entries.length,
+    entries: entries.map(e => ({
+      id: e.id,
+      date: e.date,
+      description: e.description,
+      amount: e.entries_summary,
+    })),
+  };
+}
+
+async function executeApplyCategorizationsBulk(input: Record<string, unknown>) {
+  const items = input.items;
+  if (!Array.isArray(items)) {
+    return { error: 'items must be an array of {journal_id, category_id}' };
+  }
+  const validated: Array<{ journalId: number; categoryId: number }> = [];
+  for (const raw of items) {
+    if (
+      typeof raw !== 'object' || raw === null ||
+      typeof (raw as { journal_id?: unknown }).journal_id !== 'number' ||
+      typeof (raw as { category_id?: unknown }).category_id !== 'number'
+    ) {
+      return { error: 'each item must be {journal_id: number, category_id: number}' };
+    }
+    const r = raw as { journal_id: number; category_id: number };
+    validated.push({ journalId: r.journal_id, categoryId: r.category_id });
+  }
+  const updated = await journalRepo.updateCategoryBulk(validated);
+  return { applied: updated, requested: validated.length };
 }
 
 async function executeListUncategorized(input: Record<string, unknown>) {

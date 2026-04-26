@@ -77,6 +77,7 @@ const markdownSx = {
 const QUICK_PROMPTS = [
   { label: 'Spending Analysis', prompt: 'Break down my spending for the last month', icon: <TrendingUpRoundedIcon sx={{ fontSize: 18 }} /> },
   { label: 'Categorize', prompt: 'Review my uncategorized transactions and categorize them', icon: <CategoryRoundedIcon sx={{ fontSize: 18 }} /> },
+  { label: 'Categorisation Pass', prompt: 'Run a backward month-by-month categorisation pass: start with the most recent month that has uncategorised transactions, propose categorisations grouped by payee, and turn each confirmed mapping into a rule so earlier months auto-categorise themselves. Stop and ask me to confirm each batch before applying.', icon: <CategoryRoundedIcon sx={{ fontSize: 18 }} /> },
   { label: 'Budget Review', prompt: 'How am I tracking against my budgets this month?', icon: <AccountBalanceWalletRoundedIcon sx={{ fontSize: 18 }} /> },
   { label: 'Savings Goals', prompt: 'What\'s my progress on savings goals?', icon: <SavingsRoundedIcon sx={{ fontSize: 18 }} /> },
   { label: 'Can I Afford...', prompt: 'Can I afford a big purchase? Help me figure out if it\'s feasible', icon: <ShoppingCartRoundedIcon sx={{ fontSize: 18 }} /> },

@@ -215,6 +215,72 @@ export const journalRepo = {
     }>;
   },
 
+  /**
+   * Months that still have one or more uncategorised journal entries,
+   * with the count for each. Used by the AI workflow to find where
+   * categorisation work is needed and pick the next month to review.
+   */
+  async listMonthsNeedingCategorization(): Promise<Array<{ month: string; uncategorizedCount: number }>> {
+    const db = getDb();
+    const rows = await db.execute(sql`
+      SELECT to_char(date::date, 'YYYY-MM') AS month, COUNT(*)::int AS uncategorized_count
+      FROM journal_entries
+      WHERE category_id IS NULL
+      GROUP BY to_char(date::date, 'YYYY-MM')
+      ORDER BY month DESC
+    `);
+    return rows.rows.map(r => ({
+      month: r.month as string,
+      uncategorizedCount: r.uncategorized_count as number,
+    }));
+  },
+
+  /**
+   * All uncategorised journal entries within a YYYY-MM window, with
+   * the same `entries_summary` shape as `listUncategorizedWithAmounts`.
+   * The AI categorisation workflow uses this when it picks a month to
+   * review.
+   */
+  async listUncategorizedInMonth(month: string, limit = 200): Promise<Array<{ id: number; date: string; description: string; entries_summary: string | null }>> {
+    const db = getDb();
+    const rows = await db.execute(sql`
+      SELECT je.id, je.date, je.description,
+             STRING_AGG(a.name || ':' || be.amount, '|' ORDER BY CASE a.account_type WHEN 'ASSET' THEN 0 ELSE 1 END) AS entries_summary
+      FROM journal_entries je
+      LEFT JOIN book_entries be ON be.journal_entry_id = je.id
+      LEFT JOIN accounts a ON a.id = be.account_id
+      WHERE je.category_id IS NULL
+        AND to_char(je.date::date, 'YYYY-MM') = ${month}
+      GROUP BY je.id, je.date, je.description
+      ORDER BY je.date ASC, je.id ASC
+      LIMIT ${limit}
+    `);
+    return rows.rows as Array<{ id: number; date: string; description: string; entries_summary: string | null }>;
+  },
+
+  /**
+   * Apply a category to many journal entries in one statement using a
+   * CASE expression keyed on the journal id. Single round-trip
+   * regardless of N — important when the AI commits a batch of dozens
+   * of categorisations at once.
+   */
+  async updateCategoryBulk(items: Array<{ journalId: number; categoryId: number }>): Promise<number> {
+    if (items.length === 0) return 0;
+    const db = getDb();
+    const ids = items.map(i => i.journalId);
+    // Build the CASE WHEN safely using the sql tagged template.
+    const cases = sql.join(
+      items.map(i => sql`WHEN ${i.journalId} THEN ${i.categoryId}`),
+      sql` `,
+    );
+    const result = await db.execute(sql`
+      UPDATE journal_entries
+         SET category_id = CASE id ${cases} END
+       WHERE id IN (${sql.join(ids.map(id => sql`${id}`), sql`, `)})
+    `);
+    return result.rowCount ?? 0;
+  },
+
   async listUncategorized(limit = 500) {
     const db = getDb();
     const rows = await db.execute(sql`

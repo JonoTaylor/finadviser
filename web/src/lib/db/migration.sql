@@ -69,6 +69,24 @@ CREATE TABLE IF NOT EXISTS app_settings (
     updated_at TIMESTAMP NOT NULL DEFAULT now()
 );
 
+-- Persistent facts injected into the assistant's system prompt so it
+-- learns about the user across conversations. Source distinguishes
+-- user-added entries from AI-saved ones (the `remember` tool).
+DO $$ BEGIN
+    CREATE TYPE ai_memory_source AS ENUM ('user', 'ai');
+EXCEPTION
+    WHEN duplicate_object THEN null;
+END $$;
+
+CREATE TABLE IF NOT EXISTS ai_memories (
+    id SERIAL PRIMARY KEY,
+    content TEXT NOT NULL,
+    source ai_memory_source NOT NULL DEFAULT 'ai',
+    created_at TIMESTAMP NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_ai_memories_created_at ON ai_memories(created_at DESC);
+
 -- Document storage. Holds the original binary (BYTEA) plus metadata for
 -- AI-extracted source documents (currently tenancy agreements; the enum
 -- leaves room for more). property_id / tenancy_id are nullable + ON

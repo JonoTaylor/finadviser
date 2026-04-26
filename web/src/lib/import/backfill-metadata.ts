@@ -1,0 +1,284 @@
+import { sql } from 'drizzle-orm';
+import { getDb } from '@/lib/db';
+import { parseCSV } from './csv-parser';
+import { getBankConfig } from '@/lib/config/bank-configs';
+import type { RawTransactionMetadata } from '@/lib/types';
+
+/**
+ * Fill in `transaction_metadata` rows for transactions that already
+ * exist as journal entries — typically because the user re-uploads a
+ * Monzo CSV after originally importing it under a bank profile that
+ * didn't capture merchant / type / external_id.
+ *
+ * NEVER creates journal entries. NEVER overwrites a non-null metadata
+ * field — uses COALESCE(existing, new) semantics so previously-saved
+ * values win.
+ *
+ * Matching strategy, per CSV row:
+ *   1. If `transaction_metadata.external_id` already records this row's
+ *      Monzo tx_id, that's the canonical match. Used on subsequent
+ *      re-runs after the first backfill has populated external_id.
+ *   2. Else, match by (date, lower(trim(description)),
+ *      account+amount). This mirrors the legacy fingerprint algorithm
+ *      so pre-PR-#23 imports still resolve cleanly.
+ *   3. Else, return as `unmatched` so the caller can decide whether
+ *      to import it as a new transaction (out of scope here).
+ */
+
+export interface BackfillUnmatched {
+  date: string;
+  description: string;
+  amount: string;
+  externalId: string | null;
+}
+
+export interface BackfillResult {
+  totalRows: number;
+  rowsWithMetadata: number;
+  matchedExisting: number;
+  inserted: number;        // matched + had no metadata row -> a new metadata row was created
+  filledFields: number;    // matched + had metadata -> filled NULL fields with new values
+  noChange: number;        // matched + had metadata -> nothing to fill (every column already populated)
+  unmatched: BackfillUnmatched[];
+}
+
+interface MetadataPayload {
+  journalEntryId: number;
+  externalId: string | null;
+  transactionTime: string | null;
+  transactionType: string | null;
+  merchantName: string | null;
+  merchantEmoji: string | null;
+  bankCategory: string | null;
+  currency: string | null;
+  localAmount: string | null;
+  localCurrency: string | null;
+  notes: string | null;
+  address: string | null;
+  receiptUrl: string | null;
+  raw: Record<string, unknown> | null;
+}
+
+function toPayload(journalEntryId: number, md: RawTransactionMetadata): MetadataPayload {
+  return {
+    journalEntryId,
+    externalId: md.externalId ?? null,
+    transactionTime: md.time ?? null,
+    transactionType: md.type ?? null,
+    merchantName: md.merchantName ?? null,
+    merchantEmoji: md.merchantEmoji ?? null,
+    bankCategory: md.bankCategory ?? null,
+    currency: md.currency ?? null,
+    localAmount: md.localAmount ?? null,
+    localCurrency: md.localCurrency ?? null,
+    notes: md.notes ?? null,
+    address: md.address ?? null,
+    receiptUrl: md.receiptUrl ?? null,
+    raw: md.raw ?? null,
+  };
+}
+
+export async function backfillMetadata(
+  csvContent: string,
+  bankConfigName: string,
+  accountId: number,
+): Promise<BackfillResult> {
+  const config = getBankConfig(bankConfigName);
+  if (!config) throw new Error(`Unknown bank config: ${bankConfigName}`);
+
+  const txns = await parseCSV(csvContent, config);
+  const result: BackfillResult = {
+    totalRows: txns.length,
+    rowsWithMetadata: 0,
+    matchedExisting: 0,
+    inserted: 0,
+    filledFields: 0,
+    noChange: 0,
+    unmatched: [],
+  };
+
+  // Skip rows that contributed no metadata at all — there's nothing
+  // to backfill.
+  const candidates = txns.filter(t => t.metadata !== null && t.metadata !== undefined);
+  result.rowsWithMetadata = candidates.length;
+  if (candidates.length === 0) return result;
+
+  const db = getDb();
+
+  // Pass 1: bulk-look-up existing matches by external_id. One round-trip
+  // for the whole file rather than N.
+  const externalIds = Array.from(
+    new Set(candidates.map(t => t.metadata!.externalId).filter((v): v is string => Boolean(v))),
+  );
+  const externalIdMatches = new Map<string, number>(); // external_id -> journal_entry_id
+  if (externalIds.length > 0) {
+    const rows = await db.execute(sql`
+      SELECT journal_entry_id, external_id
+      FROM transaction_metadata
+      WHERE external_id IN (${sql.join(externalIds.map(id => sql`${id}`), sql`, `)})
+    `);
+    for (const r of rows.rows) {
+      externalIdMatches.set(r.external_id as string, r.journal_entry_id as number);
+    }
+  }
+
+  // Pass 2: for rows we couldn't resolve via external_id, fall back
+  // to the legacy heuristic — (date, description, amount) on this
+  // account. We bulk-fetch every journal entry on this account that
+  // shares a date with any unresolved row, then match in memory by
+  // (date, lower(trim(description)), amount). One round-trip again.
+  const unresolved = candidates.filter(t => {
+    const ext = t.metadata!.externalId;
+    return !ext || !externalIdMatches.has(ext);
+  });
+
+  // Fingerprint key built from the same triple the legacy fingerprint
+  // helper hashed: date, normalised description, amount.
+  type Triple = string;
+  const triple = (date: string, description: string, amount: string): Triple =>
+    `${date}|${description.toLowerCase().trim()}|${amount}`;
+
+  const tripleMatches = new Map<Triple, number>();
+  if (unresolved.length > 0) {
+    const dates = Array.from(new Set(unresolved.map(t => t.date)));
+    const candidateRows = await db.execute(sql`
+      SELECT je.id, je.date, je.description, be.amount::text AS amount
+      FROM journal_entries je
+      JOIN book_entries be ON be.journal_entry_id = je.id
+      WHERE be.account_id = ${accountId}
+        AND je.date IN (${sql.join(dates.map(d => sql`${d}`), sql`, `)})
+    `);
+    for (const r of candidateRows.rows) {
+      const key = triple(r.date as string, r.description as string, r.amount as string);
+      tripleMatches.set(key, r.id as number);
+    }
+  }
+
+  // Pass 3: build the upsert payloads + record unmatched.
+  const payloads: MetadataPayload[] = [];
+  for (const txn of candidates) {
+    const md = txn.metadata!;
+    let journalId: number | null = null;
+
+    if (md.externalId) {
+      const found = externalIdMatches.get(md.externalId);
+      if (found !== undefined) journalId = found;
+    }
+    if (journalId === null) {
+      const found = tripleMatches.get(triple(txn.date, txn.description, txn.amount));
+      if (found !== undefined) journalId = found;
+    }
+
+    if (journalId === null) {
+      result.unmatched.push({
+        date: txn.date,
+        description: txn.description,
+        amount: txn.amount,
+        externalId: md.externalId ?? null,
+      });
+      continue;
+    }
+
+    result.matchedExisting++;
+    payloads.push(toPayload(journalId, md));
+  }
+
+  if (payloads.length === 0) return result;
+
+  // Pass 4: figure out which payloads will create a new metadata row
+  // vs which will update an existing one — for the response counts.
+  // (The actual write below is a single upsert; we just want to tell
+  // the user what happened.)
+  const journalIds = payloads.map(p => p.journalEntryId);
+  const existingRows = await db.execute(sql`
+    SELECT journal_entry_id,
+           external_id, transaction_time, transaction_type, merchant_name,
+           merchant_emoji, bank_category, currency, local_amount,
+           local_currency, notes, address, receipt_url, raw
+    FROM transaction_metadata
+    WHERE journal_entry_id IN (${sql.join(journalIds.map(id => sql`${id}`), sql`, `)})
+  `);
+  const existingByJournal = new Map<number, Record<string, unknown>>();
+  for (const r of existingRows.rows) {
+    existingByJournal.set(r.journal_entry_id as number, r);
+  }
+
+  const FILLABLE_KEYS = [
+    ['external_id', 'externalId'],
+    ['transaction_time', 'transactionTime'],
+    ['transaction_type', 'transactionType'],
+    ['merchant_name', 'merchantName'],
+    ['merchant_emoji', 'merchantEmoji'],
+    ['bank_category', 'bankCategory'],
+    ['currency', 'currency'],
+    ['local_amount', 'localAmount'],
+    ['local_currency', 'localCurrency'],
+    ['notes', 'notes'],
+    ['address', 'address'],
+    ['receipt_url', 'receiptUrl'],
+    ['raw', 'raw'],
+  ] as const;
+
+  for (const p of payloads) {
+    const existing = existingByJournal.get(p.journalEntryId);
+    if (!existing) {
+      result.inserted++;
+      continue;
+    }
+    let filledThisRow = false;
+    for (const [snake, camel] of FILLABLE_KEYS) {
+      const existingVal = existing[snake];
+      const newVal = p[camel];
+      if ((existingVal === null || existingVal === undefined) && newVal !== null && newVal !== undefined) {
+        filledThisRow = true;
+        break;
+      }
+    }
+    if (filledThisRow) result.filledFields++;
+    else result.noChange++;
+  }
+
+  // Pass 5: single upsert with COALESCE — never overwrite a
+  // previously-saved non-null field.
+  const insertValues = payloads.map(p => sql`(
+    ${p.journalEntryId},
+    ${p.externalId},
+    ${p.transactionTime},
+    ${p.transactionType},
+    ${p.merchantName},
+    ${p.merchantEmoji},
+    ${p.bankCategory},
+    ${p.currency},
+    ${p.localAmount},
+    ${p.localCurrency},
+    ${p.notes},
+    ${p.address},
+    ${p.receiptUrl},
+    ${p.raw === null ? null : sql`${JSON.stringify(p.raw)}::jsonb`}
+  )`);
+
+  await db.execute(sql`
+    INSERT INTO transaction_metadata (
+      journal_entry_id, external_id, transaction_time, transaction_type,
+      merchant_name, merchant_emoji, bank_category, currency,
+      local_amount, local_currency, notes, address, receipt_url, raw
+    )
+    VALUES ${sql.join(insertValues, sql`, `)}
+    ON CONFLICT (journal_entry_id) DO UPDATE SET
+      external_id      = COALESCE(transaction_metadata.external_id, EXCLUDED.external_id),
+      transaction_time = COALESCE(transaction_metadata.transaction_time, EXCLUDED.transaction_time),
+      transaction_type = COALESCE(transaction_metadata.transaction_type, EXCLUDED.transaction_type),
+      merchant_name    = COALESCE(transaction_metadata.merchant_name, EXCLUDED.merchant_name),
+      merchant_emoji   = COALESCE(transaction_metadata.merchant_emoji, EXCLUDED.merchant_emoji),
+      bank_category    = COALESCE(transaction_metadata.bank_category, EXCLUDED.bank_category),
+      currency         = COALESCE(transaction_metadata.currency, EXCLUDED.currency),
+      local_amount     = COALESCE(transaction_metadata.local_amount, EXCLUDED.local_amount),
+      local_currency   = COALESCE(transaction_metadata.local_currency, EXCLUDED.local_currency),
+      notes            = COALESCE(transaction_metadata.notes, EXCLUDED.notes),
+      address          = COALESCE(transaction_metadata.address, EXCLUDED.address),
+      receipt_url      = COALESCE(transaction_metadata.receipt_url, EXCLUDED.receipt_url),
+      raw              = COALESCE(transaction_metadata.raw, EXCLUDED.raw)
+  `);
+
+  return result;
+}

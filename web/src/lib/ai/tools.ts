@@ -1,6 +1,6 @@
 import Decimal from 'decimal.js';
 import { format, subMonths } from 'date-fns';
-import { accountRepo, journalRepo, categoryRepo, propertyRepo, tipRepo, budgetRepo, savingsGoalRepo } from '@/lib/repos';
+import { accountRepo, journalRepo, categoryRepo, propertyRepo, tipRepo, budgetRepo, savingsGoalRepo, aiMemoryRepo } from '@/lib/repos';
 import { calculateEquity } from '@/lib/properties/equity-calculator';
 import { formatCurrency } from '@/lib/utils/formatting';
 import { matchRule } from '@/lib/import/categorizer';
@@ -269,6 +269,40 @@ export const TOOL_DEFINITIONS: Tool[] = [
     },
   },
   {
+    name: 'remember',
+    description:
+      'Save a durable fact about the user that should persist across conversations and be available in future system prompts. Use for: recurring patterns the user describes, financial preferences, naming conventions for transactions, account purposes, categorisation rules they prefer, life facts that affect their finances (e.g. "Pays mortgage on the 28th from Monzo"). DO NOT use for: transient context, sensitive credentials, or facts that change month-to-month.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        content: { type: 'string', description: 'The fact to remember (1-3 sentences, written third-person about the user).' },
+      },
+      required: ['content'],
+    },
+  },
+  {
+    name: 'list_memories',
+    description:
+      'List the persisted facts the assistant currently knows about the user. Use to check whether something is already remembered before adding a duplicate.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {},
+      required: [],
+    },
+  },
+  {
+    name: 'forget',
+    description:
+      'Delete a previously-saved memory by id. Use when the user explicitly asks to forget something, or when a saved fact is no longer accurate.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        memory_id: { type: 'number', description: 'The memory id from list_memories.' },
+      },
+      required: ['memory_id'],
+    },
+  },
+  {
     name: 'get_financial_health_check',
     description:
       'Run a comprehensive financial health check. Analyses savings rate, budget adherence, debt-to-income ratio, emergency fund status, and flags concerns. Composite tool that gathers data from multiple sources.',
@@ -302,6 +336,9 @@ export const TOOL_LABELS: Record<string, string> = {
   get_debt_summary: 'Analysing debt position',
   get_income_expense_summary: 'Calculating income & expenses',
   get_financial_health_check: 'Running financial health check',
+  remember: 'Saving to memory',
+  list_memories: 'Reading memory',
+  forget: 'Removing from memory',
 };
 
 // -------------------------------------------------------------------
@@ -353,9 +390,51 @@ export async function executeTool(
       return executeGetIncomeExpenseSummary(input);
     case 'get_financial_health_check':
       return executeGetFinancialHealthCheck();
+    case 'remember':
+      return executeRemember(input);
+    case 'list_memories':
+      return executeListMemories();
+    case 'forget':
+      return executeForget(input);
     default:
       return { error: `Unknown tool: ${name}` };
   }
+}
+
+// -------------------------------------------------------------------
+// AI memory tools
+// -------------------------------------------------------------------
+
+async function executeRemember(input: Record<string, unknown>) {
+  const content = input.content;
+  if (typeof content !== 'string') {
+    return { error: 'content must be a string' };
+  }
+  try {
+    const memory = await aiMemoryRepo.add(content, 'ai');
+    return { id: memory.id, content: memory.content, source: memory.source };
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : 'Failed to save memory' };
+  }
+}
+
+async function executeListMemories() {
+  const memories = await aiMemoryRepo.list();
+  return memories.map(m => ({
+    id: m.id,
+    content: m.content,
+    source: m.source,
+    createdAt: m.createdAt.toISOString(),
+  }));
+}
+
+async function executeForget(input: Record<string, unknown>) {
+  const memoryId = input.memory_id;
+  if (typeof memoryId !== 'number') {
+    return { error: 'memory_id must be a number' };
+  }
+  const deleted = await aiMemoryRepo.delete(memoryId);
+  return { deleted, memory_id: memoryId };
 }
 
 // -------------------------------------------------------------------

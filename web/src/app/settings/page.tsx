@@ -7,8 +7,10 @@ import KeyRoundedIcon from '@mui/icons-material/KeyRounded';
 import CurrencyPoundRoundedIcon from '@mui/icons-material/CurrencyPoundRounded';
 import StorageRoundedIcon from '@mui/icons-material/StorageRounded';
 import InfoRoundedIcon from '@mui/icons-material/InfoRounded';
+import MemoryRoundedIcon from '@mui/icons-material/MemoryRounded';
 import RulesManager from '@/components/settings/RulesManager';
 import AiModelSelector from '@/components/settings/AiModelSelector';
+import AiMemoryManager from '@/components/settings/AiMemoryManager';
 
 export default function SettingsPage() {
   const handleExportCSV = () => { window.open('/api/export/csv', '_blank'); };
@@ -36,6 +38,14 @@ export default function SettingsPage() {
               the database; <code>MODEL_ID</code> env is the fallback if no row exists.
             </Typography>
           </Box>
+        </SettingsCard>
+
+        <SettingsCard
+          icon={<MemoryRoundedIcon />}
+          iconColor="#B8A9E8"
+          title="AI Memory"
+        >
+          <AiMemoryManager />
         </SettingsCard>
 
         <SettingsCard

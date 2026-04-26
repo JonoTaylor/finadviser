@@ -215,6 +215,18 @@ export const tenancies = pgTable('tenancies', {
 
 export const tipTypeEnum = pgEnum('tip_type', ['tip', 'warning', 'insight']);
 
+export const aiMemorySourceEnum = pgEnum('ai_memory_source', ['user', 'ai']);
+
+// Persistent facts the assistant should remember across conversations.
+// Discrete rows so the user can audit / delete individual entries.
+// Source tracks who created it (user via Settings, AI via remember tool).
+export const aiMemories = pgTable('ai_memories', {
+  id: serial('id').primaryKey(),
+  content: text('content').notNull(),
+  source: aiMemorySourceEnum('source').notNull().default('ai'),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+});
+
 export const appSettings = pgTable('app_settings', {
   key: text('key').primaryKey(),
   value: text('value').notNull(),

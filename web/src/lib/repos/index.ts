@@ -12,5 +12,8 @@ export { appSettingsRepo } from './app-settings.repo';
 export { rentalReportRepo } from './rental-report.repo';
 export { tenancyRepo } from './tenancy.repo';
 export { ownerReportRepo } from './owner-report.repo';
+export { aiMemoryRepo } from './ai-memory.repo';
+export type { AiMemory, AiMemorySource } from './ai-memory.repo';
+export { AI_MEMORY_MAX_CONTENT_LENGTH } from './ai-memory.repo';
 export { documentRepo } from './document.repo';
 export type { DocumentMeta, DocumentKind } from './document.repo';

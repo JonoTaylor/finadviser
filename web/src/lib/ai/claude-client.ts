@@ -4,6 +4,32 @@ import type { ModelMessage, ToolSet } from 'ai';
 import { SYSTEM_PROMPT, CATEGORIZATION_PROMPT, AGENT_SYSTEM_PROMPT } from './prompts';
 import { TOOL_DEFINITIONS, TOOL_LABELS, executeTool } from './tools';
 import { resolveModelId } from './model';
+import { aiMemoryRepo } from '@/lib/repos/ai-memory.repo';
+
+/**
+ * Wrap AGENT_SYSTEM_PROMPT with the user's saved memories so the agent
+ * sees them on every turn. Returns the base prompt unchanged when no
+ * memories exist. Memory loading failures are non-fatal — the agent
+ * still runs without remembered context rather than 500ing.
+ */
+async function buildAgentSystemPrompt(): Promise<string> {
+  try {
+    const memoryBlock = await aiMemoryRepo.renderForPrompt();
+    if (!memoryBlock) return AGENT_SYSTEM_PROMPT;
+    return `${AGENT_SYSTEM_PROMPT}
+
+## Saved memory about the user
+
+These are facts you have saved (or the user has added) about themselves
+across previous conversations. Use them to personalise responses. Manage
+them with the \`remember\`, \`list_memories\`, and \`forget\` tools.
+
+${memoryBlock}`;
+  } catch (err) {
+    console.warn('[ai] failed to load memory for system prompt:', err instanceof Error ? err.message : err);
+    return AGENT_SYSTEM_PROMPT;
+  }
+}
 
 /**
  * AI client backed by Vercel AI Gateway.
@@ -155,7 +181,7 @@ export async function* runAgent(
 
   const result = streamText({
     model: await model(),
-    system: AGENT_SYSTEM_PROMPT,
+    system: await buildAgentSystemPrompt(),
     messages,
     tools: buildAgentTools(),
     // Match the previous 15-iteration cap.

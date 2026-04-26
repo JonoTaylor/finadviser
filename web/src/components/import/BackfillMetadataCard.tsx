@@ -37,8 +37,19 @@ interface BackfillResult {
   inserted: number;
   filledFields: number;
   noChange: number;
-  unmatched: Array<{ date: string; description: string; amount: string; externalId: string | null }>;
+  unmatched: Array<{
+    date: string;
+    description: string;
+    amount: string;
+    externalId: string | null;
+    reason: 'no_match' | 'ambiguous_external_id';
+  }>;
 }
+
+const REASON_LABEL: Record<BackfillResult['unmatched'][number]['reason'], string> = {
+  no_match: 'no match',
+  ambiguous_external_id: 'ambiguous tx_id',
+};
 
 /**
  * Re-upload a Monzo (or other rich) export to enrich existing journal
@@ -174,6 +185,7 @@ export default function BackfillMetadataCard({
                           <TableCell>Description</TableCell>
                           <TableCell align="right">Amount</TableCell>
                           <TableCell>tx_id</TableCell>
+                          <TableCell>Reason</TableCell>
                         </TableRow>
                       </TableHead>
                       <TableBody>
@@ -186,6 +198,15 @@ export default function BackfillMetadataCard({
                             <TableCell align="right">{u.amount}</TableCell>
                             <TableCell sx={{ fontFamily: 'monospace', fontSize: '0.75rem', color: 'text.secondary' }}>
                               {u.externalId ?? '—'}
+                            </TableCell>
+                            <TableCell>
+                              <Chip
+                                size="small"
+                                variant="outlined"
+                                color={u.reason === 'ambiguous_external_id' ? 'warning' : 'default'}
+                                label={REASON_LABEL[u.reason]}
+                                sx={{ height: 22, fontSize: '0.7rem' }}
+                              />
                             </TableCell>
                           </TableRow>
                         ))}

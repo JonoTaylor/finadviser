@@ -31,6 +31,8 @@ export interface BackfillUnmatched {
   description: string;
   amount: string;
   externalId: string | null;
+  /** Why this row didn't get enriched. */
+  reason: 'no_match' | 'ambiguous_external_id';
 }
 
 export interface BackfillResult {
@@ -108,18 +110,33 @@ export async function backfillMetadata(
 
   // Pass 1: bulk-look-up existing matches by external_id. One round-trip
   // for the whole file rather than N.
+  //
+  // The `external_id` column is indexed but not unique (a future bank
+  // could legitimately re-use the same id namespace, so we don't want
+  // to enforce uniqueness at the schema level today). If the DB
+  // already holds more than one journal under the same external_id,
+  // treat that id as ambiguous: don't match, surface in `unmatched`
+  // with a reason hint so the user knows why we skipped it.
   const externalIds = Array.from(
     new Set(candidates.map(t => t.metadata!.externalId).filter((v): v is string => Boolean(v))),
   );
-  const externalIdMatches = new Map<string, number>(); // external_id -> journal_entry_id
+  const externalIdMatches = new Map<string, number>();
+  const ambiguousExternalIds = new Set<string>();
   if (externalIds.length > 0) {
     const rows = await db.execute(sql`
       SELECT journal_entry_id, external_id
       FROM transaction_metadata
       WHERE external_id IN (${sql.join(externalIds.map(id => sql`${id}`), sql`, `)})
     `);
+    const byExternalId = new Map<string, number[]>();
     for (const r of rows.rows) {
-      externalIdMatches.set(r.external_id as string, r.journal_entry_id as number);
+      const list = byExternalId.get(r.external_id as string) ?? [];
+      list.push(r.journal_entry_id as number);
+      byExternalId.set(r.external_id as string, list);
+    }
+    for (const [extId, list] of byExternalId) {
+      if (list.length === 1) externalIdMatches.set(extId, list[0]);
+      else ambiguousExternalIds.add(extId);
     }
   }
 
@@ -181,6 +198,17 @@ export async function backfillMetadata(
     let journalId: number | null = null;
 
     if (md.externalId) {
+      if (ambiguousExternalIds.has(md.externalId)) {
+        // DB has >1 journal under this tx_id — refuse to guess.
+        result.unmatched.push({
+          date: txn.date,
+          description: txn.description,
+          amount: txn.amount,
+          externalId: md.externalId,
+          reason: 'ambiguous_external_id',
+        });
+        continue;
+      }
       const found = externalIdMatches.get(md.externalId);
       if (found !== undefined) journalId = found;
     }
@@ -198,6 +226,7 @@ export async function backfillMetadata(
         description: txn.description,
         amount: txn.amount,
         externalId: md.externalId ?? null,
+        reason: 'no_match',
       });
       continue;
     }
@@ -208,11 +237,46 @@ export async function backfillMetadata(
 
   if (payloads.length === 0) return result;
 
+  // Dedupe by journalEntryId. A single CSV file CAN map two rows to
+  // the same journal — most plausibly when the user has the same
+  // file with a duplicated row, or when the matching falls through
+  // to a different lookup path for two CSV rows pointing at the same
+  // transaction. Postgres' `INSERT … VALUES … ON CONFLICT DO UPDATE`
+  // rejects a single statement that would touch the same conflict
+  // target twice ("cannot affect row a second time"), so we have to
+  // collapse before the upsert. Merge with COALESCE-in-JS — first
+  // payload wins, later payloads only fill its NULLs.
+  const dedupedByJournal = new Map<number, MetadataPayload>();
+  for (const p of payloads) {
+    const existing = dedupedByJournal.get(p.journalEntryId);
+    if (!existing) {
+      dedupedByJournal.set(p.journalEntryId, p);
+      continue;
+    }
+    dedupedByJournal.set(p.journalEntryId, {
+      journalEntryId: p.journalEntryId,
+      externalId:       existing.externalId       ?? p.externalId,
+      transactionTime:  existing.transactionTime  ?? p.transactionTime,
+      transactionType:  existing.transactionType  ?? p.transactionType,
+      merchantName:     existing.merchantName     ?? p.merchantName,
+      merchantEmoji:    existing.merchantEmoji    ?? p.merchantEmoji,
+      bankCategory:     existing.bankCategory     ?? p.bankCategory,
+      currency:         existing.currency         ?? p.currency,
+      localAmount:      existing.localAmount      ?? p.localAmount,
+      localCurrency:    existing.localCurrency    ?? p.localCurrency,
+      notes:            existing.notes            ?? p.notes,
+      address:          existing.address          ?? p.address,
+      receiptUrl:       existing.receiptUrl       ?? p.receiptUrl,
+      raw:              existing.raw              ?? p.raw,
+    });
+  }
+  const dedupedPayloads = Array.from(dedupedByJournal.values());
+
   // Pass 4: figure out which payloads will create a new metadata row
   // vs which will update an existing one — for the response counts.
   // (The actual write below is a single upsert; we just want to tell
   // the user what happened.)
-  const journalIds = payloads.map(p => p.journalEntryId);
+  const journalIds = dedupedPayloads.map(p => p.journalEntryId);
   const existingRows = await db.execute(sql`
     SELECT journal_entry_id,
            external_id, transaction_time, transaction_type, merchant_name,
@@ -242,7 +306,7 @@ export async function backfillMetadata(
     ['raw', 'raw'],
   ] as const;
 
-  for (const p of payloads) {
+  for (const p of dedupedPayloads) {
     const existing = existingByJournal.get(p.journalEntryId);
     if (!existing) {
       result.inserted++;
@@ -263,7 +327,7 @@ export async function backfillMetadata(
 
   // Pass 5: single upsert with COALESCE — never overwrite a
   // previously-saved non-null field.
-  const insertValues = payloads.map(p => sql`(
+  const insertValues = dedupedPayloads.map(p => sql`(
     ${p.journalEntryId},
     ${p.externalId},
     ${p.transactionTime},

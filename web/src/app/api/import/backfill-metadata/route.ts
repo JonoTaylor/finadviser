@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { backfillMetadata } from '@/lib/import/backfill-metadata';
 import { accountRepo } from '@/lib/repos';
+import { getBankConfig } from '@/lib/config/bank-configs';
 
 export const runtime = 'nodejs';
 export const maxDuration = 60;
@@ -36,6 +37,12 @@ export async function POST(request: NextRequest) {
     const bankConfig = form.get('bankConfig');
     if (typeof bankConfig !== 'string' || !bankConfig) {
       return NextResponse.json({ error: 'bankConfig is required' }, { status: 400 });
+    }
+    // Validate the bank config at the boundary so an unknown name
+    // surfaces as 400 instead of falling through to backfillMetadata
+    // and bubbling back as a 500.
+    if (!getBankConfig(bankConfig)) {
+      return NextResponse.json({ error: `Unknown bank config: ${bankConfig}` }, { status: 400 });
     }
     const accountName = form.get('accountName');
     if (typeof accountName !== 'string' || !accountName) {

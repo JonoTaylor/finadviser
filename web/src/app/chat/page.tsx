@@ -22,8 +22,19 @@ import MemoryRoundedIcon from '@mui/icons-material/MemoryRounded';
 import HistoryRoundedIcon from '@mui/icons-material/HistoryRounded';
 import useSWR from 'swr';
 import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 
 const fetcher = (url: string) => fetch(url).then(r => r.json());
+
+// Custom renderers — keep tables horizontally scrollable so a wide
+// breakdown doesn't blow out the chat bubble on narrow viewports.
+const markdownComponents = {
+  table: (props: React.HTMLAttributes<HTMLTableElement>) => (
+    <Box sx={{ overflowX: 'auto', mb: 1.5 }}>
+      <table {...props} />
+    </Box>
+  ),
+};
 
 const markdownSx = {
   '& p': { m: 0, mb: 1.5, lineHeight: 1.7, '&:last-child': { mb: 0 } },
@@ -269,7 +280,9 @@ export default function ChatPage() {
                 >
                   {msg.role === 'assistant' ? (
                     <Box sx={markdownSx}>
-                      <ReactMarkdown>{msg.content}</ReactMarkdown>
+                      <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+                        {msg.content}
+                      </ReactMarkdown>
                     </Box>
                   ) : (
                     <Typography>{msg.content}</Typography>
@@ -306,7 +319,9 @@ export default function ChatPage() {
                   }}
                 >
                   <Box sx={markdownSx}>
-                    <ReactMarkdown>{streamingContent}</ReactMarkdown>
+                    <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+                      {streamingContent}
+                    </ReactMarkdown>
                   </Box>
                 </Paper>
               )}

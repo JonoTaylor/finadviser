@@ -602,8 +602,17 @@ async function executeListUncategorizedInMonth(input: Record<string, unknown>) {
   if (typeof month !== 'string' || !/^\d{4}-\d{2}$/.test(month)) {
     return { error: 'month must be a string in YYYY-MM format' };
   }
-  const limit = (input.limit as number) || 200;
+  // Clamp limit defensively — the AI sometimes serialises numbers as
+  // strings, and we never want a stringy or out-of-range value
+  // forwarded into a SQL `LIMIT` clause.
+  const rawLimit = input.limit;
+  const limit = typeof rawLimit === 'number' && Number.isFinite(rawLimit)
+    ? Math.min(Math.max(Math.trunc(rawLimit), 1), 500)
+    : 200;
   const entries = await journalRepo.listUncategorizedInMonth(month, limit);
+  // Use `amounts` (not `amount`) to match search_transactions — the
+  // value is a pipe-delimited per-account breakdown like
+  // "Monzo:-12.34|Groceries:12.34", not a single scalar.
   return {
     month,
     count: entries.length,
@@ -611,7 +620,7 @@ async function executeListUncategorizedInMonth(input: Record<string, unknown>) {
       id: e.id,
       date: e.date,
       description: e.description,
-      amount: e.entries_summary,
+      amounts: e.entries_summary,
     })),
   };
 }

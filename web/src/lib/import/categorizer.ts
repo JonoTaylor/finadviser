@@ -8,7 +8,12 @@ export async function categorizeTransactions(
 
   for (const txn of transactions) {
     if (txn.isDuplicate) continue;
-    txn.suggestedCategoryId = matchRule(txn.description, rules);
+    // Match against description AND merchantName when present — the
+    // bank's clean merchant name (e.g. Monzo's "Name" column) often
+    // gives a much better signal than the raw description string.
+    txn.suggestedCategoryId =
+      matchRule(txn.description, rules) ??
+      (txn.metadata?.merchantName ? matchRule(txn.metadata.merchantName, rules) : null);
   }
 
   return transactions;

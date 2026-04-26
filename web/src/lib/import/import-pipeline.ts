@@ -2,7 +2,7 @@ import Decimal from 'decimal.js';
 import { parseCSV } from './csv-parser';
 import { checkDuplicates } from './duplicate-detector';
 import { categorizeTransactions } from './categorizer';
-import { accountRepo, journalRepo, fingerprintRepo, importBatchRepo } from '@/lib/repos';
+import { accountRepo, journalRepo, fingerprintRepo, importBatchRepo, transactionMetadataRepo } from '@/lib/repos';
 import { getBankConfig } from '@/lib/config/bank-configs';
 import type { RawTransaction, ImportResult } from '@/lib/types';
 
@@ -128,6 +128,35 @@ async function importTransactions(
         journalEntryId: journalIds[j],
       })),
     );
+
+    // Persist any optional per-transaction metadata (Monzo type /
+    // merchant / emoji / notes / receipt etc.). Sparse — rows
+    // without metadata are skipped so legacy importers cost nothing.
+    const metadataRows = chunk
+      .map((txn, j) => {
+        const md = txn.metadata;
+        if (!md) return null;
+        return {
+          journalEntryId: journalIds[j],
+          externalId: md.externalId ?? null,
+          transactionTime: md.time ?? null,
+          transactionType: md.type ?? null,
+          merchantName: md.merchantName ?? null,
+          merchantEmoji: md.merchantEmoji ?? null,
+          bankCategory: md.bankCategory ?? null,
+          currency: md.currency ?? null,
+          localAmount: md.localAmount ?? null,
+          localCurrency: md.localCurrency ?? null,
+          notes: md.notes ?? null,
+          address: md.address ?? null,
+          receiptUrl: md.receiptUrl ?? null,
+          raw: md.raw ?? null,
+        };
+      })
+      .filter((r): r is NonNullable<typeof r> => r !== null);
+    if (metadataRows.length > 0) {
+      await transactionMetadataRepo.createMany(metadataRows);
+    }
 
     imported += chunk.length;
     onProgress?.(imported, total);

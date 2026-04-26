@@ -9,6 +9,7 @@ import {
   timestamp,
   unique,
   customType,
+  jsonb,
   type AnyPgColumn,
 } from 'drizzle-orm/pg-core';
 
@@ -100,6 +101,30 @@ export const importBatches = pgTable('import_batches', {
   importedCount: integer('imported_count').notNull().default(0),
   duplicateCount: integer('duplicate_count').notNull().default(0),
   importedAt: timestamp('imported_at').notNull().defaultNow(),
+});
+
+// Per-transaction extras pulled from rich exports (Monzo's full CSV
+// being the motivating case). Optional 1:1 with journal_entries —
+// kept in a sidecar table rather than bloating the journal so legacy
+// importers stay simple. `raw` carries any column we didn't promote
+// to a typed field, so future banks don't require a schema change.
+export const transactionMetadata = pgTable('transaction_metadata', {
+  id: serial('id').primaryKey(),
+  journalEntryId: integer('journal_entry_id').notNull().references(() => journalEntries.id, { onDelete: 'cascade' }).unique(),
+  externalId: text('external_id'),
+  transactionTime: text('transaction_time'),
+  transactionType: text('transaction_type'),
+  merchantName: text('merchant_name'),
+  merchantEmoji: text('merchant_emoji'),
+  bankCategory: text('bank_category'),
+  currency: text('currency'),
+  localAmount: text('local_amount'),
+  localCurrency: text('local_currency'),
+  notes: text('notes'),
+  address: text('address'),
+  receiptUrl: text('receipt_url'),
+  raw: jsonb('raw'),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
 });
 
 export const transactionFingerprints = pgTable('transaction_fingerprints', {

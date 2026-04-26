@@ -20,3 +20,5 @@ export type { AiMemory, AiMemorySource } from './ai-memory.repo';
 export { AI_MEMORY_MAX_CONTENT_LENGTH } from '@/lib/ai/memory-constants';
 export { documentRepo } from './document.repo';
 export type { DocumentMeta, DocumentKind } from './document.repo';
+export { transactionMetadataRepo } from './transaction-metadata.repo';
+export type { TransactionMetadata, TransactionMetadataInput } from './transaction-metadata.repo';

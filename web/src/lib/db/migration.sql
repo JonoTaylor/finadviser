@@ -87,6 +87,34 @@ CREATE TABLE IF NOT EXISTS ai_memories (
 
 CREATE INDEX IF NOT EXISTS idx_ai_memories_created_at ON ai_memories(created_at DESC);
 
+-- Per-transaction extras pulled from rich exports (Monzo's full CSV
+-- being the motivating case). Optional 1:1 with journal_entries —
+-- kept in a sidecar table rather than bloating the journal so legacy
+-- importers stay simple. `raw` (jsonb) carries any column we didn't
+-- promote to a typed field, so future banks don't require a schema
+-- change to capture additional data.
+CREATE TABLE IF NOT EXISTS transaction_metadata (
+    id SERIAL PRIMARY KEY,
+    journal_entry_id INTEGER NOT NULL UNIQUE REFERENCES journal_entries(id) ON DELETE CASCADE,
+    external_id TEXT,
+    transaction_time TEXT,
+    transaction_type TEXT,
+    merchant_name TEXT,
+    merchant_emoji TEXT,
+    bank_category TEXT,
+    currency TEXT,
+    local_amount TEXT,
+    local_currency TEXT,
+    notes TEXT,
+    address TEXT,
+    receipt_url TEXT,
+    raw JSONB,
+    created_at TIMESTAMP NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_transaction_metadata_external_id
+    ON transaction_metadata(external_id) WHERE external_id IS NOT NULL;
+
 -- Document storage. Holds the original binary (BYTEA) plus metadata for
 -- AI-extracted source documents (currently tenancy agreements; the enum
 -- leaves room for more). property_id / tenancy_id are nullable + ON

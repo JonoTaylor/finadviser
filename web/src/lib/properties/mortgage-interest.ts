@@ -183,11 +183,14 @@ export function computeInterestForRange(params: {
 }
 
 /**
- * Slice a calculation into one entry per calendar month (last day of
- * the month, or last day of the range if the month exceeds it). Used
- * by the "Generate monthly entries" feature so each month gets a
- * single journal stamped on its last day with the correct sub-rate
- * interest. Months with zero interest (all uncovered) are omitted.
+ * Slice a calculation into one entry per calendar month, dated to the
+ * last day of that month within the range (or the last day of the
+ * range when it ends mid-month). Returned as the `months` field of
+ * the per-mortgage computed-interest API response so the UI can show
+ * a month-by-month preview of the year. This function does NOT
+ * generate journal entries — that's intentionally out of scope for
+ * the current calculator (would double-count once bank statements are
+ * imported). Months with zero interest (all uncovered) are omitted.
  */
 export function monthlyBreakdown(calc: InterestCalculation): Array<{
   month: string; // YYYY-MM

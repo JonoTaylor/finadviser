@@ -70,7 +70,15 @@ export default function MortgageCard({
               arrow
               title="Interest-only: principal stays at the original amount until the loan is refinanced or repaid. Used by the S.24 calculator to compute interest from the rate history."
             >
-              <Typography variant="body2" color="text.secondary" sx={{ cursor: 'help' }}>
+              {/* tabIndex makes the tooltip's help text keyboard-reachable;
+                  the underlying span is otherwise non-focusable. */}
+              <Typography
+                component="span"
+                variant="body2"
+                color="text.secondary"
+                tabIndex={0}
+                sx={{ cursor: 'help' }}
+              >
                 Interest-only
               </Typography>
             </Tooltip>

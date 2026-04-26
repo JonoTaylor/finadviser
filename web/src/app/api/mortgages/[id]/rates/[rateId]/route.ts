@@ -1,8 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { propertyRepo } from '@/lib/repos';
-
-const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
-const RATE_RE = /^\d+(\.\d+)?$/;
+import {
+  isValidCalendarDate,
+  isValidRate,
+  RATE_VALIDATION_MESSAGE,
+  DATE_VALIDATION_MESSAGE,
+} from '@/lib/properties/mortgage-rate-validation';
 
 export async function PATCH(
   request: NextRequest,
@@ -20,14 +23,14 @@ export async function PATCH(
     const body = (await request.json().catch(() => ({}))) || {};
     const patch: { rate?: string; effectiveDate?: string } = {};
     if (body.rate !== undefined) {
-      if (typeof body.rate !== 'string' || !RATE_RE.test(body.rate)) {
-        return NextResponse.json({ error: 'rate must be a numeric string' }, { status: 400 });
+      if (!isValidRate(body.rate)) {
+        return NextResponse.json({ error: RATE_VALIDATION_MESSAGE }, { status: 400 });
       }
       patch.rate = body.rate;
     }
     if (body.effectiveDate !== undefined) {
-      if (typeof body.effectiveDate !== 'string' || !ISO_DATE.test(body.effectiveDate)) {
-        return NextResponse.json({ error: 'effectiveDate must be YYYY-MM-DD' }, { status: 400 });
+      if (!isValidCalendarDate(body.effectiveDate)) {
+        return NextResponse.json({ error: DATE_VALIDATION_MESSAGE }, { status: 400 });
       }
       patch.effectiveDate = body.effectiveDate;
     }

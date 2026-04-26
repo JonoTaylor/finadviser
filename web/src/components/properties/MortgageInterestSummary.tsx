@@ -1,6 +1,6 @@
 'use client';
 
-import useSWR from 'swr';
+import useSWR, { type SWRResponse } from 'swr';
 import {
   Card,
   CardContent,
@@ -134,7 +134,7 @@ function YearColumn({
 function ComputedBlock({
   state,
 }: {
-  state: ReturnType<typeof useSWR<SummaryResponse>>;
+  state: SWRResponse<SummaryResponse, Error>;
 }) {
   if (state.isLoading) {
     return (

@@ -5,6 +5,27 @@ export interface ColumnMapping {
   debit?: string;
   credit?: string;
   reference?: string;
+
+  // Optional extras for rich exports (Monzo). Every field below is
+  // optional — banks that don't have these columns simply omit them
+  // and the parser writes nothing into transaction_metadata.
+  externalId?: string;       // e.g. Monzo "Transaction ID"
+  time?: string;             // e.g. Monzo "Time"
+  type?: string;             // e.g. Monzo "Type"
+  merchantName?: string;     // e.g. Monzo "Name"
+  merchantEmoji?: string;    // e.g. Monzo "Emoji"
+  bankCategory?: string;     // e.g. Monzo "Category"
+  currency?: string;
+  localAmount?: string;
+  localCurrency?: string;
+  notes?: string;            // e.g. Monzo "Notes and #tags"
+  address?: string;
+  receiptUrl?: string;       // e.g. Monzo "Receipt"
+  // Some banks split debits and credits into two columns under
+  // different names. These act as aliases for `debit` / `credit`
+  // (Monzo uses "Money Out" / "Money In").
+  moneyOut?: string;
+  moneyIn?: string;
 }
 
 export interface BankConfig {
@@ -59,6 +80,34 @@ export const bankConfigs: Record<string, BankConfig> = {
       description: 'Description',
       debit: 'Debit',
       credit: 'Credit',
+    },
+    skipRows: 0,
+    encoding: 'utf-8',
+    delimiter: ',',
+    signConvention: 'standard',
+    amountMultiplier: 1.0,
+  },
+  'monzo': {
+    name: 'monzo',
+    description: 'Monzo (full export — captures merchant, type, notes, currency, etc.)',
+    dateFormat: 'DD/MM/YYYY',
+    columns: {
+      date: 'Date',
+      description: 'Description',
+      amount: 'Amount',
+      reference: 'Notes and #tags',
+      externalId: 'Transaction ID',
+      time: 'Time',
+      type: 'Type',
+      merchantName: 'Name',
+      merchantEmoji: 'Emoji',
+      bankCategory: 'Category',
+      currency: 'Currency',
+      localAmount: 'Local amount',
+      localCurrency: 'Local currency',
+      notes: 'Notes and #tags',
+      address: 'Address',
+      receiptUrl: 'Receipt',
     },
     skipRows: 0,
     encoding: 'utf-8',

@@ -7,6 +7,9 @@ import CurrencyPoundRoundedIcon from '@mui/icons-material/CurrencyPoundRounded';
 import StorageRoundedIcon from '@mui/icons-material/StorageRounded';
 import InfoRoundedIcon from '@mui/icons-material/InfoRounded';
 import MemoryRoundedIcon from '@mui/icons-material/MemoryRounded';
+import AccountBalanceRoundedIcon from '@mui/icons-material/AccountBalanceRounded';
+import LinkRoundedIcon from '@mui/icons-material/LinkRounded';
+import Link from 'next/link';
 import RulesManager from '@/components/settings/RulesManager';
 import AiModelSelector from '@/components/settings/AiModelSelector';
 import AiMemoryManager from '@/components/settings/AiMemoryManager';
@@ -28,6 +31,27 @@ export default function SettingsPage() {
 
       <Stack spacing={2.5}>
         <BankCoverageCard />
+
+        <SettingsCard
+          icon={<AccountBalanceRoundedIcon />}
+          tile={softTokens.lavender.main}
+          ink={softTokens.lavender.ink}
+          title="Bank connections"
+        >
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
+            Manage live data feeds from your banks and credit cards. Connect a provider, map its
+            accounts to existing ones, sync transactions on demand. Reconsent every 90 days per PSD2.
+          </Typography>
+          <Button
+            component={Link}
+            href="/settings/connections"
+            size="small"
+            variant="outlined"
+            startIcon={<LinkRoundedIcon />}
+          >
+            Manage connections
+          </Button>
+        </SettingsCard>
 
         <SettingsCard
           icon={<KeyRoundedIcon />}

@@ -25,6 +25,10 @@ const PUBLIC_PATHS = new Set([
   '/login',
   '/api/auth/login',
   '/api/auth/logout',
+  // Vercel Cron hits this with its own Authorization: Bearer
+  // ${CRON_SECRET} header; the route handler verifies that token
+  // itself, so we let it past the session-cookie gate here.
+  '/api/cron/sync-connections',
 ]);
 
 export async function middleware(req: NextRequest) {

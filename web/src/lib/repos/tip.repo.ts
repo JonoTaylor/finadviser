@@ -17,6 +17,46 @@ export const tipRepo = {
     return row;
   },
 
+  /**
+   * Idempotent insert keyed on `tag`. The partial unique index
+   * (tag) WHERE dismissed_at IS NULL enforces "one active tip per
+   * tag at a time"; this helper relies on that to avoid duplicates
+   * when the daily cron runs twice in a window or the same condition
+   * triggers two tip writes.
+   *
+   * Returns true if a new row was inserted, false if an active tip
+   * with the same tag already existed.
+   */
+  async upsertTagged(data: {
+    tag: string;
+    content: string;
+    tipType?: 'tip' | 'warning' | 'insight';
+    priority?: number;
+  }): Promise<boolean> {
+    const db = getDb();
+    const result = await db.execute(sql`
+      INSERT INTO ai_tips (content, tip_type, priority, tag)
+      VALUES (${data.content}, ${data.tipType ?? 'tip'}, ${data.priority ?? 0}, ${data.tag})
+      ON CONFLICT (tag) WHERE tag IS NOT NULL AND dismissed_at IS NULL DO NOTHING
+      RETURNING id
+    `);
+    return result.rows.length > 0;
+  },
+
+  /**
+   * Dismiss any active tip with the given tag. Used to clear an
+   * "expiring" tip once the connection has been reconnected (so the
+   * new consent_expires_at no longer trips the 7-day window).
+   */
+  async dismissByTag(tag: string) {
+    const db = getDb();
+    await db.execute(sql`
+      UPDATE ai_tips
+         SET dismissed_at = now()
+       WHERE tag = ${tag} AND dismissed_at IS NULL
+    `);
+  },
+
   async listActive() {
     const db = getDb();
     return db

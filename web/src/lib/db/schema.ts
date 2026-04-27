@@ -284,6 +284,10 @@ export const aiTips = pgTable('ai_tips', {
   content: text('content').notNull(),
   tipType: tipTypeEnum('tip_type').notNull().default('tip'),
   priority: integer('priority').notNull().default(0),
+  // Stable dedup handle so e.g. an "expiring soon" cron run only ever
+  // has one active tip per connection, not one per cron tick. Active
+  // rows (dismissed_at IS NULL) are uniquely indexed on tag.
+  tag: text('tag'),
   createdAt: timestamp('created_at').notNull().defaultNow(),
   dismissedAt: timestamp('dismissed_at'),
 });

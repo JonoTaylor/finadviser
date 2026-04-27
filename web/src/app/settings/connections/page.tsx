@@ -4,7 +4,7 @@ import { useState, Suspense } from 'react';
 import useSWR from 'swr';
 import {
   Box, Typography, Card, CardContent, Button, Stack, Chip, Alert, IconButton, Snackbar,
-  Dialog, DialogTitle, DialogContent, DialogActions,
+  Dialog, DialogTitle, DialogContent, DialogActions, TextField,
 } from '@mui/material';
 import AccountBalanceRoundedIcon from '@mui/icons-material/AccountBalanceRounded';
 import ArrowBackRoundedIcon from '@mui/icons-material/ArrowBackRounded';
@@ -13,6 +13,7 @@ import LinkRoundedIcon from '@mui/icons-material/LinkRounded';
 import LinkOffRoundedIcon from '@mui/icons-material/LinkOffRounded';
 import SyncRoundedIcon from '@mui/icons-material/SyncRounded';
 import HistoryRoundedIcon from '@mui/icons-material/HistoryRounded';
+import KeyRoundedIcon from '@mui/icons-material/KeyRounded';
 import { format, formatDistanceToNow } from 'date-fns';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
@@ -290,6 +291,11 @@ function ConnectionsPageInner() {
             </Stack>
           </CardContent>
         </Card>
+
+        <MonzoManualTokenCard onSaved={(message) => {
+          setSnack({ open: true, severity: 'success', message });
+          mutate();
+        }} />
       </Stack>
 
       <Dialog open={confirmDelete !== null} onClose={() => setConfirmDelete(null)}>
@@ -337,5 +343,90 @@ function DataPair({ label, value }: { label: string; value: string }) {
       </Typography>
       <Typography variant="body2" sx={{ fontWeight: 500 }}>{value}</Typography>
     </Box>
+  );
+}
+
+function MonzoManualTokenCard({ onSaved }: { onSaved: (message: string) => void }) {
+  const [token, setToken] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [localError, setLocalError] = useState<string | null>(null);
+  const router = useRouter();
+
+  async function handleSubmit() {
+    if (!token.trim()) return;
+    setSubmitting(true);
+    setLocalError(null);
+    try {
+      const res = await fetch('/api/banking/connections/monzo/manual', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ accessToken: token.trim() }),
+      });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body?.error ?? `Request failed: ${res.status}`);
+      onSaved(`Monzo connected via manual token. ${body.accountsAvailable} account${body.accountsAvailable === 1 ? '' : 's'} ready to map.`);
+      setToken('');
+      router.push(`/settings/connections/${body.connectionId}/map`);
+    } catch (e) {
+      setLocalError(e instanceof Error ? e.message : 'Failed to validate token');
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <Card sx={{ borderLeft: `3px solid ${softTokens.lemon.deep}` }}>
+      <CardContent>
+        <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 1.5, mb: 1.5 }}>
+          <Box sx={{
+            width: 36, height: 36, borderRadius: 2.5,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            bgcolor: softTokens.lemon.main, color: softTokens.lemon.ink,
+          }}>
+            <KeyRoundedIcon sx={{ fontSize: 20 }} />
+          </Box>
+          <Box sx={{ flex: 1 }}>
+            <Typography variant="h6">Monzo: manual token (playground)</Typography>
+            <Typography variant="caption" color="text.secondary">
+              Workaround when your Monzo OAuth client is not Confidential.
+            </Typography>
+          </Box>
+        </Box>
+
+        <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+          Open <a href="https://developers.monzo.com/api/playground" target="_blank" rel="noreferrer">developers.monzo.com/api/playground</a>,
+          tap <strong>Authorise</strong> on the access token row, copy the token, and paste it here.
+          The token is good for 6 hours; you&apos;ll need to repeat this when it expires (or get a Confidential client from
+          {' '}<a href="mailto:developer-support@monzo.com">developer-support@monzo.com</a> for refresh-token support).
+        </Typography>
+
+        <TextField
+          label="Monzo access token"
+          fullWidth
+          size="small"
+          type="password"
+          autoComplete="off"
+          value={token}
+          onChange={(e) => setToken(e.target.value)}
+          placeholder="eyJhbGciOi..."
+          sx={{ mb: 1.5 }}
+        />
+
+        {localError && (
+          <Alert severity="error" sx={{ mb: 1.5 }}>{localError}</Alert>
+        )}
+
+        <Stack direction="row" spacing={1.5}>
+          <Button
+            variant="contained"
+            size="small"
+            onClick={handleSubmit}
+            disabled={submitting || !token.trim()}
+          >
+            {submitting ? 'Validating...' : 'Save token + connect'}
+          </Button>
+        </Stack>
+      </CardContent>
+    </Card>
   );
 }

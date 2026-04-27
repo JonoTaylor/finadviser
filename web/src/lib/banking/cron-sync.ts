@@ -79,11 +79,28 @@ export async function runDailySync(): Promise<CronSummary> {
         txnsAdded: outcome.txnsAdded,
         txnsUpdated: outcome.txnsUpdated,
       });
-      await bankingRepo.markSynced(conn.id);
-      // Clear any prior sync-error tip; the next failure will
-      // re-write it.
-      await tipRepo.dismissByTag(`connection:${conn.id}:sync-error`);
       summary.synced += 1;
+
+      // Bookkeeping after a successful sync: stamp last_synced_at,
+      // clear any persisted last_error, dismiss the prior sync-error
+      // tip. Each runs in its own try/catch so a transient blip on
+      // any one of them does NOT re-mark the already-finished run as
+      // status='error' with zero counts. The summary stays correct.
+      try {
+        await bankingRepo.markSynced(conn.id);
+      } catch (e) {
+        console.error(`[cron] markSynced failed for connection ${conn.id}:`, e);
+      }
+      try {
+        await bankingRepo.setConnectionStatus(conn.id, newStatus, { lastError: null });
+      } catch (e) {
+        console.error(`[cron] clear lastError failed for connection ${conn.id}:`, e);
+      }
+      try {
+        await tipRepo.dismissByTag(`connection:${conn.id}:sync-error`);
+      } catch (e) {
+        console.error(`[cron] dismiss sync-error tip failed for connection ${conn.id}:`, e);
+      }
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'unknown error';
       await bankingRepo.finishSyncRun(runId, {
@@ -109,14 +126,25 @@ export async function runDailySync(): Promise<CronSummary> {
 }
 
 function computeNewStatus(conn: ConnectionRow): ConnectionStatus {
-  // Pending stays pending; consent isn't established yet.
-  if (conn.status === 'pending' || conn.status === 'revoked') return conn.status;
+  // Pending / revoked / error stay where they are: each indicates a
+  // user-action requirement (finish consent, reconnect, look at the
+  // error) that the cron can't satisfy on its own. Auto-recovering
+  // an `error` connection to `active` purely on consent_expires_at
+  // would hide the "Reconnect" CTA in the settings UI even though
+  // the underlying problem (e.g. revoked at the bank, malformed
+  // requisition) is unfixed.
+  if (
+    conn.status === 'pending' ||
+    conn.status === 'revoked' ||
+    conn.status === 'error'
+  ) {
+    return conn.status;
+  }
 
   if (!conn.consentExpiresAt) {
     // No expiry recorded but status implies one (active/expiring/
-    // expired/error): leave as-is. Migration to add the field would
-    // surface this case; in practice every active connection has
-    // an expiry set by createConsent.
+    // expired). Leave as-is; in practice every active connection
+    // has an expiry set by createConsent.
     return conn.status;
   }
 

@@ -63,7 +63,10 @@ export const tipRepo = {
       .select()
       .from(aiTips)
       .where(isNull(aiTips.dismissedAt))
-      .orderBy(aiTips.priority, aiTips.createdAt);
+      // Higher `priority` = more urgent. Newer first within a tier so
+      // freshly-written warnings (e.g. expiring consent flagged by
+      // today's cron) bubble above stale tips at the same level.
+      .orderBy(sql`${aiTips.priority} DESC`, sql`${aiTips.createdAt} DESC`);
   },
 
   async dismiss(id: number) {

@@ -170,11 +170,21 @@ function AddInvestmentDialog({
 }) {
   const [name, setName] = useState('');
   const [kind, setKind] = useState('pension');
-  const [ownerId, setOwnerId] = useState<number | ''>(owners[0]?.id ?? '');
+  const [ownerId, setOwnerId] = useState<number | ''>('');
   const [initialBalance, setInitialBalance] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
-  const reset = () => { setName(''); setKind('pension'); setOwnerId(owners[0]?.id ?? ''); setInitialBalance(''); };
+  // owners loads asynchronously via SWR. The first render sees
+  // an empty array; the second (after owners arrives) needs to
+  // fill in the default ownerId so the user isn't forced to pick
+  // every time. "Adjust state during render" idiom rather than
+  // useEffect to avoid an extra render flash.
+  const firstOwnerId = owners[0]?.id;
+  if (ownerId === '' && firstOwnerId !== undefined) {
+    setOwnerId(firstOwnerId);
+  }
+
+  const reset = () => { setName(''); setKind('pension'); setOwnerId(firstOwnerId ?? ''); setInitialBalance(''); };
 
   const handleSubmit = async () => {
     if (!name.trim() || ownerId === '') return;

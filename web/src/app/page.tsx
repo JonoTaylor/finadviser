@@ -15,7 +15,7 @@ import SavingsGoalsCard from '@/components/dashboard/SavingsGoalsCard';
 const fetcher = (url: string) => fetch(url).then(r => r.json());
 
 export default function DashboardPage() {
-  const { data: balances } = useSWR('/api/accounts?balances=true', fetcher);
+  const { data: balances, isLoading: loadingBalances } = useSWR('/api/accounts?balances=true', fetcher);
   const { data: spending, isLoading: loadingSpending } = useSWR('/api/journal/monthly-spending', fetcher);
   const { data: journalData, isLoading: loadingJournal } = useSWR('/api/journal?limit=10', fetcher);
 
@@ -43,12 +43,12 @@ export default function DashboardPage() {
           <YourShareCard />
         </Grid>
         <Grid size={{ xs: 12, sm: 6, lg: 3 }}>
-          {loadingSpending ? <Skeleton variant="rounded" height={180} sx={{ borderRadius: 5 }} /> : (
+          {(loadingSpending || loadingBalances) ? <Skeleton variant="rounded" height={180} sx={{ borderRadius: 5 }} /> : (
             <MonthlySummaryCard spending={spending ?? []} balances={balances ?? []} />
           )}
         </Grid>
         <Grid size={{ xs: 12, sm: 6, lg: 3 }}>
-          {loadingSpending ? <Skeleton variant="rounded" height={180} sx={{ borderRadius: 5 }} /> : (
+          {(loadingSpending || loadingBalances) ? <Skeleton variant="rounded" height={180} sx={{ borderRadius: 5 }} /> : (
             <SavingsRateCard spending={spending ?? []} balances={balances ?? []} />
           )}
         </Grid>

@@ -40,13 +40,30 @@ export async function POST(
       asOfDate = body.asOfDate;
     }
 
-    const result = await setInvestmentBalance({
-      accountId,
-      newBalance: newBalance.trim(),
-      asOfDate,
-      description: typeof body.description === 'string' ? body.description : undefined,
-    });
-    return NextResponse.json({ accountId, ...result, asOfDate });
+    try {
+      const result = await setInvestmentBalance({
+        accountId,
+        newBalance: newBalance.trim(),
+        asOfDate,
+        description: typeof body.description === 'string' ? body.description : undefined,
+      });
+      return NextResponse.json({ accountId, ...result, asOfDate });
+    } catch (error) {
+      // Map known client-fault errors thrown by setInvestmentBalance
+      // to 400/404 so the UI / AI tool can distinguish bad input
+      // from server failure. The "Investment Adjustments missing"
+      // case stays a 500 — that's a deploy-time DB issue, not user
+      // input.
+      const message = error instanceof Error ? error.message : 'Failed to update balance';
+      if (message.startsWith('Account ') && message.includes('not found')) {
+        return NextResponse.json({ error: message }, { status: 404 });
+      }
+      if (message.includes('not flagged as an investment') ||
+          message.includes('Investment accounts must be ASSET type')) {
+        return NextResponse.json({ error: message }, { status: 400 });
+      }
+      throw error;
+    }
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Failed to update balance';
     return NextResponse.json({ error: message }, { status: 500 });

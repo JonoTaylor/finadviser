@@ -413,7 +413,13 @@ export const TOOL_DEFINITIONS: Tool[] = [
       type: 'object' as const,
       properties: {
         account_id: { type: 'number' },
-        owner_id: { type: 'number', description: 'Owner id, or null to mark as shared.' },
+        owner_id: {
+          // Schema allows null because the executor explicitly handles
+          // owner_id=null as "mark account shared". Without nullable
+          // typing here the AI couldn't actually pass null.
+          type: ['number', 'null'],
+          description: 'Owner id, or null to mark as shared.',
+        },
       },
       required: ['account_id'],
     },

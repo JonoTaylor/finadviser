@@ -2,7 +2,7 @@ import Decimal from 'decimal.js';
 import { sql } from 'drizzle-orm';
 import { getDb } from '@/lib/db';
 import { propertyRepo } from '@/lib/repos';
-import { calculateAllEquity } from './equity-calculator';
+import { calculateEquity } from './equity-calculator';
 
 /**
  * "Your share" net worth — owner-scoped instead of household-aggregate.
@@ -52,20 +52,24 @@ export async function calculatePersonalNetWorth(ownerId: number): Promise<Person
 
   const db = getDb();
 
-  // Property equity. calculateAllEquity returns Record<propertyId, OwnerEquityData[]>.
-  const equityByProperty = await calculateAllEquity();
+  // Property equity. Fetch the property list ONCE and run
+  // calculateEquity per property in parallel — calculateAllEquity
+  // would re-fetch listProperties internally, doubling the
+  // round-trip on every dashboard load.
   const properties = await propertyRepo.listProperties();
-  const propertyIndex = new Map<number, string>(properties.map(p => [p.id, p.name]));
+  const equitySlices = await Promise.all(properties.map(p => calculateEquity(p.id)));
 
   let propertyEquity = new Decimal(0);
   const perProperty: PersonalNetWorth['perProperty'] = [];
-  for (const [propertyIdStr, owners] of Object.entries(equityByProperty)) {
-    const slice = owners.find(o => o.ownerId === ownerId);
+  for (let i = 0; i < properties.length; i++) {
+    const property = properties[i];
+    const ownersForProperty = equitySlices[i];
+    const slice = ownersForProperty.find(o => o.ownerId === ownerId);
     if (!slice) continue;
     propertyEquity = propertyEquity.plus(slice.equityAmount);
     perProperty.push({
-      propertyId: Number(propertyIdStr),
-      propertyName: propertyIndex.get(Number(propertyIdStr)) ?? `Property ${propertyIdStr}`,
+      propertyId: property.id,
+      propertyName: property.name,
       equityPct: slice.equityPct,
       equityAmount: slice.equityAmount.toFixed(2),
     });

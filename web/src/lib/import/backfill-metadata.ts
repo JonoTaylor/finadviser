@@ -325,8 +325,14 @@ export async function backfillMetadata(
     else result.noChange++;
   }
 
-  // Pass 5: single upsert with COALESCE — never overwrite a
+  // Pass 5: chunked upsert with COALESCE — never overwrite a
   // previously-saved non-null field.
+  //
+  // Chunking keeps each statement well under Postgres' 65535
+  // parameter cap (we use 14 params per row, so 200 rows = 2800
+  // params — leaves plenty of headroom) and keeps the Neon HTTP
+  // request body modest. Matches the chunking pattern already used
+  // by the regular journal/book-entry import.
   //
   // The `raw` column is jsonb. Bind the value as either a JSON string
   // or NULL and apply the `::jsonb` cast in SQL on every row, so
@@ -334,45 +340,49 @@ export async function backfillMetadata(
   // sees the same shape. Without the cast, mixing populated rows
   // (text-bound) with empty rows (NULL-bound) trips "could not
   // determine data type of parameter $N".
-  const insertValues = dedupedPayloads.map(p => sql`(
-    ${p.journalEntryId},
-    ${p.externalId},
-    ${p.transactionTime},
-    ${p.transactionType},
-    ${p.merchantName},
-    ${p.merchantEmoji},
-    ${p.bankCategory},
-    ${p.currency},
-    ${p.localAmount},
-    ${p.localCurrency},
-    ${p.notes},
-    ${p.address},
-    ${p.receiptUrl},
-    ${p.raw === null ? null : JSON.stringify(p.raw)}::jsonb
-  )`);
+  const UPSERT_CHUNK_SIZE = 200;
+  for (let i = 0; i < dedupedPayloads.length; i += UPSERT_CHUNK_SIZE) {
+    const chunk = dedupedPayloads.slice(i, i + UPSERT_CHUNK_SIZE);
+    const insertValues = chunk.map(p => sql`(
+      ${p.journalEntryId},
+      ${p.externalId},
+      ${p.transactionTime},
+      ${p.transactionType},
+      ${p.merchantName},
+      ${p.merchantEmoji},
+      ${p.bankCategory},
+      ${p.currency},
+      ${p.localAmount},
+      ${p.localCurrency},
+      ${p.notes},
+      ${p.address},
+      ${p.receiptUrl},
+      ${p.raw === null ? null : JSON.stringify(p.raw)}::jsonb
+    )`);
 
-  await db.execute(sql`
-    INSERT INTO transaction_metadata (
-      journal_entry_id, external_id, transaction_time, transaction_type,
-      merchant_name, merchant_emoji, bank_category, currency,
-      local_amount, local_currency, notes, address, receipt_url, raw
-    )
-    VALUES ${sql.join(insertValues, sql`, `)}
-    ON CONFLICT (journal_entry_id) DO UPDATE SET
-      external_id      = COALESCE(transaction_metadata.external_id, EXCLUDED.external_id),
-      transaction_time = COALESCE(transaction_metadata.transaction_time, EXCLUDED.transaction_time),
-      transaction_type = COALESCE(transaction_metadata.transaction_type, EXCLUDED.transaction_type),
-      merchant_name    = COALESCE(transaction_metadata.merchant_name, EXCLUDED.merchant_name),
-      merchant_emoji   = COALESCE(transaction_metadata.merchant_emoji, EXCLUDED.merchant_emoji),
-      bank_category    = COALESCE(transaction_metadata.bank_category, EXCLUDED.bank_category),
-      currency         = COALESCE(transaction_metadata.currency, EXCLUDED.currency),
-      local_amount     = COALESCE(transaction_metadata.local_amount, EXCLUDED.local_amount),
-      local_currency   = COALESCE(transaction_metadata.local_currency, EXCLUDED.local_currency),
-      notes            = COALESCE(transaction_metadata.notes, EXCLUDED.notes),
-      address          = COALESCE(transaction_metadata.address, EXCLUDED.address),
-      receipt_url      = COALESCE(transaction_metadata.receipt_url, EXCLUDED.receipt_url),
-      raw              = COALESCE(transaction_metadata.raw, EXCLUDED.raw)
-  `);
+    await db.execute(sql`
+      INSERT INTO transaction_metadata (
+        journal_entry_id, external_id, transaction_time, transaction_type,
+        merchant_name, merchant_emoji, bank_category, currency,
+        local_amount, local_currency, notes, address, receipt_url, raw
+      )
+      VALUES ${sql.join(insertValues, sql`, `)}
+      ON CONFLICT (journal_entry_id) DO UPDATE SET
+        external_id      = COALESCE(transaction_metadata.external_id, EXCLUDED.external_id),
+        transaction_time = COALESCE(transaction_metadata.transaction_time, EXCLUDED.transaction_time),
+        transaction_type = COALESCE(transaction_metadata.transaction_type, EXCLUDED.transaction_type),
+        merchant_name    = COALESCE(transaction_metadata.merchant_name, EXCLUDED.merchant_name),
+        merchant_emoji   = COALESCE(transaction_metadata.merchant_emoji, EXCLUDED.merchant_emoji),
+        bank_category    = COALESCE(transaction_metadata.bank_category, EXCLUDED.bank_category),
+        currency         = COALESCE(transaction_metadata.currency, EXCLUDED.currency),
+        local_amount     = COALESCE(transaction_metadata.local_amount, EXCLUDED.local_amount),
+        local_currency   = COALESCE(transaction_metadata.local_currency, EXCLUDED.local_currency),
+        notes            = COALESCE(transaction_metadata.notes, EXCLUDED.notes),
+        address          = COALESCE(transaction_metadata.address, EXCLUDED.address),
+        receipt_url      = COALESCE(transaction_metadata.receipt_url, EXCLUDED.receipt_url),
+        raw              = COALESCE(transaction_metadata.raw, EXCLUDED.raw)
+    `);
+  }
 
   return result;
 }

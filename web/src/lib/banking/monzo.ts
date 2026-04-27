@@ -282,36 +282,64 @@ function humanizeProduct(type?: string, description?: string): string | null {
 }
 
 /**
- * GET /transactions. The dateFrom / dateTo become RFC3339 since/before
- * params; a YYYY-MM-DD-only range is treated as midnight UTC at each
- * boundary (Monzo's API accepts that). expand[]=merchant inlines the
- * merchant object so we don't have to N+1 to /merchants.
+ * GET /transactions with cursor pagination. Each page is up to 100
+ * transactions (Monzo's max). When a page returns the full 100 we
+ * issue another request using the last transaction id as the
+ * `since` cursor; the loop ends when a page returns < 100 or 0
+ * rows. expand[]=merchant inlines the merchant object so each page
+ * is one round-trip rather than N+1.
  *
- * limit defaults to 100 (Monzo's max); the daily sync window is
- * always small so we don't paginate. PR for higher-volume cases
- * would loop using the last txn id as `since` cursor.
+ * `since` accepts EITHER an RFC3339 timestamp OR a transaction id.
+ * The first page uses the timestamp; subsequent pages switch to the
+ * id-based cursor so we don't re-fetch transactions we've already
+ * seen and never miss any when more than 100 land in the window.
+ *
+ * Safety cap (PAGE_LIMIT) prevents an infinite loop in the
+ * pathological case where Monzo somehow returns 100 rows on every
+ * page indefinitely. 50 pages = 5,000 transactions which is
+ * comfortably more than any realistic 7-day window for a single
+ * account; if we hit it, something is wrong upstream and we should
+ * stop and surface it rather than DOS Monzo.
  */
+const PAGE_LIMIT = 50;
+const PAGE_SIZE = 100;
+
 export async function listMonzoTransactions(
   accessToken: string,
   input: ListTransactionsInput,
 ): Promise<AggregatorTransaction[]> {
-  const params = new URLSearchParams();
-  params.set('account_id', input.aggregatorAccountRef);
-  params.append('expand[]', 'merchant');
-  if (input.dateFrom) params.set('since', `${input.dateFrom}T00:00:00Z`);
-  if (input.dateTo)   params.set('before', `${input.dateTo}T23:59:59Z`);
-  params.set('limit', '100');
+  const out: AggregatorTransaction[] = [];
+  // First page: time-based `since`. Subsequent pages: id-based cursor.
+  let sinceCursor: string | null = input.dateFrom ? `${input.dateFrom}T00:00:00Z` : null;
 
-  const res = await fetch(`${BASE_URL}/transactions?${params}`, {
-    headers: { Authorization: `Bearer ${accessToken}` },
-  });
-  if (res.status === 403) throw new MonzoSCAPendingError(await readBody(res));
-  if (res.status === 401) throw new MonzoAuthError(await readBody(res));
-  if (!res.ok) throw new MonzoApiError(res.status, await readBody(res));
-  const body = (await res.json()) as { transactions: MonzoTransactionWire[] };
-  return body.transactions
-    .filter(t => !t.decline_reason)  // skip declined; they don't represent real money movement
-    .map(normaliseMonzoTxn);
+  for (let page = 0; page < PAGE_LIMIT; page++) {
+    const params = new URLSearchParams();
+    params.set('account_id', input.aggregatorAccountRef);
+    params.append('expand[]', 'merchant');
+    if (sinceCursor)  params.set('since', sinceCursor);
+    if (input.dateTo) params.set('before', `${input.dateTo}T23:59:59Z`);
+    params.set('limit', String(PAGE_SIZE));
+
+    const res = await fetch(`${BASE_URL}/transactions?${params}`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    if (res.status === 403) throw new MonzoSCAPendingError(await readBody(res));
+    if (res.status === 401) throw new MonzoAuthError(await readBody(res));
+    if (!res.ok) throw new MonzoApiError(res.status, await readBody(res));
+    const body = (await res.json()) as { transactions: MonzoTransactionWire[] };
+
+    for (const t of body.transactions) {
+      // Skip declined; they don't represent real money movement.
+      if (!t.decline_reason) out.push(normaliseMonzoTxn(t));
+    }
+
+    if (body.transactions.length < PAGE_SIZE) break;
+    // Next page: cursor on the last raw txn id, NOT the last
+    // out-array id (which may have been filtered out by
+    // decline_reason).
+    sinceCursor = body.transactions[body.transactions.length - 1].id;
+  }
+  return out;
 }
 
 function normaliseMonzoTxn(t: MonzoTransactionWire): AggregatorTransaction {
@@ -420,8 +448,7 @@ async function readBody(res: Response): Promise<unknown> {
 export function generateMonzoStateNonce(bytes = 32): string {
   const buf = new Uint8Array(bytes);
   crypto.getRandomValues(buf);
-  // base64url
-  return btoa(String.fromCharCode(...buf)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  return Buffer.from(buf).toString('base64url');
 }
 
 // `monzoProvider` is the conceptual single institution this adapter

@@ -398,6 +398,10 @@ export const gocardless: BankingAggregator = {
           currency: detail.account.currency ?? 'GBP',
           ownerName: detail.account.ownerName ?? null,
           product: detail.account.product ?? detail.account.name ?? detail.account.cashAccountType ?? null,
+          // GoCardless doesn't expose a stable account-type slug
+          // across institutions; the wizard falls back to product
+          // text when type is null.
+          type: detail.account.cashAccountType ?? null,
         };
       }),
     );

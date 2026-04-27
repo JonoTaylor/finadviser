@@ -4,15 +4,44 @@ import { useState, useEffect, use } from 'react';
 import useSWR from 'swr';
 import {
   Box, Typography, Card, CardContent, Button, Stack, Chip, Alert, IconButton,
-  TextField, MenuItem, Snackbar,
+  TextField, MenuItem, Snackbar, Dialog, DialogTitle, DialogContent, DialogActions, Divider,
 } from '@mui/material';
 import AccountBalanceRoundedIcon from '@mui/icons-material/AccountBalanceRounded';
 import ArrowBackRoundedIcon from '@mui/icons-material/ArrowBackRounded';
 import CheckCircleRoundedIcon from '@mui/icons-material/CheckCircleRounded';
+import AddRoundedIcon from '@mui/icons-material/AddRounded';
 import { format } from 'date-fns';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
+import { formatCurrency } from '@/lib/utils/formatting';
 import { softTokens } from '@/theme/theme';
+
+const CREATE_NEW_SENTINEL = '__create_new__';
+
+/**
+ * Best-guess human label for an aggregator-side account type.
+ * Monzo's `type` strings (uk_retail, uk_retail_joint, uk_loan, etc)
+ * are stable enough to switch on; for unknown values we surface the
+ * raw string so the user has *something* to read.
+ */
+function humanAccountType(type: string | null): string {
+  if (!type) return 'Account';
+  const map: Record<string, string> = {
+    uk_retail: 'Current account',
+    uk_retail_joint: 'Joint account',
+    uk_business: 'Business account',
+    uk_loan: 'Loan',
+    uk_rewards: 'Rewards opt-in',
+    uk_monzo_flex: 'Monzo Flex',
+    uk_savings: 'Savings pot',
+  };
+  return map[type] ?? type;
+}
+
+/** Most users only want to map their everyday spending account. */
+function isEverydayAccountType(type: string | null): boolean {
+  return type === 'uk_retail' || type === 'uk_retail_joint' || type === 'uk_business';
+}
 
 interface AggregatorAccount {
   aggregatorAccountRef: string;
@@ -20,11 +49,16 @@ interface AggregatorAccount {
   currency: string;
   ownerName: string | null;
   product: string | null;
+  /** Raw aggregator account-type string (Monzo: "uk_retail",
+   *  "uk_retail_joint", "uk_loan", "uk_rewards", etc). Used by the
+   *  wizard to decide which accounts to suggest binding versus
+   *  default-skip. Null when the aggregator doesn't expose it. */
+  type: string | null;
 }
 
 interface InternalAccount {
-  id: number;
-  name: string;
+  account_id: number;
+  account_name: string;
   account_type: string;
   balance: string;
 }
@@ -75,7 +109,7 @@ export default function MappingWizardPage({ params }: { params: Promise<{ id: st
     fetcher,
     { revalidateOnFocus: false },
   );
-  const { data: accountsData } = useSWR<InternalAccount[]>('/api/accounts?balances=true', fetcher);
+  const { data: accountsData, mutate: mutateAccounts } = useSWR<InternalAccount[]>('/api/accounts?balances=true', fetcher);
 
   const [drafts, setDrafts] = useState<Record<string, MappingDraft>>({});
   const [submitting, setSubmitting] = useState(false);
@@ -83,8 +117,14 @@ export default function MappingWizardPage({ params }: { params: Promise<{ id: st
     open: false, severity: 'success', message: '',
   });
 
+  const [createDialog, setCreateDialog] = useState<{ aggregatorAccountRef: string; defaultName: string } | null>(null);
+  const [createName, setCreateName] = useState('');
+  const [creating, setCreating] = useState(false);
+
   // Pre-populate drafts from any already-linked rows + sane defaults
-  // for unlinked aggregator accounts.
+  // for unlinked aggregator accounts. Non-everyday account types
+  // (loans, rewards opt-ins, savings pots) default to Skip so the
+  // user only has to think about their actual spending account(s).
   useEffect(() => {
     if (!data) return;
     const today = format(new Date(), 'yyyy-MM-dd');
@@ -98,6 +138,42 @@ export default function MappingWizardPage({ params }: { params: Promise<{ id: st
     }
     setDrafts(next);
   }, [data]);
+
+  async function handleCreateAccount() {
+    if (!createDialog || !createName.trim()) return;
+    setCreating(true);
+    try {
+      const res = await fetch('/api/accounts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: createName.trim(),
+          accountType: 'ASSET',
+          description: `Bank-fed account synced from ${data?.connection.providerDisplayName ?? 'aggregator'}`,
+        }),
+      });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body?.error ?? `Request failed: ${res.status}`);
+      // Bind the new account to the row that triggered the dialog.
+      setDrafts(d => ({
+        ...d,
+        [createDialog.aggregatorAccountRef]: {
+          ...d[createDialog.aggregatorAccountRef],
+          accountId: body.id,
+        },
+      }));
+      // Refresh the accounts list so the new option appears in the
+      // dropdown for any other rows the user might want to bind to.
+      await mutateAccounts();
+      setCreateDialog(null);
+      setCreateName('');
+      setSnack({ open: true, severity: 'success', message: `Created "${body.name}" and bound it to this row.` });
+    } catch (e) {
+      setSnack({ open: true, severity: 'error', message: e instanceof Error ? e.message : 'Failed to create account' });
+    } finally {
+      setCreating(false);
+    }
+  }
 
   if (Number.isNaN(connectionId)) {
     return (
@@ -195,18 +271,30 @@ export default function MappingWizardPage({ params }: { params: Promise<{ id: st
                     </Box>
                     <Box sx={{ flex: 1 }}>
                       <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
-                        {agg.product ?? 'Account'}
-                      </Typography>
-                      <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
-                        {agg.iban ?? agg.aggregatorAccountRef}
+                        {humanAccountType(agg.type)}
                       </Typography>
                       {agg.ownerName && (
                         <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
                           Owner: {agg.ownerName}
                         </Typography>
                       )}
+                      {agg.product && humanAccountType(agg.type) !== agg.product && (
+                        <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+                          Product: {agg.product}
+                        </Typography>
+                      )}
+                      <Typography variant="caption" color="text.disabled" sx={{ display: 'block', fontFamily: 'monospace', fontSize: '0.7rem', mt: 0.25 }}>
+                        {agg.iban ?? agg.aggregatorAccountRef}
+                      </Typography>
                     </Box>
                     <Chip label={agg.currency} size="small" />
+                    {!isEverydayAccountType(agg.type) && !linked && (
+                      <Chip
+                        label="Skipped by default"
+                        size="small"
+                        sx={{ bgcolor: softTokens.stone, color: softTokens.ink2 }}
+                      />
+                    )}
                     {linked && (
                       <Chip
                         icon={<CheckCircleRoundedIcon sx={{ fontSize: '14px !important' }} />}
@@ -224,20 +312,47 @@ export default function MappingWizardPage({ params }: { params: Promise<{ id: st
                       size="small"
                       fullWidth
                       value={draft?.accountId ?? ''}
-                      onChange={(e) => setDrafts(d => ({
-                        ...d,
-                        [agg.aggregatorAccountRef]: { ...d[agg.aggregatorAccountRef], accountId: e.target.value === '' ? '' : Number(e.target.value) },
-                      }))}
-                      helperText="Pick an existing ASSET account (Bank, savings, etc)"
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        if (v === CREATE_NEW_SENTINEL) {
+                          // Open the create-new dialog with a name
+                          // pre-filled from the aggregator label so
+                          // the user just confirms and saves.
+                          const defaultName = `${data.connection.providerDisplayName} ${humanAccountType(agg.type)}`;
+                          setCreateName(defaultName);
+                          setCreateDialog({ aggregatorAccountRef: agg.aggregatorAccountRef, defaultName });
+                          return;
+                        }
+                        setDrafts(d => ({
+                          ...d,
+                          [agg.aggregatorAccountRef]: { ...d[agg.aggregatorAccountRef], accountId: v === '' ? '' : Number(v) },
+                        }));
+                      }}
+                      helperText={isEverydayAccountType(agg.type)
+                        ? 'Pick an existing ASSET account or create a new one for this Monzo account'
+                        : 'Skipped by default - bind only if you want to track this account'}
                     >
                       <MenuItem value=""><em>Skip this account</em></MenuItem>
+                      <Divider />
                       {(accountsData ?? [])
                         .filter(a => a.account_type === 'ASSET')
                         .map(a => (
-                          <MenuItem key={a.id} value={a.id}>
-                            {a.name} ({a.account_type})
+                          <MenuItem key={a.account_id} value={a.account_id}>
+                            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%', gap: 2 }}>
+                              <span>{a.account_name}</span>
+                              <Box component="span" sx={{ color: 'text.secondary', fontSize: '0.78rem', fontFeatureSettings: '"tnum"' }}>
+                                {formatCurrency(a.balance)}
+                              </Box>
+                            </Box>
                           </MenuItem>
                         ))}
+                      <Divider />
+                      <MenuItem value={CREATE_NEW_SENTINEL}>
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, color: softTokens.lavender.ink }}>
+                          <AddRoundedIcon sx={{ fontSize: 18 }} />
+                          <em>Create a new account...</em>
+                        </Box>
+                      </MenuItem>
                     </TextField>
                     <TextField
                       label="Cutover date"
@@ -270,6 +385,37 @@ export default function MappingWizardPage({ params }: { params: Promise<{ id: st
           </Box>
         </Stack>
       )}
+
+      <Dialog
+        open={createDialog !== null}
+        onClose={() => { if (!creating) { setCreateDialog(null); setCreateName(''); } }}
+        maxWidth="xs"
+        fullWidth
+      >
+        <DialogTitle>Create a new ASSET account</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            New account on FinAdviser&apos;s side. The bank-fed sync will write its
+            transactions here. You can rename or restructure later from the chart
+            of accounts.
+          </Typography>
+          <TextField
+            label="Account name"
+            fullWidth
+            size="small"
+            autoFocus
+            value={createName}
+            onChange={(e) => setCreateName(e.target.value)}
+            helperText="e.g. Monzo, Monzo Joint, Barclays Current"
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => { setCreateDialog(null); setCreateName(''); }} disabled={creating}>Cancel</Button>
+          <Button variant="contained" onClick={handleCreateAccount} disabled={creating || !createName.trim()}>
+            {creating ? 'Creating...' : 'Create + bind'}
+          </Button>
+        </DialogActions>
+      </Dialog>
 
       <Snackbar
         open={snack.open}

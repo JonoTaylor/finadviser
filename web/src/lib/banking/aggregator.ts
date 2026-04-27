@@ -65,6 +65,13 @@ export interface AggregatorAccount {
   /** Free-form bank-side product name e.g. "Current Account",
    *  "Credit Card", "Joint Account". */
   product: string | null;
+  /** Aggregator-side account-type slug. Monzo: "uk_retail",
+   *  "uk_retail_joint", "uk_loan", "uk_rewards", etc. GoCardless
+   *  doesn't expose this in a stable form so it stays null on that
+   *  path. The mapping wizard uses it to default-skip non-everyday
+   *  account types so the user only has to think about their
+   *  spending account(s). */
+  type: string | null;
 }
 
 export type TransactionStatus = 'pending' | 'settled';

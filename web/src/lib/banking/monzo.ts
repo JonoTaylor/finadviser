@@ -305,6 +305,7 @@ export async function listMonzoAccounts(accessToken: string): Promise<Aggregator
       currency: a.currency ?? 'GBP',
       ownerName: a.owners?.[0]?.preferred_name ?? a.description,
       product: humanizeProduct(a.type, a.description),
+      type: a.type ?? null,
     }));
 }
 

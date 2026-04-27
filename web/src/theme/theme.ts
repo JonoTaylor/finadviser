@@ -47,23 +47,6 @@ export const softTokens = {
 // variant because that requires module augmentation for one helper.
 export const serifFamily = 'var(--font-instrument-serif), "Instrument Serif", "Times New Roman", serif';
 
-// ── Helper-export shims ─────────────────────────────────────────────
-// YourShareCard.tsx + NetWorthCard.tsx still import these. They get
-// their proper redesign in PR 2 (dashboard rebuild), at which point
-// these exports go away.
-
-/** @deprecated v2 has no glow shadows; will be removed in PR 2. */
-export const glowShadow = {
-  primary:   softTokens.shadowPillow,
-  success:   softTokens.shadowPillow,
-  error:     softTokens.shadowPillow,
-  secondary: softTokens.shadowPillow,
-};
-
-/** @deprecated v2 has no gradient text; will be removed in PR 2. */
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-export const gradientText = (_from: string, _to: string) => ({});
-
 const theme = createTheme({
   palette: {
     mode: 'light',

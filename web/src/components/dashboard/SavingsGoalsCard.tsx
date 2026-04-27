@@ -6,6 +6,7 @@ import SavingsRoundedIcon from '@mui/icons-material/SavingsRounded';
 import ChatRoundedIcon from '@mui/icons-material/ChatRounded';
 import useSWR from 'swr';
 import Link from 'next/link';
+import { softTokens } from '@/theme/theme';
 
 const fetcher = (url: string) => fetch(url).then(r => r.json());
 
@@ -18,10 +19,10 @@ interface SavingsGoal {
   status: string;
 }
 
-function getColor(pct: number): string {
-  if (pct >= 75) return '#4ADE80';
-  if (pct >= 40) return '#FBBF24';
-  return '#8E7DC0';
+function paletteForProgress(pct: number) {
+  if (pct >= 75) return softTokens.mint;
+  if (pct >= 40) return softTokens.lemon;
+  return softTokens.lavender;
 }
 
 export default function SavingsGoalsCard() {
@@ -38,14 +39,14 @@ export default function SavingsGoalsCard() {
               sx={{
                 width: 36, height: 36, borderRadius: 2.5,
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
-                bgcolor: alpha('#8E7DC0', 0.15),
+                bgcolor: softTokens.mint.main, color: softTokens.mint.ink,
               }}
             >
-              <SavingsRoundedIcon sx={{ fontSize: 20, color: '#8E7DC0' }} />
+              <SavingsRoundedIcon sx={{ fontSize: 20 }} />
             </Box>
-            <Typography variant="subtitle2" sx={{ color: '#1A1730' }}>Savings Goals</Typography>
+            <Typography variant="subtitle2">Savings Goals</Typography>
           </Box>
-          <Typography variant="body2" sx={{ color: alpha('#1A1730', 0.7), mb: 2 }}>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
             No savings goals yet. Use the AI chat to set targets and track your progress.
           </Typography>
           <Button
@@ -63,25 +64,19 @@ export default function SavingsGoalsCard() {
   }
 
   return (
-    <Card sx={{ height: '100%', position: 'relative', overflow: 'hidden' }}>
-      <Box
-        sx={{
-          position: 'absolute', top: 0, left: 0, right: 0, height: 3,
-          background: 'linear-gradient(90deg, #E8C547, #F472B6)',
-        }}
-      />
+    <Card sx={{ height: '100%' }}>
       <CardContent>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
           <Box
             sx={{
               width: 36, height: 36, borderRadius: 2.5,
               display: 'flex', alignItems: 'center', justifyContent: 'center',
-              bgcolor: alpha('#8E7DC0', 0.15),
+              bgcolor: softTokens.mint.main, color: softTokens.mint.ink,
             }}
           >
-            <SavingsRoundedIcon sx={{ fontSize: 20, color: '#8E7DC0' }} />
+            <SavingsRoundedIcon sx={{ fontSize: 20 }} />
           </Box>
-          <Typography variant="subtitle2" sx={{ color: '#1A1730' }}>Savings Goals</Typography>
+          <Typography variant="subtitle2">Savings Goals</Typography>
         </Box>
 
         <Stack spacing={2}>
@@ -90,9 +85,8 @@ export default function SavingsGoalsCard() {
             const current = parseFloat(goal.currentAmount);
             const pct = target > 0 ? Math.min(100, Math.round((current / target) * 100)) : 0;
             const remaining = Math.max(0, target - current);
-            const color = getColor(pct);
+            const palette = paletteForProgress(pct);
 
-            // Ring params
             const size = 52;
             const stroke = 5;
             const radius = (size - stroke) / 2;
@@ -105,11 +99,11 @@ export default function SavingsGoalsCard() {
                   <svg width={size} height={size} style={{ transform: 'rotate(-90deg)' }}>
                     <circle
                       cx={size / 2} cy={size / 2} r={radius}
-                      fill="none" stroke={alpha(color, 0.2)} strokeWidth={stroke}
+                      fill="none" stroke={alpha(palette.deep, 0.2)} strokeWidth={stroke}
                     />
                     <circle
                       cx={size / 2} cy={size / 2} r={radius}
-                      fill="none" stroke={color} strokeWidth={stroke}
+                      fill="none" stroke={palette.deep} strokeWidth={stroke}
                       strokeLinecap="round"
                       strokeDasharray={circumference}
                       strokeDashoffset={offset}
@@ -122,16 +116,16 @@ export default function SavingsGoalsCard() {
                       display: 'flex', alignItems: 'center', justifyContent: 'center',
                     }}
                   >
-                    <Typography variant="caption" sx={{ fontWeight: 700, fontSize: '0.7rem', color }}>
+                    <Typography variant="caption" sx={{ fontWeight: 700, fontSize: '0.7rem', color: palette.ink }}>
                       {pct}%
                     </Typography>
                   </Box>
                 </Box>
                 <Box sx={{ flex: 1, minWidth: 0 }}>
-                  <Typography variant="body2" sx={{ fontWeight: 500, color: '#1A1730' }} noWrap>
+                  <Typography variant="body2" sx={{ fontWeight: 500 }} noWrap>
                     {goal.name}
                   </Typography>
-                  <Typography variant="caption" sx={{ color: alpha('#1A1730', 0.6) }}>
+                  <Typography variant="caption" color="text.secondary">
                     £{remaining.toFixed(0)} remaining
                     {goal.targetDate ? ` · by ${goal.targetDate}` : ''}
                   </Typography>

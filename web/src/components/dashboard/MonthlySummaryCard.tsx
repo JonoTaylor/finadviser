@@ -1,13 +1,14 @@
 'use client';
 
+import { useState } from 'react';
 import { Card, CardContent, Typography, Box, Chip } from '@mui/material';
-import { alpha } from '@mui/material/styles';
 import CalendarMonthRoundedIcon from '@mui/icons-material/CalendarMonthRounded';
 import TrendingUpRoundedIcon from '@mui/icons-material/TrendingUpRounded';
 import TrendingDownRoundedIcon from '@mui/icons-material/TrendingDownRounded';
 import { formatCurrency } from '@/lib/utils/formatting';
 import { format, subMonths } from 'date-fns';
 import Decimal from 'decimal.js';
+import { softTokens, serifFamily } from '@/theme/theme';
 
 interface SpendingRow {
   month: string;
@@ -49,7 +50,9 @@ export default function MonthlySummaryCard({
 }) {
   void _balances;
 
-  const now = new Date();
+  // Pin "now" at mount so the month boundary can't shift between SSR
+  // and hydration.
+  const [now] = useState(() => new Date());
   const currentMonth = format(now, 'yyyy-MM');
   const prevMonth = format(subMonths(now, 1), 'yyyy-MM');
 
@@ -58,6 +61,7 @@ export default function MonthlySummaryCard({
   const monthIncome = sumByMonthAndType(spending, currentMonth, 'INCOME');
 
   const net = monthIncome.minus(monthExpenses);
+  const netIsPositive = net.gte(0);
 
   const trendPct = prevMonthExpenses.gt(0)
     ? monthExpenses.minus(prevMonthExpenses).div(prevMonthExpenses).mul(100).toNumber()
@@ -65,13 +69,7 @@ export default function MonthlySummaryCard({
   const trendUp = trendPct > 0;
 
   return (
-    <Card sx={{ height: '100%', position: 'relative', overflow: 'hidden' }}>
-      <Box
-        sx={{
-          position: 'absolute', top: 0, left: 0, right: 0, height: 3,
-          background: 'linear-gradient(90deg, #E8C547, #B8A9E8)',
-        }}
-      />
+    <Card sx={{ height: '100%' }}>
       <CardContent>
         <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 2 }}>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
@@ -79,12 +77,12 @@ export default function MonthlySummaryCard({
               sx={{
                 width: 36, height: 36, borderRadius: 2.5,
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
-                bgcolor: alpha('#E8C547', 0.12),
+                bgcolor: softTokens.mint.main, color: softTokens.mint.ink,
               }}
             >
-              <CalendarMonthRoundedIcon sx={{ fontSize: 20, color: 'primary.main' }} />
+              <CalendarMonthRoundedIcon sx={{ fontSize: 20 }} />
             </Box>
-            <Typography variant="subtitle2" color="text.secondary">This Month</Typography>
+            <Typography variant="subtitle2">This Month</Typography>
           </Box>
           {prevMonthExpenses.gt(0) && (
             <Chip
@@ -94,34 +92,30 @@ export default function MonthlySummaryCard({
               }
               label={`${Math.abs(trendPct).toFixed(0)}%`}
               size="small"
-              sx={{
-                height: 24,
-                bgcolor: alpha(trendUp ? '#FB7185' : '#4ADE80', 0.12),
-                color: trendUp ? 'error.main' : 'success.main',
-                fontWeight: 600,
-                fontSize: '0.75rem',
-                boxShadow: `0 0 8px ${alpha(trendUp ? '#FB7185' : '#4ADE80', 0.15)}`,
-                '& .MuiChip-icon': { color: 'inherit' },
-              }}
+              color={trendUp ? 'error' : 'success'}
+              sx={{ '& .MuiChip-icon': { color: 'inherit' } }}
             />
           )}
         </Box>
 
-        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.25 }}>
-          <Row label="Income" value={formatCurrency(monthIncome.toString())} color="success.main" />
-          <Row label="Expenses" value={formatCurrency(monthExpenses.toString())} color="error.main" />
-          <Box
-            sx={{
-              height: '1px',
-              background: `linear-gradient(90deg, transparent, ${alpha('#E8C547', 0.3)}, transparent)`,
-            }}
-          />
-          <Row
-            label="Net"
-            value={formatCurrency(net.toString())}
-            color={net.gte(0) ? 'success.main' : 'error.main'}
-            bold
-          />
+        <Typography
+          sx={{
+            fontFamily: serifFamily,
+            fontStyle: 'italic',
+            fontWeight: 400,
+            fontSize: '2.25rem',
+            lineHeight: 1,
+            letterSpacing: '-0.02em',
+            color: netIsPositive ? softTokens.mint.ink : softTokens.peach.ink,
+            mb: 2,
+          }}
+        >
+          {formatCurrency(net.toString())}
+        </Typography>
+
+        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+          <Row label="Income" value={formatCurrency(monthIncome.toString())} color={softTokens.mint.ink} />
+          <Row label="Expenses" value={formatCurrency(monthExpenses.toString())} color={softTokens.peach.ink} />
         </Box>
       </CardContent>
     </Card>
@@ -133,21 +127,16 @@ function sumByMonthAndType(
   month: string,
   accountType: 'INCOME' | 'EXPENSE',
 ): Decimal {
-  // EXPENSE entries are stored as positive (debit) — sum and take abs
-  //   in case any contra entry slipped in negative.
-  // INCOME entries are stored as negative (credit) — abs gives the
-  //   positive magnitude we want to display.
-  // Either way abs() yields the right "headline" figure for this card.
   return spending
     .filter(s => s.month === month && s.account_type === accountType)
     .reduce((sum, s) => sum.plus(new Decimal(s.total).abs()), new Decimal(0));
 }
 
-function Row({ label, value, color, bold }: { label: string; value: string; color: string; bold?: boolean }) {
+function Row({ label, value, color }: { label: string; value: string; color: string }) {
   return (
     <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
       <Typography variant="body2" color="text.secondary">{label}</Typography>
-      <Typography variant="body2" sx={{ color, fontWeight: bold ? 700 : 600 }}>{value}</Typography>
+      <Typography variant="body2" sx={{ color, fontWeight: 600 }}>{value}</Typography>
     </Box>
   );
 }

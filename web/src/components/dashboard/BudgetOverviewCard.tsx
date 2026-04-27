@@ -1,5 +1,6 @@
 'use client';
 
+import { useState } from 'react';
 import { Card, CardContent, Typography, Box, Button, Stack } from '@mui/material';
 import { alpha } from '@mui/material/styles';
 import AccountBalanceWalletRoundedIcon from '@mui/icons-material/AccountBalanceWalletRounded';
@@ -7,6 +8,7 @@ import ChatRoundedIcon from '@mui/icons-material/ChatRounded';
 import useSWR from 'swr';
 import { format } from 'date-fns';
 import Link from 'next/link';
+import { softTokens } from '@/theme/theme';
 
 const fetcher = (url: string) => fetch(url).then(r => r.json());
 
@@ -18,14 +20,18 @@ interface BudgetStatus {
   spent: string;
 }
 
-function getColor(pct: number): string {
-  if (pct > 90) return '#FB7185';
-  if (pct > 70) return '#FBBF24';
-  return '#4ADE80';
+function paletteForUtilisation(pct: number) {
+  if (pct > 90) return softTokens.peach;
+  if (pct > 70) return softTokens.lemon;
+  return softTokens.mint;
 }
 
 export default function BudgetOverviewCard() {
-  const month = format(new Date(), 'yyyy-MM');
+  // Pin "now" at mount so the SWR cache key + display label can't
+  // disagree between SSR and hydration if a month boundary lands
+  // between server-render and client-mount.
+  const [now] = useState(() => new Date());
+  const month = format(now, 'yyyy-MM');
   const { data: budgets } = useSWR<BudgetStatus[]>(`/api/budgets/status?month=${month}`, fetcher);
 
   if (!budgets || budgets.length === 0) {
@@ -37,14 +43,14 @@ export default function BudgetOverviewCard() {
               sx={{
                 width: 36, height: 36, borderRadius: 2.5,
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
-                bgcolor: alpha('#8E7DC0', 0.15),
+                bgcolor: softTokens.lavender.main, color: softTokens.lavender.ink,
               }}
             >
-              <AccountBalanceWalletRoundedIcon sx={{ fontSize: 20, color: '#8E7DC0' }} />
+              <AccountBalanceWalletRoundedIcon sx={{ fontSize: 20 }} />
             </Box>
-            <Typography variant="subtitle2" sx={{ color: '#1A1730' }}>Budget Overview</Typography>
+            <Typography variant="subtitle2">Budget Overview</Typography>
           </Box>
-          <Typography variant="body2" sx={{ color: alpha('#1A1730', 0.7), mb: 2 }}>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
             No budgets set up yet. Use the AI chat to create budgets for your spending categories.
           </Typography>
           <Button
@@ -64,27 +70,21 @@ export default function BudgetOverviewCard() {
   const top = budgets.slice(0, 5);
 
   return (
-    <Card sx={{ height: '100%', position: 'relative', overflow: 'hidden' }}>
-      <Box
-        sx={{
-          position: 'absolute', top: 0, left: 0, right: 0, height: 3,
-          background: 'linear-gradient(90deg, #E8C547, #B8A9E8)',
-        }}
-      />
+    <Card sx={{ height: '100%' }}>
       <CardContent>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
           <Box
             sx={{
               width: 36, height: 36, borderRadius: 2.5,
               display: 'flex', alignItems: 'center', justifyContent: 'center',
-              bgcolor: alpha('#8E7DC0', 0.15),
+              bgcolor: softTokens.lavender.main, color: softTokens.lavender.ink,
             }}
           >
-            <AccountBalanceWalletRoundedIcon sx={{ fontSize: 20, color: '#8E7DC0' }} />
+            <AccountBalanceWalletRoundedIcon sx={{ fontSize: 20 }} />
           </Box>
-          <Typography variant="subtitle2" sx={{ color: '#1A1730' }}>Budget Overview</Typography>
-          <Typography variant="caption" sx={{ color: alpha('#1A1730', 0.5), ml: 'auto' }}>
-            {format(new Date(), 'MMM yyyy')}
+          <Typography variant="subtitle2">Budget Overview</Typography>
+          <Typography variant="caption" color="text.secondary" sx={{ ml: 'auto' }}>
+            {format(now, 'MMM yyyy')}
           </Typography>
         </Box>
 
@@ -93,21 +93,21 @@ export default function BudgetOverviewCard() {
             const limit = parseFloat(b.monthly_limit);
             const spent = parseFloat(b.spent);
             const pct = limit > 0 ? Math.min(100, Math.round((spent / limit) * 100)) : 0;
-            const color = getColor(pct);
+            const palette = paletteForUtilisation(pct);
 
             return (
               <Box key={b.budget_id}>
                 <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
-                  <Typography variant="caption" sx={{ fontWeight: 500, color: '#1A1730' }}>
+                  <Typography variant="caption" sx={{ fontWeight: 500 }}>
                     {b.category_name}
                   </Typography>
-                  <Typography variant="caption" sx={{ color: alpha('#1A1730', 0.6) }}>
+                  <Typography variant="caption" color="text.secondary">
                     £{spent.toFixed(0)} / £{limit.toFixed(0)}
                   </Typography>
                 </Box>
                 <Box
                   sx={{
-                    height: 8, borderRadius: 4, bgcolor: alpha(color, 0.18),
+                    height: 8, borderRadius: 4, bgcolor: alpha(palette.deep, 0.18),
                     overflow: 'hidden',
                   }}
                 >
@@ -116,7 +116,7 @@ export default function BudgetOverviewCard() {
                       height: '100%',
                       width: `${pct}%`,
                       borderRadius: 4,
-                      bgcolor: color,
+                      bgcolor: palette.deep,
                       transition: 'width 0.4s ease',
                     }}
                   />

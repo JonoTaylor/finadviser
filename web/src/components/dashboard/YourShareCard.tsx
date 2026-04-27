@@ -13,14 +13,13 @@ import {
   Skeleton,
   Tooltip,
 } from '@mui/material';
-import { alpha } from '@mui/material/styles';
 import AccountBalanceWalletRoundedIcon from '@mui/icons-material/AccountBalanceWalletRounded';
 import HomeWorkRoundedIcon from '@mui/icons-material/HomeWorkRounded';
 import TrendingUpRoundedIcon from '@mui/icons-material/TrendingUpRounded';
 import SavingsRoundedIcon from '@mui/icons-material/SavingsRounded';
 import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
 import { formatCurrency } from '@/lib/utils/formatting';
-import { glowShadow, gradientText } from '@/theme/theme';
+import { softTokens, serifFamily } from '@/theme/theme';
 
 interface OwnerLite { id: number; name: string }
 interface PerProperty { propertyId: number; propertyName: string; equityPct: number; equityAmount: string }
@@ -80,10 +79,10 @@ export default function YourShareCard() {
       <Card sx={{ height: '100%' }}>
         <CardContent>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
-            <Box sx={{ width: 36, height: 36, borderRadius: 2.5, display: 'flex', alignItems: 'center', justifyContent: 'center', bgcolor: alpha('#E8C547', 0.12) }}>
-              <AccountBalanceWalletRoundedIcon sx={{ fontSize: 20, color: 'primary.main' }} />
-            </Box>
-            <Typography variant="subtitle2" color="text.secondary">Your share</Typography>
+            <IconTile color={softTokens.lavender.main} ink={softTokens.lavender.ink}>
+              <AccountBalanceWalletRoundedIcon sx={{ fontSize: 20 }} />
+            </IconTile>
+            <Typography variant="subtitle2">Your share</Typography>
           </Box>
           <Typography variant="body2" color="text.secondary">
             Add an owner to see a personal net-worth view.
@@ -96,24 +95,18 @@ export default function YourShareCard() {
   const { yourShare, owners } = data;
   const total = parseFloat(yourShare.total);
   const isPositive = total >= 0;
+  const totalColour = isPositive ? softTokens.mint.ink : softTokens.peach.ink;
 
   return (
-    <Card sx={{ height: '100%', position: 'relative', overflow: 'hidden', boxShadow: isPositive ? glowShadow.success : glowShadow.error }}>
-      <Box
-        sx={{
-          position: 'absolute', top: 0, left: 0, right: 0, height: 80,
-          background: `radial-gradient(ellipse 80% 100% at 50% 0%, ${alpha(isPositive ? '#4ADE80' : '#FB7185', 0.1)} 0%, transparent 70%)`,
-          pointerEvents: 'none',
-        }}
-      />
-      <CardContent sx={{ position: 'relative' }}>
+    <Card sx={{ height: '100%' }}>
+      <CardContent>
         <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 1.5 }} flexWrap="wrap" useFlexGap>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-            <Box sx={{ width: 36, height: 36, borderRadius: 2.5, display: 'flex', alignItems: 'center', justifyContent: 'center', bgcolor: alpha('#E8C547', 0.12) }}>
-              <AccountBalanceWalletRoundedIcon sx={{ fontSize: 20, color: 'primary.main' }} />
-            </Box>
+            <IconTile color={softTokens.lavender.main} ink={softTokens.lavender.ink}>
+              <AccountBalanceWalletRoundedIcon sx={{ fontSize: 20 }} />
+            </IconTile>
             <Box>
-              <Typography variant="subtitle2" color="text.secondary">Your share</Typography>
+              <Typography variant="subtitle2">Your share</Typography>
               <Typography variant="caption" color="text.secondary" sx={{ display: 'block', lineHeight: 1.2 }}>
                 Viewing as {yourShare.ownerName}
               </Typography>
@@ -137,16 +130,15 @@ export default function YourShareCard() {
         </Stack>
 
         <Typography
-          variant="h4"
           sx={{
-            fontWeight: 800,
-            fontSize: '1.75rem',
-            letterSpacing: '-0.03em',
-            mb: 2,
-            ...gradientText(
-              isPositive ? '#4ADE80' : '#FB7185',
-              isPositive ? '#16A34A' : '#E11D48',
-            ),
+            fontFamily: serifFamily,
+            fontStyle: 'italic',
+            fontWeight: 400,
+            fontSize: '2.5rem',
+            lineHeight: 1,
+            letterSpacing: '-0.02em',
+            color: totalColour,
+            mb: 2.5,
           }}
         >
           {formatCurrency(yourShare.total)}
@@ -154,7 +146,7 @@ export default function YourShareCard() {
 
         <Stack spacing={1}>
           <Row
-            icon={<HomeWorkRoundedIcon sx={{ fontSize: 16, color: 'primary.main' }} />}
+            icon={<HomeWorkRoundedIcon sx={{ fontSize: 16, color: softTokens.lavender.deep }} />}
             label="Property equity"
             value={yourShare.propertyEquity}
             detail={yourShare.perProperty.length > 0
@@ -162,7 +154,7 @@ export default function YourShareCard() {
               : null}
           />
           <Row
-            icon={<TrendingUpRoundedIcon sx={{ fontSize: 16, color: 'success.main' }} />}
+            icon={<TrendingUpRoundedIcon sx={{ fontSize: 16, color: softTokens.mint.deep }} />}
             label="Investments"
             value={yourShare.investments}
             detail={yourShare.perInvestment.length > 0
@@ -170,7 +162,7 @@ export default function YourShareCard() {
               : 'None tracked yet'}
           />
           <Row
-            icon={<SavingsRoundedIcon sx={{ fontSize: 16, color: 'secondary.main' }} />}
+            icon={<SavingsRoundedIcon sx={{ fontSize: 16, color: softTokens.peach.deep }} />}
             label="Personal cash"
             value={yourShare.personalCash}
             detail={parseFloat(yourShare.sharedCashUnattributed) !== 0
@@ -194,6 +186,25 @@ export default function YourShareCard() {
         )}
       </CardContent>
     </Card>
+  );
+}
+
+function IconTile({ children, color, ink }: { children: React.ReactNode; color: string; ink: string }) {
+  return (
+    <Box
+      sx={{
+        width: 36,
+        height: 36,
+        borderRadius: 2.5,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        bgcolor: color,
+        color: ink,
+      }}
+    >
+      {children}
+    </Box>
   );
 }
 

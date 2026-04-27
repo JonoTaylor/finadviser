@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { gocardless, GoCardlessApiError, GoCardlessAuthError } from '@/lib/banking/gocardless';
+import { buildMonzoAuthUrl, generateMonzoStateNonce } from '@/lib/banking/monzo';
 import { bankingRepo } from '@/lib/banking/repo';
 import type { ProviderSlug } from '@/lib/banking/aggregator';
 
@@ -9,7 +10,13 @@ import type { ProviderSlug } from '@/lib/banking/aggregator';
  *                                         Body: { provider: 'monzo' | 'barclays' | 'amex_uk' | 'yonder', ownerId?: number }
  *                                         Returns: { connectionId, consentUrl } - frontend redirects user there.
  *
- * The post-consent redirect lands on /api/banking/connections/callback?ref=<connectionId>.
+ * Two paths depending on the provider's configured aggregator:
+ *  - 'gocardless_bad' (Barclays, Amex UK, Yonder, etc): we ask
+ *    GoCardless to broker the OAuth dance with the bank. Callback
+ *    lands on /api/banking/connections/callback?ref=<connectionId>.
+ *  - 'monzo_direct' (Monzo): we own the OAuth flow ourselves with
+ *    Monzo's own API. Callback lands on
+ *    /api/banking/connections/monzo/callback?code=X&state=Y.
  */
 
 const VALID_PROVIDERS: ProviderSlug[] = ['monzo', 'barclays', 'amex_uk', 'yonder'];
@@ -43,16 +50,36 @@ export async function POST(req: Request) {
     }
 
     // Clear out any prior non-active rows for this provider before
-    // creating a new pending one. Without this, a "Resume connect" /
-    // "Reconnect" click would accumulate duplicate rows alongside
-    // the original. Active rows are intentionally left alone: if
-    // the user wants a fresh consent on a working connection, they
-    // disconnect via the UI first.
+    // creating a new pending one. Same dedup guard as before.
     await bankingRepo.deleteStaleConnectionsForProvider(provider.id);
 
-    // Discover the institution id from the aggregator's GB catalogue.
-    // We classified it during the smoke test, so this is just a
-    // re-lookup; cached briefly in the access-token round-trip.
+    const origin = new URL(req.url).origin;
+
+    // ── Monzo direct OAuth path ───────────────────────────────────
+    if (provider.aggregator === 'monzo_direct') {
+      const state = generateMonzoStateNonce();
+      const redirectUri = `${origin}/api/banking/connections/monzo/callback`;
+      // The Monzo `state` doubles as our connection lookup on
+      // callback (CSRF protection + connection-id mapping in one
+      // nonce). We pin it on the connection row so the callback
+      // can find this row via aggregator_ref = state.
+      const conn = await bankingRepo.createPendingConnection({
+        providerId: provider.id,
+        ownerId: typeof ownerId === 'number' ? ownerId : null,
+        aggregatorRef: state,
+        // Monzo doesn't have a hard 90-day cap (their tokens refresh
+        // indefinitely), but we set a generous default so the
+        // expiring/expired status logic in cron-sync still flags
+        // stale connections eventually. Reset every reauth.
+        consentExpiresAt: new Date(Date.now() + 365 * 86_400_000),
+        institutionId: 'monzo',
+        institutionName: 'Monzo',
+      });
+      const consentUrl = buildMonzoAuthUrl({ state, redirectUri });
+      return NextResponse.json({ connectionId: conn.id, consentUrl });
+    }
+
+    // ── GoCardless brokered path (default for everything else) ──
     const institutions = await gocardless.listInstitutions('gb');
     const match = institutions.find(i => i.knownProvider === slug);
     if (!match) {
@@ -62,24 +89,8 @@ export async function POST(req: Request) {
       );
     }
 
-    // Build the redirect URI against this deployment's origin so
-    // preview deploys callback to themselves rather than production.
-    // The user must register each origin in the GoCardless dashboard
-    // (or use a wildcard pattern there).
-    const origin = new URL(req.url).origin;
     const redirectUri = `${origin}/api/banking/connections/callback`;
 
-    // Create a placeholder connection up front so we have an id to
-    // pass as `reference` to the aggregator. The status starts as
-    // pending; the callback flips it to active. If the user
-    // abandons the consent flow the row stays pending (visible in
-    // the UI as "needs reconnect").
-    //
-    // We need the connection.id BEFORE calling createConsent because
-    // GoCardless's `reference` is the only thing it echoes back to
-    // us in the callback URL. Doing this in two steps means the
-    // first DB write happens with a placeholder aggregator_ref;
-    // patched after createConsent succeeds.
     const placeholderRef = `pending-${crypto.randomUUID()}`;
     const conn = await bankingRepo.createPendingConnection({
       providerId: provider.id,
@@ -97,10 +108,6 @@ export async function POST(req: Request) {
         reference: String(conn.id),
         maxHistoricalDays: match.transactionsMaxHistoricalDays,
       });
-      // Patch the placeholder ref to the real requisition_id and
-      // refresh consentExpiresAt with what the aggregator returned
-      // at agreement creation. PR C will refresh again post-consent
-      // once the requisition status flips to LN.
       await bankingRepo.updateConnectionAfterConsent(conn.id, {
         aggregatorRef: consent.aggregatorRef,
         consentExpiresAt: consent.consentExpiresAt,

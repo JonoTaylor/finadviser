@@ -1,6 +1,7 @@
 import { and, desc, eq, sql } from 'drizzle-orm';
 import { getDb, schema } from '@/lib/db';
 import type { ProviderSlug } from '@/lib/banking/aggregator';
+import type { BankingAggregatorSlug } from '@/lib/db/schema';
 
 const {
   providers,
@@ -16,7 +17,7 @@ export interface ProviderRow {
   id: number;
   slug: ProviderSlug;
   displayName: string;
-  aggregator: 'gocardless_bad' | 'truelayer';
+  aggregator: BankingAggregatorSlug;
 }
 
 export interface ConnectionRow {

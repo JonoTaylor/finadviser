@@ -6,7 +6,13 @@ import { setInvestmentBalance } from '@/lib/properties/personal-net-worth';
 import { formatCurrency } from '@/lib/utils/formatting';
 import { matchRule } from '@/lib/import/categorizer';
 import { londonTodayIso } from '@/lib/dates/today';
-import { autoLinkPropertyExpenses } from '@/lib/properties/property-expense-link';
+import {
+  autoLinkPropertyExpenses,
+  tagJournalAsPropertyExpense,
+  tagJournalsAsPropertyExpensesBulk,
+  untagJournalPropertyExpense,
+  listPropertyExpenseCategories,
+} from '@/lib/properties/property-expense-link';
 import { categorizeBatch } from './claude-client';
 
 /**
@@ -434,6 +440,69 @@ export const TOOL_DEFINITIONS: Tool[] = [
       required: [],
     },
   },
+  {
+    name: 'list_property_expense_categories',
+    description:
+      'List the seeded "Property expenses" subtree (parent + children like "Repairs & maintenance", "Letting agent fees", etc) with their ids. Use this BEFORE tag_property_expense / tag_property_expenses_bulk so you pick a category that\'s actually a property-expense one — tagging a journal under a non-property category would not show up on the property\'s tax-year report.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {},
+      required: [],
+    },
+  },
+  {
+    name: 'tag_property_expense',
+    description:
+      'Attribute a single transaction (journal entry) to a specific BTL property as a property expense. Sets journal_entries.property_id (and optionally re-categorises it). Use this when the user has multiple properties and the auto-link from categorize_transaction can\'t pick which one (multi-property mode disables the single-property auto-link). After tagging, the transaction shows up on that property\'s tax-year report. Validate categoryId is in the property-expense subtree first via list_property_expense_categories.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        journal_id: { type: 'number', description: 'The journal entry id to tag.' },
+        property_id: { type: 'number', description: 'Which BTL property the expense belongs to.' },
+        category_id: {
+          type: 'number',
+          description: 'Optional: also re-categorise the journal under this property-expense subtree id (e.g. "Repairs & maintenance"). If omitted, the journal\'s existing category is preserved.',
+        },
+      },
+      required: ['journal_id', 'property_id'],
+    },
+  },
+  {
+    name: 'tag_property_expenses_bulk',
+    description:
+      'Attribute many transactions to (potentially different) BTL properties in a single round-trip. Use after the user confirms a batch e.g. "tag all letting-agent invoices in March to Denbigh Road and the boiler repair to Francis Road". The whole batch is rejected if any item references an unknown property / journal / non-property-expense category, so the user / AI doesn\'t end up with a partially-applied state.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        items: {
+          type: 'array',
+          description: 'Array of {journal_id, property_id, category_id?} triples.',
+          items: {
+            type: 'object',
+            properties: {
+              journal_id: { type: 'number' },
+              property_id: { type: 'number' },
+              category_id: { type: 'number', description: 'Optional property-expense subtree id.' },
+            },
+            required: ['journal_id', 'property_id'],
+          },
+        },
+      },
+      required: ['items'],
+    },
+  },
+  {
+    name: 'untag_property_expense',
+    description:
+      'Clear a journal entry\'s property_id (the inverse of tag_property_expense). Use when an expense was wrongly attributed to a property — e.g. a personal repair that the AI mistakenly tagged to a BTL. Doesn\'t change the category; if you want to re-categorise too, follow up with categorize_transaction.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        journal_id: { type: 'number' },
+      },
+      required: ['journal_id'],
+    },
+  },
 ];
 
 // Human-readable labels for tool status display
@@ -443,6 +512,10 @@ export const TOOL_LABELS: Record<string, string> = {
   update_investment_balance: 'Updating investment balance',
   tag_account_owner: 'Tagging account owner',
   list_owners: 'Listing owners',
+  list_property_expense_categories: 'Loading property-expense categories',
+  tag_property_expense: 'Tagging property expense',
+  tag_property_expenses_bulk: 'Tagging property expenses',
+  untag_property_expense: 'Untagging property expense',
   get_account_balances: 'Looking up account balances',
   search_transactions: 'Searching transactions',
   get_monthly_spending: 'Fetching spending data',
@@ -542,6 +615,14 @@ export async function executeTool(
       return executeTagAccountOwner(input);
     case 'list_owners':
       return executeListOwners();
+    case 'list_property_expense_categories':
+      return executeListPropertyExpenseCategories();
+    case 'tag_property_expense':
+      return executeTagPropertyExpense(input);
+    case 'tag_property_expenses_bulk':
+      return executeTagPropertyExpensesBulk(input);
+    case 'untag_property_expense':
+      return executeUntagPropertyExpense(input);
     default:
       return { error: `Unknown tool: ${name}` };
   }
@@ -1351,4 +1432,79 @@ async function executeTagAccountOwner(input: Record<string, unknown>) {
     accountName: updated.name,
     ownerId: updated.ownerId ?? null,
   };
+}
+
+// -------------------------------------------------------------------
+// Property-expense tagging
+// -------------------------------------------------------------------
+
+async function executeListPropertyExpenseCategories() {
+  try {
+    const rows = await listPropertyExpenseCategories();
+    return { categories: rows, count: rows.length };
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : 'Failed to list property-expense categories' };
+  }
+}
+
+async function executeTagPropertyExpense(input: Record<string, unknown>) {
+  const journalId = input.journal_id;
+  const propertyId = input.property_id;
+  const categoryId = input.category_id;
+  if (typeof journalId !== 'number') return { error: 'journal_id is required' };
+  if (typeof propertyId !== 'number') return { error: 'property_id is required' };
+  if (categoryId !== undefined && typeof categoryId !== 'number') {
+    return { error: 'category_id, when supplied, must be a number' };
+  }
+  try {
+    const result = await tagJournalAsPropertyExpense({
+      journalId,
+      propertyId,
+      categoryId: typeof categoryId === 'number' ? categoryId : undefined,
+    });
+    return { success: true, ...result };
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : 'Failed to tag property expense' };
+  }
+}
+
+async function executeTagPropertyExpensesBulk(input: Record<string, unknown>) {
+  const items = input.items;
+  if (!Array.isArray(items)) {
+    return { error: 'items must be an array of { journal_id, property_id, category_id? }' };
+  }
+  const validated: Array<{ journalId: number; propertyId: number; categoryId?: number }> = [];
+  for (const raw of items) {
+    if (typeof raw !== 'object' || raw === null) {
+      return { error: 'each item must be an object with journal_id and property_id' };
+    }
+    const r = raw as { journal_id?: unknown; property_id?: unknown; category_id?: unknown };
+    if (typeof r.journal_id !== 'number') return { error: 'each item must have a numeric journal_id' };
+    if (typeof r.property_id !== 'number') return { error: 'each item must have a numeric property_id' };
+    if (r.category_id !== undefined && typeof r.category_id !== 'number') {
+      return { error: 'category_id, when supplied, must be a number' };
+    }
+    validated.push({
+      journalId: r.journal_id,
+      propertyId: r.property_id,
+      categoryId: typeof r.category_id === 'number' ? r.category_id : undefined,
+    });
+  }
+  try {
+    const result = await tagJournalsAsPropertyExpensesBulk(validated);
+    return { success: true, ...result };
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : 'Failed to tag property expenses' };
+  }
+}
+
+async function executeUntagPropertyExpense(input: Record<string, unknown>) {
+  const journalId = input.journal_id;
+  if (typeof journalId !== 'number') return { error: 'journal_id is required' };
+  try {
+    const result = await untagJournalPropertyExpense(journalId);
+    return { success: true, ...result };
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : 'Failed to untag property expense' };
+  }
 }

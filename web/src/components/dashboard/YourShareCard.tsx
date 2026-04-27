@@ -46,6 +46,17 @@ const fetcher = async (url: string): Promise<Response> => {
   return res.json();
 };
 
+/**
+ * Owner-scoped replacement for the household Net Worth card. Shows the
+ * selected person's slice of:
+ *  - Property equity (their ownership share of market value − mortgage)
+ *  - Investments (pension / ISA / etc. tagged owner_id = them)
+ *  - Personal cash (untagged accounts assumed shared and excluded)
+ *
+ * The toggle lets you flip between owners — a household with two
+ * partners can sanity-check that both views add up to roughly the
+ * same household total they used to see.
+ */
 export default function YourShareCard() {
   const [ownerId, setOwnerId] = useState<number | null>(null);
   const url = ownerId === null ? '/api/dashboard/your-share' : `/api/dashboard/your-share?ownerId=${ownerId}`;

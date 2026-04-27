@@ -1,5 +1,6 @@
 'use client';
 
+import { useState } from 'react';
 import { Card, CardContent, Typography, Box, Button, Stack } from '@mui/material';
 import { alpha } from '@mui/material/styles';
 import AccountBalanceWalletRoundedIcon from '@mui/icons-material/AccountBalanceWalletRounded';
@@ -26,7 +27,11 @@ function paletteForUtilisation(pct: number) {
 }
 
 export default function BudgetOverviewCard() {
-  const month = format(new Date(), 'yyyy-MM');
+  // Pin "now" at mount so the SWR cache key + display label can't
+  // disagree between SSR and hydration if a month boundary lands
+  // between server-render and client-mount.
+  const [now] = useState(() => new Date());
+  const month = format(now, 'yyyy-MM');
   const { data: budgets } = useSWR<BudgetStatus[]>(`/api/budgets/status?month=${month}`, fetcher);
 
   if (!budgets || budgets.length === 0) {
@@ -79,7 +84,7 @@ export default function BudgetOverviewCard() {
           </Box>
           <Typography variant="subtitle2">Budget Overview</Typography>
           <Typography variant="caption" color="text.secondary" sx={{ ml: 'auto' }}>
-            {format(new Date(), 'MMM yyyy')}
+            {format(now, 'MMM yyyy')}
           </Typography>
         </Box>
 

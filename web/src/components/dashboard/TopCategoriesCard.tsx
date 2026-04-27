@@ -9,6 +9,7 @@ import ArrowDropDownRoundedIcon from '@mui/icons-material/ArrowDropDownRounded';
 import { formatCurrency } from '@/lib/utils/formatting';
 import { getCategoryColor } from '@/lib/utils/category-colors';
 import { londonTodayIso } from '@/lib/dates/today';
+import { format } from 'date-fns';
 import Decimal from 'decimal.js';
 import { softTokens } from '@/theme/theme';
 
@@ -29,7 +30,7 @@ function previousMonth(yyyyMm: string): string {
 
 function monthLabel(yyyyMm: string): string {
   const [y, m] = yyyyMm.split('-').map(Number);
-  return new Date(y, m - 1, 1).toLocaleDateString('en-GB', { month: 'short', year: 'numeric' });
+  return format(new Date(y, m - 1, 1), 'MMM yyyy');
 }
 
 /**

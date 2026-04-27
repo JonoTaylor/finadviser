@@ -1,5 +1,6 @@
 'use client';
 
+import { useState } from 'react';
 import { Card, CardContent, Typography, Box, Chip } from '@mui/material';
 import CalendarMonthRoundedIcon from '@mui/icons-material/CalendarMonthRounded';
 import TrendingUpRoundedIcon from '@mui/icons-material/TrendingUpRounded';
@@ -49,7 +50,9 @@ export default function MonthlySummaryCard({
 }) {
   void _balances;
 
-  const now = new Date();
+  // Pin "now" at mount so the month boundary can't shift between SSR
+  // and hydration.
+  const [now] = useState(() => new Date());
   const currentMonth = format(now, 'yyyy-MM');
   const prevMonth = format(subMonths(now, 1), 'yyyy-MM');
 

@@ -327,6 +327,12 @@ export async function backfillMetadata(
 
   // Pass 5: single upsert with COALESCE — never overwrite a
   // previously-saved non-null field.
+  //
+  // The `raw` column is jsonb. Mixing rows that bind a json string
+  // with `::jsonb` and rows that bind bare NULL trips Postgres' type
+  // unification across the VALUES list ("could not determine data
+  // type of parameter $N"), so we always render the cast explicitly
+  // — `NULL::jsonb` for empty rows, `$N::jsonb` for populated ones.
   const insertValues = dedupedPayloads.map(p => sql`(
     ${p.journalEntryId},
     ${p.externalId},
@@ -341,7 +347,7 @@ export async function backfillMetadata(
     ${p.notes},
     ${p.address},
     ${p.receiptUrl},
-    ${p.raw === null ? null : sql`${JSON.stringify(p.raw)}::jsonb`}
+    ${p.raw === null ? sql`NULL::jsonb` : sql`${JSON.stringify(p.raw)}::jsonb`}
   )`);
 
   await db.execute(sql`

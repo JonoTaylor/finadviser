@@ -12,6 +12,7 @@ import RefreshRoundedIcon from '@mui/icons-material/RefreshRounded';
 import LinkRoundedIcon from '@mui/icons-material/LinkRounded';
 import LinkOffRoundedIcon from '@mui/icons-material/LinkOffRounded';
 import SyncRoundedIcon from '@mui/icons-material/SyncRounded';
+import HistoryRoundedIcon from '@mui/icons-material/HistoryRounded';
 import { format, formatDistanceToNow } from 'date-fns';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
@@ -227,6 +228,15 @@ function ConnectionsPageInner() {
                         href={`/settings/connections/${conn.id}/map`}
                       >
                         Map accounts
+                      </Button>
+                      <Button
+                        variant="outlined"
+                        size="small"
+                        startIcon={<HistoryRoundedIcon />}
+                        component={Link}
+                        href={`/settings/connections/${conn.id}/sync-runs`}
+                      >
+                        Sync history
                       </Button>
                     </>
                   )}

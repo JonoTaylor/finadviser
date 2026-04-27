@@ -280,6 +280,14 @@ CREATE TABLE IF NOT EXISTS ai_tips (
     dismissed_at TIMESTAMP
 );
 
+-- Stable handle for deduplicated tips (e.g. one "Monzo connection
+-- expiring" tip at a time, not three). The cron in PR C writes tips
+-- with tags like "connection:5:expiring"; on conflict we keep the
+-- existing active tip rather than spamming the dashboard.
+ALTER TABLE ai_tips ADD COLUMN IF NOT EXISTS tag TEXT;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_ai_tips_active_tag
+    ON ai_tips(tag) WHERE tag IS NOT NULL AND dismissed_at IS NULL;
+
 CREATE INDEX IF NOT EXISTS idx_ai_tips_active
     ON ai_tips(priority DESC, created_at DESC)
     WHERE dismissed_at IS NULL;

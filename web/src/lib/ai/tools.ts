@@ -1273,7 +1273,7 @@ async function executeAddInvestmentAccount(input: Record<string, unknown>) {
         // the app (UK calendar) regardless of where the function
         // executor is running.
         asOfDate: londonTodayIso(),
-        description: `Opening balance — ${account.name}`,
+        description: `Opening balance - ${account.name}`,
       });
       openingResult = { delta: r.delta, previousBalance: r.previousBalance };
     }

@@ -429,6 +429,55 @@ SELECT v.name, true
     WHERE c.name = v.name AND c.parent_id IS NULL
  );
 
+-- Investment balance update primitive. Replaces a multi-CTE pattern
+-- in TypeScript that the neon-http transport rejected with HTTP 400
+-- when multiple data-modifying CTEs were combined with FK
+-- relationships. The function does the same work imperatively in a
+-- single procedural body, called from TS as a single SELECT, so the
+-- transport sees one statement and Postgres handles the writes
+-- sequentially without any CTE snapshot interplay.
+--
+-- Reads current balance, computes delta, inserts a journal entry and
+-- two offsetting book_entries (subject + adjustment account), then
+-- returns a single row of (journal_id, delta, previous_balance).
+-- Atomic at the function level: either all three rows land or none
+-- do. The journal-balance trigger still fires per book_entries
+-- insert and validates double-entry as before.
+CREATE OR REPLACE FUNCTION set_investment_balance(
+    p_account_id     INTEGER,
+    p_target_balance NUMERIC,
+    p_as_of_date     TEXT,
+    p_description    TEXT,
+    p_adj_account_id INTEGER
+) RETURNS TABLE (
+    journal_id       INTEGER,
+    delta            NUMERIC,
+    previous_balance NUMERIC
+) AS $$
+DECLARE
+    v_bal        NUMERIC;
+    v_delta      NUMERIC;
+    v_journal_id INTEGER;
+BEGIN
+    SELECT COALESCE(SUM(amount::numeric), 0) INTO v_bal
+      FROM book_entries
+     WHERE account_id = p_account_id;
+
+    v_delta := p_target_balance - v_bal;
+
+    INSERT INTO journal_entries (date, description)
+         VALUES (p_as_of_date, p_description)
+      RETURNING id INTO v_journal_id;
+
+    INSERT INTO book_entries (journal_entry_id, account_id, amount)
+    VALUES
+        (v_journal_id, p_account_id,     v_delta),
+        (v_journal_id, p_adj_account_id, -v_delta);
+
+    RETURN QUERY SELECT v_journal_id, v_delta, v_bal;
+END;
+$$ LANGUAGE plpgsql;
+
 -- Itemised UK BTL deductible expense categories (children of 'Property
 -- expenses'). Mortgage interest is intentionally NOT seeded here: under
 -- S.24 it's not an ordinary deductible expense and it's already isolated

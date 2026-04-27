@@ -2,240 +2,292 @@
 
 import { createTheme, alpha } from '@mui/material/styles';
 
-// ── Deep Navy-Purple + Gold/Yellow Palette ──────────────────────────
-// Primary:   gold — warm, premium accent
-// Secondary: lavender — soft, modern contrast
-// Tertiary:  pink — supporting accent
-// Surfaces:  deep navy tonal scale
+// ── Soft Surfaces v2 ────────────────────────────────────────────────
+// Light pastel canvas + white "pillow" cards + Instrument Serif italic
+// display numerals. CTAs are dark ink, not gold; accents come from a
+// fixed mint / lemon / lavender / peach palette.
+//
+// MUI's `palette.*` is mapped to the v2 tokens that have natural
+// equivalents (success=mint, warning=lemon, error=peach, secondary=
+// lavender). `palette.info.main` is also lavender.deep so contained
+// "info" CTAs have enough contrast for white text — the softer
+// `softTokens.fog` tint that the spec calls "info" is applied via
+// the explicit `MuiAlert.standardInfo` and `MuiChip.colorInfo`
+// component overrides instead. Everything else lives on `softTokens`,
+// exported alongside this theme for use via `sx`.
 // ─────────────────────────────────────────────────────────────────────
 
-const palette = {
-  primary:   { main: '#E8C547', light: '#F2DA7A', dark: '#C9A82E', contrastText: '#1A1730' },
-  secondary: { main: '#B8A9E8', light: '#D4C9F5', dark: '#8E7DC0', contrastText: '#1A1730' },
-  tertiary:  { main: '#F472B6', light: '#F9A8D4', dark: '#EC4899' },
+export const softTokens = {
+  mint:     { main: '#C8EAB8', deep: '#9FCC8C', ink: '#1F5E2D' },
+  lemon:    { main: '#F2EE8F', deep: '#DFD867', ink: '#6B5A0B' },
+  lavender: { main: '#D9CFF5', deep: '#B8A9E8', ink: '#3A2B7A' },
+  peach:    { main: '#F5C4A8', deep: '#E8A589', ink: '#8B3A1A' },
 
-  success: { main: '#4ADE80', dark: '#16A34A' },
-  error:   { main: '#FB7185', dark: '#E11D48' },
-  warning: { main: '#FBBF24', dark: '#D97706' },
-  info:    { main: '#60A5FA', dark: '#2563EB' },
+  cream: '#F7F3E7',
+  stone: '#ECE9DF',
+  fog:   '#ECE7F5',
 
-  // Deep navy tonal surface scale
-  bg:      '#12101F',
-  surface: '#1A1730',
-  surfaceContainerLow:     '#1F1C35',
-  surfaceContainer:        '#262340',
-  surfaceContainerHigh:    '#302D4A',
-  surfaceContainerHighest: '#3A3655',
+  ink:  '#1A1730',
+  ink2: '#4A4566',
+  ink3: '#6E6886',
+  ink4: '#9A95B0',
 
-  outline:        'rgba(184,169,232,0.12)',
-  outlineVariant: 'rgba(184,169,232,0.06)',
-  textPrimary:    '#F0EDF8',
-  textSecondary:  '#8E8AAE',
-};
+  // Shadow strings keep their literal rgba — the multi-layer recipe is
+  // composed once here and consumed as a string. Converting to alpha()
+  // would require template-literal interpolation per layer with no
+  // runtime benefit.
+  shadowPillow: '0 24px 56px -24px rgba(26,23,48,0.22), 0 4px 12px -2px rgba(26,23,48,0.08), 0 0 0 1px rgba(26,23,48,0.04)',
+  shadowPillowLift: '0 32px 72px -24px rgba(26,23,48,0.28), 0 6px 16px -2px rgba(26,23,48,0.10), 0 0 0 1px rgba(26,23,48,0.04)',
 
-// ── Visual Effect Utilities ──────────────────────────────────────────
-export const glassCard = {
-  backgroundColor: 'rgba(26,23,48,0.55)',
-  backdropFilter: 'blur(20px) saturate(180%)',
-  border: `1px solid rgba(184,169,232,0.08)`,
-};
+  radius: { sm: 14, md: 16, lg: 20, xl: 24, '2xl': 28, '3xl': 32, pill: 999 },
+} as const;
 
+// Used via sx={{ fontFamily: serifFamily, fontStyle: 'italic' }} for
+// hero numerals + display headings. Not added as a custom typography
+// variant because that requires module augmentation for one helper.
+export const serifFamily = 'var(--font-instrument-serif), "Instrument Serif", "Times New Roman", serif';
+
+// ── Helper-export shims ─────────────────────────────────────────────
+// YourShareCard.tsx + NetWorthCard.tsx still import these. They get
+// their proper redesign in PR 2 (dashboard rebuild), at which point
+// these exports go away.
+
+/** @deprecated v2 has no glow shadows; will be removed in PR 2. */
 export const glowShadow = {
-  primary: `0 4px 24px -4px ${alpha(palette.primary.main, 0.2)}`,
-  success: `0 4px 24px -4px ${alpha(palette.success.main, 0.2)}`,
-  error:   `0 4px 24px -4px ${alpha(palette.error.main, 0.2)}`,
-  secondary: `0 4px 24px -4px ${alpha(palette.secondary.main, 0.2)}`,
+  primary:   softTokens.shadowPillow,
+  success:   softTokens.shadowPillow,
+  error:     softTokens.shadowPillow,
+  secondary: softTokens.shadowPillow,
 };
 
-export const gradientText = (from: string, to: string) => ({
-  background: `linear-gradient(135deg, ${from}, ${to})`,
-  WebkitBackgroundClip: 'text',
-  WebkitTextFillColor: 'transparent',
-  backgroundClip: 'text',
-});
-
-export const lightCard = {
-  backgroundColor: '#F0EDF8',
-  border: '1px solid rgba(184,169,232,0.2)',
-  backdropFilter: 'none',
-};
+/** @deprecated v2 has no gradient text; will be removed in PR 2. */
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+export const gradientText = (_from: string, _to: string) => ({});
 
 const theme = createTheme({
   palette: {
-    mode: 'dark',
-    primary:   palette.primary,
-    secondary: palette.secondary,
-    success:   palette.success,
-    error:     palette.error,
-    warning:   palette.warning,
-    info:      palette.info,
-    background: { default: palette.bg, paper: palette.surface },
-    text:       { primary: palette.textPrimary, secondary: palette.textSecondary },
-    divider: palette.outlineVariant,
+    mode: 'light',
+    primary:    { main: softTokens.ink,           contrastText: '#FFFFFF' },
+    secondary:  { main: softTokens.lavender.deep, contrastText: softTokens.lavender.ink },
+    success:    { main: softTokens.mint.deep,     contrastText: softTokens.mint.ink },
+    warning:    { main: softTokens.lemon.deep,    contrastText: softTokens.lemon.ink },
+    error:      { main: softTokens.peach.deep,    contrastText: softTokens.peach.ink },
+    info:       { main: softTokens.lavender.deep, contrastText: softTokens.lavender.ink },
+    background: { default: '#FAF6EC',             paper: '#FFFFFF' },
+    text:       { primary: softTokens.ink, secondary: softTokens.ink2, disabled: softTokens.ink4 },
+    divider:    alpha(softTokens.ink, 0.06),
   },
 
   typography: {
-    fontFamily: '"Inter", "Roboto", "Helvetica", "Arial", sans-serif',
-    h4: { fontWeight: 700, letterSpacing: '-0.02em' },
+    fontFamily: 'var(--font-inter), "Inter", -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif',
+    h3: { fontWeight: 600, letterSpacing: '-0.02em' },
+    h4: { fontWeight: 600, letterSpacing: '-0.02em' },
     h5: { fontWeight: 600, letterSpacing: '-0.01em' },
     h6: { fontWeight: 600, letterSpacing: '-0.01em' },
     subtitle1: { fontWeight: 500 },
-    subtitle2: { fontWeight: 500, fontSize: '0.8rem', letterSpacing: '0.04em', textTransform: 'uppercase' as const },
-    body2: { color: palette.textSecondary },
-    caption: { color: palette.textSecondary, fontSize: '0.75rem' },
+    subtitle2: { fontWeight: 500, fontSize: '0.85rem', color: softTokens.ink3 },
+    body2: { color: softTokens.ink2 },
+    caption: { color: softTokens.ink3, fontSize: '0.78rem' },
   },
 
-  shape: { borderRadius: 16 },
+  shape: { borderRadius: softTokens.radius.md },
 
   components: {
-    // ── Surfaces ───────────────────────────────────────────────────
     MuiCssBaseline: {
       styleOverrides: {
         body: {
-          backgroundColor: palette.bg,
-          backgroundImage: `
-            radial-gradient(ellipse 80% 60% at 10% 90%, ${alpha(palette.secondary.main, 0.06)} 0%, transparent 60%),
-            radial-gradient(ellipse 60% 50% at 90% 10%, ${alpha(palette.primary.main, 0.05)} 0%, transparent 60%)
-          `,
+          background: 'var(--gradient-page-soft)',
           backgroundAttachment: 'fixed',
+          color: softTokens.ink,
+          minHeight: '100vh',
         },
-        '::-webkit-scrollbar': { width: 6 },
+        '::-webkit-scrollbar': { width: 8, height: 8 },
         '::-webkit-scrollbar-track': { background: 'transparent' },
-        '::-webkit-scrollbar-thumb': { background: 'rgba(184,169,232,0.12)', borderRadius: 3 },
+        '::-webkit-scrollbar-thumb': { background: alpha(softTokens.ink, 0.18), borderRadius: softTokens.radius.pill },
       },
     },
+
     MuiPaper: {
       styleOverrides: {
-        root: { backgroundImage: 'none' },
+        root: { backgroundImage: 'none', backgroundColor: '#fff' },
       },
     },
+
     MuiCard: {
       styleOverrides: {
         root: {
           backgroundImage: 'none',
-          ...glassCard,
-          borderRadius: 20,
-          transition: 'border-color 0.2s, box-shadow 0.2s',
-          '&:hover': {
-            borderColor: palette.outline,
-          },
+          backgroundColor: '#fff',
+          borderRadius: softTokens.radius['2xl'],
+          boxShadow: softTokens.shadowPillow,
+          border: 'none',
+          transition: 'box-shadow 0.2s ease',
+          '&:hover': { boxShadow: softTokens.shadowPillowLift },
         },
       },
     },
     MuiCardContent: {
       styleOverrides: {
-        root: { padding: 20, '&:last-child': { paddingBottom: 20 } },
+        root: { padding: 24, '&:last-child': { paddingBottom: 24 } },
       },
     },
 
-    // ── Buttons ────────────────────────────────────────────────────
     MuiButton: {
+      defaultProps: { disableElevation: true },
       styleOverrides: {
         root: {
           textTransform: 'none' as const,
-          borderRadius: 12,
+          borderRadius: softTokens.radius.pill,
           fontWeight: 600,
-          padding: '8px 20px',
+          padding: '10px 22px',
+          boxShadow: 'none',
+          lineHeight: 1.2,
         },
         contained: {
-          background: `linear-gradient(135deg, ${palette.primary.main}, ${palette.primary.dark})`,
-          boxShadow: glowShadow.primary,
-          '&:hover': {
-            background: `linear-gradient(135deg, ${palette.primary.light}, ${palette.primary.main})`,
-            boxShadow: glowShadow.primary,
-          },
+          boxShadow: 'none',
+          '&:hover': { boxShadow: 'none' },
+        },
+        containedPrimary: {
+          backgroundColor: softTokens.ink,
+          color: '#FFFFFF',
+          '&:hover': { backgroundColor: '#2A2548' },
+          '&:active': { backgroundColor: '#0F0D1F' },
+        },
+        containedSuccess: {
+          backgroundColor: softTokens.mint.deep,
+          color: softTokens.mint.ink,
+          '&:hover': { backgroundColor: softTokens.mint.main },
         },
         outlined: {
-          borderColor: alpha(palette.secondary.main, 0.2),
-          '&:hover': { borderColor: palette.primary.main, backgroundColor: alpha(palette.primary.main, 0.08) },
+          borderColor: alpha(softTokens.ink, 0.12),
+          color: softTokens.ink,
+          '&:hover': { borderColor: alpha(softTokens.ink, 0.24), backgroundColor: alpha(softTokens.ink, 0.04) },
+        },
+        text: {
+          color: softTokens.ink,
+          '&:hover': { backgroundColor: alpha(softTokens.ink, 0.04) },
         },
       },
     },
     MuiFab: {
       styleOverrides: {
-        root: { boxShadow: glowShadow.primary },
+        root: { boxShadow: softTokens.shadowPillow },
       },
     },
 
-    // ── Inputs ─────────────────────────────────────────────────────
     MuiTextField: {
       defaultProps: { variant: 'outlined', size: 'small' },
       styleOverrides: {
         root: {
           '& .MuiOutlinedInput-root': {
-            borderRadius: 12,
-            '& fieldset': { borderColor: palette.outline },
-            '&:hover fieldset': { borderColor: palette.textSecondary },
-            '&.Mui-focused fieldset': { borderColor: palette.primary.main },
+            borderRadius: softTokens.radius.sm,
+            backgroundColor: '#fff',
+            '& fieldset': { borderColor: alpha(softTokens.ink, 0.12) },
+            '&:hover fieldset': { borderColor: alpha(softTokens.ink, 0.24) },
+            '&.Mui-focused fieldset': { borderColor: softTokens.ink, borderWidth: 1.5 },
           },
         },
       },
     },
     MuiAutocomplete: {
       styleOverrides: {
-        paper: { backgroundColor: palette.surfaceContainerHigh, borderRadius: 12, border: `1px solid ${palette.outline}` },
+        paper: {
+          backgroundColor: '#fff',
+          borderRadius: softTokens.radius.md,
+          boxShadow: softTokens.shadowPillow,
+          border: 'none',
+        },
       },
     },
     MuiMenu: {
       styleOverrides: {
-        paper: { backgroundColor: palette.surfaceContainerHigh, borderRadius: 12, border: `1px solid ${palette.outline}` },
+        paper: {
+          backgroundColor: '#fff',
+          borderRadius: softTokens.radius.md,
+          boxShadow: softTokens.shadowPillow,
+          border: 'none',
+        },
       },
     },
     MuiDialog: {
       styleOverrides: {
-        paper: { backgroundColor: palette.surfaceContainerHigh, borderRadius: 20, border: `1px solid ${palette.outline}` },
+        paper: {
+          backgroundColor: '#fff',
+          borderRadius: softTokens.radius.xl,
+          boxShadow: softTokens.shadowPillow,
+          border: 'none',
+        },
       },
     },
 
-    // ── Chips ──────────────────────────────────────────────────────
     MuiChip: {
       styleOverrides: {
-        root: { borderRadius: 10, fontWeight: 500, fontSize: '0.8rem' },
-        outlined: { borderColor: palette.outline },
+        root: {
+          borderRadius: softTokens.radius.pill,
+          fontWeight: 500,
+          fontSize: '0.78rem',
+          height: 26,
+        },
+        colorSuccess: { backgroundColor: softTokens.mint.main, color: softTokens.mint.ink },
+        colorWarning: { backgroundColor: softTokens.lemon.main, color: softTokens.lemon.ink },
+        colorError:   { backgroundColor: softTokens.peach.main, color: softTokens.peach.ink },
+        colorInfo:    { backgroundColor: softTokens.fog,        color: softTokens.lavender.ink },
+        colorDefault: { backgroundColor: softTokens.stone,      color: softTokens.ink },
+        outlined: { borderColor: alpha(softTokens.ink, 0.12), backgroundColor: 'transparent' },
       },
     },
 
-    // ── Tables ─────────────────────────────────────────────────────
     MuiTableCell: {
       styleOverrides: {
-        root: { borderColor: palette.outlineVariant, padding: '12px 16px' },
-        head: { fontWeight: 600, color: palette.textSecondary, fontSize: '0.8rem', letterSpacing: '0.04em', textTransform: 'uppercase' as const },
+        root: { borderColor: alpha(softTokens.ink, 0.06), padding: '14px 16px', color: softTokens.ink },
+        head: { fontWeight: 600, color: softTokens.ink3, fontSize: '0.78rem' },
       },
     },
     MuiTableRow: {
       styleOverrides: {
         root: {
           transition: 'background-color 0.15s',
-          '&:hover': { backgroundColor: alpha(palette.primary.main, 0.04) },
+          '&:hover': { backgroundColor: alpha(softTokens.ink, 0.03) },
         },
       },
     },
 
-    // ── Navigation ─────────────────────────────────────────────────
     MuiDrawer: {
       styleOverrides: {
-        paper: { borderRight: 'none', backgroundColor: palette.surface },
+        paper: {
+          backgroundColor: 'rgba(255,253,247,0.55)',
+          backdropFilter: 'blur(20px) saturate(180%)',
+          WebkitBackdropFilter: 'blur(20px) saturate(180%)',
+          borderRight: `1px solid ${alpha(softTokens.ink, 0.04)}`,
+          backgroundImage: 'none',
+        },
       },
     },
     MuiListItemButton: {
       styleOverrides: {
         root: {
-          borderRadius: 14,
+          borderRadius: softTokens.radius.sm,
           margin: '2px 8px',
-          padding: '10px 16px',
-          transition: 'background-color 0.15s',
+          padding: '10px 14px',
+          color: softTokens.ink2,
+          transition: 'background-color 0.15s, color 0.15s',
+          '&:hover': { backgroundColor: alpha(softTokens.ink, 0.06) },
           '&.Mui-selected': {
-            backgroundColor: alpha(palette.primary.main, 0.12),
-            '&:hover': { backgroundColor: alpha(palette.primary.main, 0.16) },
+            backgroundColor: softTokens.ink,
+            color: '#FFFFFF',
+            '&:hover': { backgroundColor: softTokens.ink },
           },
         },
       },
     },
 
-    // ── Tabs & Progress ────────────────────────────────────────────
     MuiLinearProgress: {
       styleOverrides: {
-        root: { borderRadius: 8, height: 8, backgroundColor: palette.surfaceContainerHighest },
+        root: {
+          borderRadius: softTokens.radius.pill,
+          height: 8,
+          backgroundColor: softTokens.stone,
+        },
       },
     },
     MuiStepper: {
@@ -244,15 +296,24 @@ const theme = createTheme({
       },
     },
 
-    // ── Tooltip / Snackbar ─────────────────────────────────────────
     MuiTooltip: {
       styleOverrides: {
-        tooltip: { backgroundColor: palette.surfaceContainerHighest, borderRadius: 8, fontSize: '0.8rem' },
+        tooltip: {
+          backgroundColor: softTokens.ink,
+          color: '#FFFFFF',
+          borderRadius: 10,
+          fontSize: '0.78rem',
+        },
+        arrow: { color: softTokens.ink },
       },
     },
     MuiAlert: {
       styleOverrides: {
-        root: { borderRadius: 12 },
+        root: { borderRadius: softTokens.radius.md },
+        standardSuccess: { backgroundColor: softTokens.mint.main, color: softTokens.mint.ink },
+        standardWarning: { backgroundColor: softTokens.lemon.main, color: softTokens.lemon.ink },
+        standardError:   { backgroundColor: softTokens.peach.main, color: softTokens.peach.ink },
+        standardInfo:    { backgroundColor: softTokens.fog,        color: softTokens.lavender.ink },
       },
     },
     MuiSnackbar: {
@@ -262,6 +323,3 @@ const theme = createTheme({
 });
 
 export default theme;
-
-// Export palette tokens for use in components
-export { palette };

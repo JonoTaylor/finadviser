@@ -1,3 +1,16 @@
+:root {
+  --gradient-page-soft:
+    radial-gradient(ellipse 60% 50% at 95% 5%, #ECE0F8 0%, transparent 55%),
+    radial-gradient(ellipse 70% 60% at 5% 100%, #DDEED0 0%, transparent 55%),
+    linear-gradient(180deg, #FAF6EC 0%, #F4EFE0 100%);
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
 body {
   margin: 0;
   padding: 0;

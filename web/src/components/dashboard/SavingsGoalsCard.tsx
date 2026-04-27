@@ -6,7 +6,6 @@ import SavingsRoundedIcon from '@mui/icons-material/SavingsRounded';
 import ChatRoundedIcon from '@mui/icons-material/ChatRounded';
 import useSWR from 'swr';
 import Link from 'next/link';
-import { lightCard } from '@/theme/theme';
 
 const fetcher = (url: string) => fetch(url).then(r => r.json());
 
@@ -32,7 +31,7 @@ export default function SavingsGoalsCard() {
 
   if (activeGoals.length === 0) {
     return (
-      <Card sx={{ height: '100%', ...lightCard }}>
+      <Card sx={{ height: '100%' }}>
         <CardContent>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
             <Box
@@ -64,7 +63,7 @@ export default function SavingsGoalsCard() {
   }
 
   return (
-    <Card sx={{ height: '100%', position: 'relative', overflow: 'hidden', ...lightCard }}>
+    <Card sx={{ height: '100%', position: 'relative', overflow: 'hidden' }}>
       <Box
         sx={{
           position: 'absolute', top: 0, left: 0, right: 0, height: 3,

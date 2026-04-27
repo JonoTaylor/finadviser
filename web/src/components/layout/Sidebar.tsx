@@ -23,11 +23,11 @@ import TuneRoundedIcon from '@mui/icons-material/TuneRounded';
 import MenuRoundedIcon from '@mui/icons-material/MenuRounded';
 import ShowChartRoundedIcon from '@mui/icons-material/ShowChartRounded';
 import useMediaQuery from '@mui/material/useMediaQuery';
-import { useTheme, alpha } from '@mui/material/styles';
-import { glassCard } from '@/theme/theme';
+import { useTheme } from '@mui/material/styles';
+import { softTokens, serifFamily } from '@/theme/theme';
 import LogoutButton from '@/components/auth/LogoutButton';
 
-const DRAWER_WIDTH = 260;
+const DRAWER_WIDTH = 240;
 
 const navItems = [
   { label: 'Dashboard',    href: '/',              icon: <DashboardRoundedIcon /> },
@@ -46,14 +46,12 @@ export default function Sidebar({ children }: { children: React.ReactNode }) {
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
   const [mobileOpen, setMobileOpen] = useState(false);
 
-  // Auth pages render full-bleed without the navigation drawer or header.
   if (pathname === '/login') {
     return <>{children}</>;
   }
 
   const drawerContent = (
     <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%', py: 1.5 }}>
-      {/* ── Brand ────────────────────────────────────── */}
       <Box sx={{ px: 2.5, py: 2, display: 'flex', alignItems: 'center', gap: 1.5 }}>
         <Box
           sx={{
@@ -63,24 +61,31 @@ export default function Sidebar({ children }: { children: React.ReactNode }) {
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            background: `linear-gradient(135deg, ${theme.palette.primary.main}, ${theme.palette.secondary.main})`,
-            boxShadow: `0 2px 12px -2px ${alpha(theme.palette.primary.main, 0.3)}`,
+            backgroundColor: softTokens.lavender.main,
           }}
         >
-          <ShowChartRoundedIcon sx={{ fontSize: 20, color: '#fff' }} />
+          <ShowChartRoundedIcon sx={{ fontSize: 20, color: softTokens.ink }} />
         </Box>
         <Box>
-          <Typography variant="subtitle1" sx={{ fontWeight: 700, lineHeight: 1.2, color: 'text.primary' }}>
+          <Typography
+            sx={{
+              fontFamily: serifFamily,
+              fontStyle: 'italic',
+              fontWeight: 400,
+              fontSize: '1.25rem',
+              lineHeight: 1.1,
+              color: softTokens.ink,
+            }}
+          >
             FinAdviser
           </Typography>
-          <Typography variant="caption" sx={{ color: 'text.secondary', lineHeight: 1 }}>
+          <Typography variant="caption" sx={{ color: softTokens.ink3, lineHeight: 1 }}>
             Personal Finance
           </Typography>
         </Box>
       </Box>
 
-      {/* ── Navigation ───────────────────────────────── */}
-      <List sx={{ flex: 1, px: 1.5, pt: 1 }}>
+      <List sx={{ flex: 1, px: 1, pt: 1 }}>
         {navItems.map((item) => {
           const isActive = item.href === '/'
             ? pathname === '/'
@@ -95,12 +100,9 @@ export default function Sidebar({ children }: { children: React.ReactNode }) {
               >
                 <ListItemIcon
                   sx={{
-                    minWidth: 40,
-                    color: isActive ? 'primary.main' : 'text.secondary',
+                    minWidth: 36,
+                    color: isActive ? softTokens.mint.deep : softTokens.ink3,
                     transition: 'color 0.15s',
-                    ...(isActive && {
-                      filter: `drop-shadow(0 0 6px ${alpha(theme.palette.primary.main, 0.4)})`,
-                    }),
                   }}
                 >
                   {item.icon}
@@ -109,8 +111,7 @@ export default function Sidebar({ children }: { children: React.ReactNode }) {
                   primary={item.label}
                   primaryTypographyProps={{
                     fontSize: '0.875rem',
-                    fontWeight: isActive ? 600 : 400,
-                    color: isActive ? 'text.primary' : 'text.secondary',
+                    fontWeight: isActive ? 600 : 500,
                   }}
                 />
               </ListItemButton>
@@ -119,9 +120,8 @@ export default function Sidebar({ children }: { children: React.ReactNode }) {
         })}
       </List>
 
-      {/* ── Footer ───────────────────────────────────── */}
       <Box sx={{ px: 2.5, py: 1.5, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <Typography variant="caption" sx={{ opacity: 0.4 }}>
+        <Typography variant="caption" sx={{ color: softTokens.ink4 }}>
           v0.1.0
         </Typography>
         <LogoutButton />
@@ -130,7 +130,7 @@ export default function Sidebar({ children }: { children: React.ReactNode }) {
   );
 
   return (
-    <Box sx={{ display: 'flex', minHeight: '100vh', bgcolor: 'background.default' }}>
+    <Box sx={{ display: 'flex', minHeight: '100vh' }}>
       {isMobile && (
         <IconButton
           onClick={() => setMobileOpen(true)}
@@ -139,8 +139,10 @@ export default function Sidebar({ children }: { children: React.ReactNode }) {
             top: 12,
             left: 12,
             zIndex: 1300,
-            ...glassCard,
-            '&:hover': { bgcolor: alpha(theme.palette.background.paper, 0.95) },
+            backgroundColor: 'background.paper',
+            boxShadow: softTokens.shadowPillow,
+            borderRadius: softTokens.radius.pill,
+            '&:hover': { backgroundColor: 'background.paper' },
           }}
         >
           <MenuRoundedIcon />
@@ -157,8 +159,6 @@ export default function Sidebar({ children }: { children: React.ReactNode }) {
           '& .MuiDrawer-paper': {
             width: DRAWER_WIDTH,
             boxSizing: 'border-box',
-            borderRight: `1px solid rgba(184,169,232,0.04)`,
-            ...(isMobile && glassCard),
           },
         }}
       >
@@ -169,10 +169,9 @@ export default function Sidebar({ children }: { children: React.ReactNode }) {
         component="main"
         sx={{
           flexGrow: 1,
-          p: { xs: 2, sm: 3, md: 4 },
+          p: { xs: 2, sm: 3, md: 5 },
           pt: isMobile ? 7 : undefined,
           width: isMobile ? '100%' : `calc(100% - ${DRAWER_WIDTH}px)`,
-          maxWidth: 1400,
         }}
       >
         {children}

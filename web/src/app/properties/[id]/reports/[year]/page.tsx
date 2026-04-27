@@ -24,6 +24,7 @@ import DownloadIcon from '@mui/icons-material/Download';
 import Link from 'next/link';
 import useSWR from 'swr';
 import { formatCurrency } from '@/lib/utils/formatting';
+import { currentTaxYear } from '@/lib/tax/ukTaxYear';
 
 const fetcher = (url: string) => fetch(url).then(r => r.json());
 
@@ -127,6 +128,8 @@ export default function TaxYearReportPage({
       <Typography variant="subtitle1" color="text.secondary" sx={{ mb: 2 }}>
         UK tax year {report.taxYear.label} ({report.taxYear.startDate} to {report.taxYear.endDate})
       </Typography>
+
+      <YearSelector propertyId={id} currentYear={report.taxYear.label} />
 
       {owners.length > 0 && (
         <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 3 }}>
@@ -281,7 +284,12 @@ export default function TaxYearReportPage({
       <ExpenseSection
         title="Itemised deductible expenses"
         rows={report.expenses}
-        emptyHint="No expenses recorded for this property in this tax year. (Expense capture UI lands in Sprint 2.)"
+        emptyHint={
+          'No expenses recorded for this property in this tax year. '
+          + 'Tag historical transactions via the AI chat ("tag last quarter\'s repairs to this property") '
+          + 'or use Auto-link existing on the property page after running a categorisation pass. '
+          + 'Tax-year reports filter by transaction date, so transactions before 6 April of the displayed year sit on the previous tax year - try the year selector above.'
+        }
         onDownload={() => downloadCsv(
           `expenses-${fileBase}${ownerSuffix}.csv`,
           ['Date', 'Description', 'Category', 'Account', 'Reference', 'Amount'],
@@ -293,9 +301,14 @@ export default function TaxYearReportPage({
       />
 
       <ExpenseSection
-        title="Mortgage interest (separate — restricted to basic-rate relief under S.24)"
+        title="Mortgage interest (separate - restricted to basic-rate relief under S.24)"
         rows={report.mortgageInterest}
-        emptyHint="No mortgage interest recorded for this property in this tax year. (Mortgage payments need to be tagged with the property — Sprint 2.)"
+        emptyHint={
+          'No mortgage-interest journals for this property in this tax year. '
+          + 'The Mortgage Interest card on the property page already shows the rate-history-computed figure that HMRC needs for S.24 relief; '
+          + 'this section only fills in if you have explicit journals against the system "Mortgage Interest" account. '
+          + 'A "Generate interest journals" flow is queued.'
+        }
         onDownload={() => downloadCsv(
           `mortgage-interest-${fileBase}${ownerSuffix}.csv`,
           ['Date', 'Description', 'Category', 'Account', 'Reference', 'Amount'],
@@ -368,5 +381,48 @@ function ExpenseSection({
         )}
       </CardContent>
     </Card>
+  );
+}
+
+/**
+ * Tax-year navigator. The route param is the year label (e.g. "2025-26");
+ * each pill links to the same property's report at a different year.
+ *
+ * Range: from the property-tracking origin year (we reach back 5 years
+ * because BTL accounts often start a couple of years before the user
+ * tracks them) up to next year (so users can pre-flight a return
+ * before April rolls over). Anchor links rather than client-side
+ * routing because each year is a fresh SWR fetch and Next file-based
+ * routing already gives us proper history entries.
+ */
+function YearSelector({ propertyId, currentYear }: { propertyId: string; currentYear: string }) {
+  const thisYear = currentTaxYear().label;
+  // taxYearRange's label format is "YYYY-YY" (e.g. "2025-26"). Walk back
+  // 5 from `thisYear`, forward 1.
+  const startYear = parseInt(thisYear.split('-')[0], 10);
+  const years: string[] = [];
+  for (let offset = -5; offset <= 1; offset++) {
+    const y = startYear + offset;
+    const next = String((y + 1) % 100).padStart(2, '0');
+    years.push(`${y}-${next}`);
+  }
+  return (
+    <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 3 }} flexWrap="wrap" useFlexGap>
+      <Typography variant="body2" color="text.secondary">Tax year</Typography>
+      <ToggleButtonGroup size="small" exclusive value={currentYear}>
+        {years.map(y => (
+          <ToggleButton
+            key={y}
+            value={y}
+            component={Link}
+            href={`/properties/${propertyId}/reports/${y}`}
+            selected={y === currentYear}
+          >
+            {y}
+            {y === thisYear ? ' (current)' : ''}
+          </ToggleButton>
+        ))}
+      </ToggleButtonGroup>
+    </Stack>
   );
 }

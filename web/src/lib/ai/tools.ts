@@ -6,6 +6,7 @@ import { setInvestmentBalance } from '@/lib/properties/personal-net-worth';
 import { formatCurrency } from '@/lib/utils/formatting';
 import { matchRule } from '@/lib/import/categorizer';
 import { londonTodayIso } from '@/lib/dates/today';
+import { autoLinkPropertyExpenses } from '@/lib/properties/property-expense-link';
 import { categorizeBatch } from './claude-client';
 
 /**
@@ -686,7 +687,16 @@ async function executeCategorizeTransaction(input: Record<string, unknown>) {
   const journalId = input.journal_id as number;
   const categoryId = input.category_id as number;
   await journalRepo.updateCategory(journalId, categoryId);
-  return { success: true, journalId, categoryId };
+  // Stamp property_id when the new category lives in the
+  // "Property expenses" subtree AND there's exactly one property —
+  // otherwise the tax-year report (which filters by je.property_id)
+  // can't see the expense even though it's correctly categorised.
+  // Multi-property users have to specify explicitly.
+  const propertyLinked = await autoLinkPropertyExpenses([journalId]);
+  // Return the count (0 or 1) so the response shape matches
+  // executeApplyCategorizationsBulk — keeps the AI's mental model
+  // consistent across the two categorisation tools.
+  return { success: true, journalId, categoryId, propertyLinked };
 }
 
 async function executeListMonthsNeedingCategorization() {
@@ -753,7 +763,12 @@ async function executeApplyCategorizationsBulk(input: Record<string, unknown>) {
     validated.push({ journalId: r.journal_id, categoryId: r.category_id });
   }
   const updated = await journalRepo.updateCategoryBulk(validated);
-  return { applied: updated, requested: validated.length };
+  // Same auto-link pass as the single-row tool: any of these
+  // journals whose new category sits in "Property expenses" AND who
+  // currently have NULL property_id get stamped, so they show up on
+  // the tax-year report. Single-property users only.
+  const propertyLinked = await autoLinkPropertyExpenses(validated.map(v => v.journalId));
+  return { applied: updated, requested: validated.length, propertyLinked };
 }
 
 async function executeListUncategorized(input: Record<string, unknown>) {

@@ -29,7 +29,7 @@ import Decimal from 'decimal.js';
 import { sql } from 'drizzle-orm';
 import { format, subDays } from 'date-fns';
 import { getDb } from '@/lib/db';
-import { gocardless } from './gocardless';
+import { listTransactionsForConnection } from './dispatch';
 import { bankingRepo } from './repo';
 import { accountRepo } from '@/lib/repos';
 import type { AggregatorTransaction } from './aggregator';
@@ -79,7 +79,7 @@ export async function syncConnection(connectionId: number, syncRunId: number): P
       ? pa.cutoverDate
       : overlapStart;
 
-    const txns = await gocardless.listTransactions({
+    const txns = await listTransactionsForConnection(conn, {
       aggregatorAccountRef: pa.aggregatorAccountRef,
       dateFrom,
       dateTo: todayIso,

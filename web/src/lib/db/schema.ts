@@ -360,7 +360,12 @@ export const savingsGoals = pgTable('savings_goals', {
 // the PSD2 90-day expiry clock. provider_accounts binds an aggregator
 // account to one of our existing `accounts` rows so synced txns flow
 // into the existing journal model. sync_runs is per-cron-tick audit.
-export const bankingAggregatorEnum = pgEnum('banking_aggregator', ['gocardless_bad', 'truelayer']);
+// `aggregator` is plain TEXT with a CHECK constraint (see migration.sql)
+// rather than a Postgres enum because ALTER TYPE ... ADD VALUE can't run
+// inside a transaction block, and our migrate.mjs wraps the whole file
+// in BEGIN/COMMIT. TEXT keeps adding new aggregator types future-proof.
+export type BankingAggregatorSlug = 'gocardless_bad' | 'truelayer' | 'monzo_direct';
+
 export const connectionStatusEnum = pgEnum('connection_status', ['pending', 'active', 'expiring', 'expired', 'revoked', 'error']);
 export const syncRunStatusEnum = pgEnum('sync_run_status', ['running', 'success', 'partial', 'error']);
 
@@ -368,7 +373,7 @@ export const providers = pgTable('providers', {
   id: serial('id').primaryKey(),
   slug: text('slug').notNull().unique(),
   displayName: text('display_name').notNull(),
-  aggregator: bankingAggregatorEnum('aggregator').notNull().default('gocardless_bad'),
+  aggregator: text('aggregator').notNull().default('gocardless_bad').$type<BankingAggregatorSlug>(),
   createdAt: timestamp('created_at').notNull().defaultNow(),
 });
 
@@ -384,6 +389,13 @@ export const connections = pgTable('connections', {
   encryptedSecret: bytea('encrypted_secret'),
   institutionId: text('institution_id').notNull(),
   institutionName: text('institution_name').notNull(),
+  // Monzo-specific: when the OAuth access token expires. The cron
+  // refreshes pre-emptively if this is within 2 hours of now.
+  monzoAccessExpiresAt: timestamp('monzo_access_expires_at'),
+  // Monzo-specific: webhook id (for DELETE on disconnect). The
+  // webhook URL token (which acts as the path secret) is stored
+  // alongside the OAuth tokens in encrypted_secret.
+  monzoWebhookId: text('monzo_webhook_id'),
   createdAt: timestamp('created_at').notNull().defaultNow(),
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
 });

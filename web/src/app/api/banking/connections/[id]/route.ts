@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server';
-import { gocardless, GoCardlessApiError } from '@/lib/banking/gocardless';
+import { GoCardlessApiError } from '@/lib/banking/gocardless';
+import { listAccountsForConnection } from '@/lib/banking/dispatch';
+import { MonzoApiError, MonzoSCAPendingError } from '@/lib/banking/monzo';
 import { bankingRepo } from '@/lib/banking/repo';
 
 /**
@@ -30,11 +32,17 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     let aggregatorError: string | null = null;
     if (conn.status === 'active' || conn.status === 'expiring') {
       try {
-        aggregatorAccounts = await gocardless.listAccounts(conn.aggregatorRef);
+        aggregatorAccounts = await listAccountsForConnection(conn);
       } catch (err) {
-        aggregatorError = err instanceof GoCardlessApiError
-          ? `GoCardless ${err.status}`
-          : err instanceof Error ? err.message : 'unknown';
+        if (err instanceof MonzoSCAPendingError) {
+          aggregatorError = 'Monzo Strong Customer Authentication is still pending. Open the Monzo app and tap Allow.';
+        } else if (err instanceof GoCardlessApiError) {
+          aggregatorError = `GoCardless ${err.status}`;
+        } else if (err instanceof MonzoApiError) {
+          aggregatorError = `Monzo ${err.status}`;
+        } else {
+          aggregatorError = err instanceof Error ? err.message : 'unknown';
+        }
       }
     }
 

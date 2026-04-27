@@ -746,3 +746,57 @@ ALTER TABLE transaction_metadata
 ALTER TABLE transaction_metadata
     ALTER COLUMN original_currency TYPE TEXT;
 
+-- Monzo direct API integration. Adds a new aggregator slug so the
+-- existing connect flow can route Monzo via OAuth-on-our-side
+-- instead of through GoCardless's brokered consent. Other banks
+-- (Barclays, Amex UK, Yonder) keep using GoCardless because they
+-- don't expose a public personal-use API.
+--
+-- The original `banking_aggregator` enum can't take a new value
+-- inside a transaction block (Postgres restriction on ALTER TYPE ADD
+-- VALUE), and our migrate.mjs wraps the whole file in BEGIN/COMMIT.
+-- Switching providers.aggregator to TEXT + CHECK sidesteps that AND
+-- keeps it forward-compatible for future aggregator types without
+-- another schema change. The enum is dropped only if no rows still
+-- reference it, which is true once the column type is TEXT.
+-- Drop the enum-typed default first; ALTER COLUMN ... TYPE doesn't
+-- always re-cast the column default expression, which trips the
+-- migration on a fresh deploy. Re-set as a plain TEXT literal after
+-- the column is converted.
+ALTER TABLE providers ALTER COLUMN aggregator DROP DEFAULT;
+ALTER TABLE providers ALTER COLUMN aggregator TYPE TEXT USING aggregator::text;
+ALTER TABLE providers ALTER COLUMN aggregator SET DEFAULT 'gocardless_bad';
+
+-- providers.aggregator was the only column that referenced the enum,
+-- so the type is now unused and safe to drop.
+DROP TYPE IF EXISTS banking_aggregator;
+
+DO $$ BEGIN
+    ALTER TABLE providers
+        ADD CONSTRAINT providers_aggregator_check
+        CHECK (aggregator IN ('gocardless_bad', 'truelayer', 'monzo_direct'));
+EXCEPTION WHEN duplicate_object THEN null;
+END $$;
+
+-- Re-point the seeded "monzo" provider to the direct API so newly
+-- created connections take that path. ON CONFLICT covers the
+-- already-seeded row from PR A. Other providers keep their default.
+INSERT INTO providers (slug, display_name, aggregator)
+VALUES ('monzo', 'Monzo', 'monzo_direct')
+ON CONFLICT (slug) DO UPDATE SET aggregator = EXCLUDED.aggregator;
+
+-- Per-connection access-token expiry for proactive refresh. Monzo
+-- access tokens last 6 hours; the cron in cron-sync.ts refreshes if
+-- this timestamp is within 2 hours so a slow sync doesn't cross the
+-- expiry boundary mid-call. Null on non-Monzo connections (whose
+-- aggregator brokers tokens for us and we don't see them).
+ALTER TABLE connections
+    ADD COLUMN IF NOT EXISTS monzo_access_expires_at TIMESTAMP;
+
+-- Per-connection webhook handle (Monzo only). Stored as the webhook
+-- id returned by POST /webhooks; needed to delete the webhook on
+-- disconnect. The URL token (used as the path secret) lives on
+-- encrypted_secret alongside the OAuth tokens.
+ALTER TABLE connections
+    ADD COLUMN IF NOT EXISTS monzo_webhook_id TEXT;
+

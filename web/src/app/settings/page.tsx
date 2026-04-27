@@ -10,6 +10,7 @@ import MemoryRoundedIcon from '@mui/icons-material/MemoryRounded';
 import RulesManager from '@/components/settings/RulesManager';
 import AiModelSelector from '@/components/settings/AiModelSelector';
 import AiMemoryManager from '@/components/settings/AiMemoryManager';
+import BankCoverageCard from '@/components/banking/BankCoverageCard';
 import { softTokens } from '@/theme/theme';
 
 export default function SettingsPage() {
@@ -26,6 +27,8 @@ export default function SettingsPage() {
       </Box>
 
       <Stack spacing={2.5}>
+        <BankCoverageCard />
+
         <SettingsCard
           icon={<KeyRoundedIcon />}
           tile={softTokens.lavender.main}

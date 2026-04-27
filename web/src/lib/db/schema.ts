@@ -89,6 +89,11 @@ export const journalEntries = pgTable('journal_entries', {
   categoryId: integer('category_id').references(() => categories.id),
   importBatchId: integer('import_batch_id').references((): AnyPgColumn => importBatches.id),
   propertyId: integer('property_id').references((): AnyPgColumn => properties.id),
+  // Set when this row was created by a banking-aggregator sync.
+  // UNIQUE (partial index where NOT NULL) is the dedup primitive on
+  // re-sync: the same aggregator txn ID lands in the same row idempotently.
+  providerTxnId: text('provider_txn_id'),
+  syncRunId: integer('sync_run_id').references((): AnyPgColumn => syncRuns.id, { onDelete: 'set null' }),
   createdAt: timestamp('created_at').notNull().defaultNow(),
 });
 
@@ -132,6 +137,13 @@ export const transactionMetadata = pgTable('transaction_metadata', {
   address: text('address'),
   receiptUrl: text('receipt_url'),
   raw: jsonb('raw'),
+  // FX preservation for foreign-charged transactions where the booking
+  // currency (typically GBP) differs from what was actually spent.
+  // Populated by the banking sync when the aggregator returns
+  // transactionAmount + currencyExchange data; left null otherwise.
+  originalAmount: numeric('original_amount', { precision: 14, scale: 2 }),
+  originalCurrency: text('original_currency'),
+  fxRate: numeric('fx_rate', { precision: 18, scale: 8 }),
   createdAt: timestamp('created_at').notNull().defaultNow(),
 });
 
@@ -336,4 +348,61 @@ export const savingsGoals = pgTable('savings_goals', {
   status: savingsGoalStatusEnum('status').notNull().default('active'),
   createdAt: timestamp('created_at').notNull().defaultNow(),
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
+});
+
+// Banking integration tables. providers is the small catalogue of
+// banks the user wants aggregated (Monzo, Barclays, Amex UK, Yonder).
+// connections tracks the aggregator-side link state per provider, with
+// the PSD2 90-day expiry clock. provider_accounts binds an aggregator
+// account to one of our existing `accounts` rows so synced txns flow
+// into the existing journal model. sync_runs is per-cron-tick audit.
+export const bankingAggregatorEnum = pgEnum('banking_aggregator', ['gocardless_bad', 'truelayer']);
+export const connectionStatusEnum = pgEnum('connection_status', ['pending', 'active', 'expiring', 'expired', 'revoked', 'error']);
+export const syncRunStatusEnum = pgEnum('sync_run_status', ['running', 'success', 'partial', 'error']);
+
+export const providers = pgTable('providers', {
+  id: serial('id').primaryKey(),
+  slug: text('slug').notNull().unique(),
+  displayName: text('display_name').notNull(),
+  aggregator: bankingAggregatorEnum('aggregator').notNull().default('gocardless_bad'),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+});
+
+export const connections = pgTable('connections', {
+  id: serial('id').primaryKey(),
+  providerId: integer('provider_id').notNull().references(() => providers.id),
+  ownerId: integer('owner_id').references(() => owners.id),
+  aggregatorRef: text('aggregator_ref').notNull().unique(),
+  status: connectionStatusEnum('status').notNull().default('pending'),
+  consentExpiresAt: timestamp('consent_expires_at'),
+  lastSyncedAt: timestamp('last_synced_at'),
+  lastError: text('last_error'),
+  encryptedSecret: bytea('encrypted_secret'),
+  institutionId: text('institution_id').notNull(),
+  institutionName: text('institution_name').notNull(),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+});
+
+export const providerAccounts = pgTable('provider_accounts', {
+  id: serial('id').primaryKey(),
+  connectionId: integer('connection_id').notNull().references(() => connections.id, { onDelete: 'cascade' }),
+  accountId: integer('account_id').notNull().references(() => accounts.id),
+  aggregatorAccountRef: text('aggregator_account_ref').notNull().unique(),
+  iban: text('iban'),
+  currency: text('currency').notNull().default('GBP'),
+  product: text('product'),
+  cutoverDate: text('cutover_date'),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+});
+
+export const syncRuns = pgTable('sync_runs', {
+  id: serial('id').primaryKey(),
+  connectionId: integer('connection_id').notNull().references(() => connections.id, { onDelete: 'cascade' }),
+  startedAt: timestamp('started_at').notNull().defaultNow(),
+  finishedAt: timestamp('finished_at'),
+  status: syncRunStatusEnum('status').notNull().default('running'),
+  txnsAdded: integer('txns_added').notNull().default(0),
+  txnsUpdated: integer('txns_updated').notNull().default(0),
+  errorMessage: text('error_message'),
 });

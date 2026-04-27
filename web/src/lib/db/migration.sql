@@ -458,3 +458,140 @@ SELECT child.child_name, p.id, true
     ORDER BY id ASC LIMIT 1
  ) AS p
 ON CONFLICT (name, parent_id) DO NOTHING;
+
+-- Banking integration (Phase 1, PR A)
+-- ------------------------------------
+-- Provider catalogue. Seeded with the four banks the user wants
+-- aggregated. `aggregator` records which third-party data provider
+-- handles this bank (today only gocardless_bad; truelayer reserved as
+-- a fallback). `slug` is what code references; `display_name` is what
+-- the UI shows.
+DO $$ BEGIN
+    CREATE TYPE banking_aggregator AS ENUM ('gocardless_bad', 'truelayer');
+EXCEPTION
+    WHEN duplicate_object THEN null;
+END $$;
+
+CREATE TABLE IF NOT EXISTS providers (
+    id SERIAL PRIMARY KEY,
+    slug TEXT NOT NULL UNIQUE,
+    display_name TEXT NOT NULL,
+    aggregator banking_aggregator NOT NULL DEFAULT 'gocardless_bad',
+    created_at TIMESTAMP NOT NULL DEFAULT now()
+);
+
+INSERT INTO providers (slug, display_name)
+VALUES
+    ('monzo',     'Monzo'),
+    ('barclays',  'Barclays'),
+    ('amex_uk',   'American Express UK'),
+    ('yonder',    'Yonder')
+ON CONFLICT (slug) DO NOTHING;
+
+-- Per-bank link state. One row per requisition / consent created with
+-- the aggregator. consent_expires_at tracks the PSD2 90-day clock so
+-- the daily cron in PR C can flip the status to `expiring` ahead of
+-- the deadline.
+--
+-- aggregator_ref is the requisition ID (GoCardless BAD) or its
+-- equivalent in another aggregator. Not a credential, just a handle.
+--
+-- encrypted_secret is reserved for future aggregator types that
+-- require per-user OAuth refresh tokens (TrueLayer). NULL for
+-- GoCardless BAD because that aggregator brokers the OAuth dance and
+-- we authenticate with our own app-wide secret_id/secret_key instead.
+DO $$ BEGIN
+    CREATE TYPE connection_status AS ENUM ('pending', 'active', 'expiring', 'expired', 'revoked', 'error');
+EXCEPTION
+    WHEN duplicate_object THEN null;
+END $$;
+
+CREATE TABLE IF NOT EXISTS connections (
+    id SERIAL PRIMARY KEY,
+    provider_id INTEGER NOT NULL REFERENCES providers(id),
+    owner_id INTEGER REFERENCES owners(id),
+    aggregator_ref TEXT NOT NULL UNIQUE,
+    status connection_status NOT NULL DEFAULT 'pending',
+    consent_expires_at TIMESTAMP,
+    last_synced_at TIMESTAMP,
+    last_error TEXT,
+    encrypted_secret BYTEA,
+    institution_id TEXT NOT NULL,
+    institution_name TEXT NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT now(),
+    updated_at TIMESTAMP NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_connections_status_expiry
+    ON connections(status, consent_expires_at)
+    WHERE status IN ('active', 'expiring');
+
+-- Maps an aggregator-side account (Monzo joint vs. sole, etc.) to
+-- one of our internal `accounts` rows. Set up on first-connect via
+-- the account-mapping wizard. UNIQUE on aggregator_account_ref so a
+-- given aggregator account binds to exactly one internal account.
+CREATE TABLE IF NOT EXISTS provider_accounts (
+    id SERIAL PRIMARY KEY,
+    connection_id INTEGER NOT NULL REFERENCES connections(id) ON DELETE CASCADE,
+    account_id INTEGER NOT NULL REFERENCES accounts(id),
+    aggregator_account_ref TEXT NOT NULL UNIQUE,
+    iban TEXT,
+    currency TEXT NOT NULL DEFAULT 'GBP',
+    product TEXT,
+    cutover_date TEXT,
+    created_at TIMESTAMP NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_provider_accounts_connection
+    ON provider_accounts(connection_id);
+
+-- Audit / observability for each cron tick. One row per
+-- (connection, run) so a per-connection sync history can show what
+-- happened, when, and why something failed.
+DO $$ BEGIN
+    CREATE TYPE sync_run_status AS ENUM ('running', 'success', 'partial', 'error');
+EXCEPTION
+    WHEN duplicate_object THEN null;
+END $$;
+
+CREATE TABLE IF NOT EXISTS sync_runs (
+    id SERIAL PRIMARY KEY,
+    connection_id INTEGER NOT NULL REFERENCES connections(id) ON DELETE CASCADE,
+    started_at TIMESTAMP NOT NULL DEFAULT now(),
+    finished_at TIMESTAMP,
+    status sync_run_status NOT NULL DEFAULT 'running',
+    txns_added INTEGER NOT NULL DEFAULT 0,
+    txns_updated INTEGER NOT NULL DEFAULT 0,
+    error_message TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_sync_runs_connection_started
+    ON sync_runs(connection_id, started_at DESC);
+
+-- journal_entries dedup primitive. Aggregator transaction IDs are
+-- stable per provider, so a re-sync becomes naturally idempotent:
+-- INSERT ... ON CONFLICT (provider_txn_id) DO UPDATE matches by ID
+-- and updates only the fields that can legitimately change (status,
+-- amount on pending->settled). Partial unique index so manual
+-- entries (which have NULL provider_txn_id) are exempt.
+ALTER TABLE journal_entries
+    ADD COLUMN IF NOT EXISTS provider_txn_id TEXT;
+ALTER TABLE journal_entries
+    ADD COLUMN IF NOT EXISTS sync_run_id INTEGER REFERENCES sync_runs(id) ON DELETE SET NULL;
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_journal_entries_provider_txn_id
+    ON journal_entries(provider_txn_id) WHERE provider_txn_id IS NOT NULL;
+
+-- FX columns on transaction_metadata, for foreign-charged
+-- transactions where the booking currency (typically GBP) differs
+-- from what the user actually spent. `original_amount` and
+-- `original_currency` preserve the foreign side; `fx_rate` is the
+-- bank-applied rate at booking time. UI surfaces this inline (see
+-- PR D).
+ALTER TABLE transaction_metadata
+    ADD COLUMN IF NOT EXISTS original_amount NUMERIC(14,2);
+ALTER TABLE transaction_metadata
+    ADD COLUMN IF NOT EXISTS original_currency CHAR(3);
+ALTER TABLE transaction_metadata
+    ADD COLUMN IF NOT EXISTS fx_rate NUMERIC(18,8);
+

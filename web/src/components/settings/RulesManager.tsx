@@ -25,9 +25,9 @@ import {
   Box,
   Tooltip,
 } from '@mui/material';
-import { alpha } from '@mui/material/styles';
 import EditRoundedIcon from '@mui/icons-material/EditRounded';
 import DeleteRoundedIcon from '@mui/icons-material/DeleteRounded';
+import { softTokens } from '@/theme/theme';
 import AddRoundedIcon from '@mui/icons-material/AddRounded';
 import RuleRoundedIcon from '@mui/icons-material/RuleRounded';
 import useSWR from 'swr';
@@ -149,10 +149,11 @@ export default function RulesManager() {
                 sx={{
                   width: 36, height: 36, borderRadius: 2.5,
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  bgcolor: alpha('#F97316', 0.12),
+                  bgcolor: softTokens.lemon.main,
+                  color: softTokens.lemon.ink,
                 }}
               >
-                <RuleRoundedIcon sx={{ fontSize: 20, color: '#F97316' }} />
+                <RuleRoundedIcon sx={{ fontSize: 20 }} />
               </Box>
               <Typography variant="h6">Categorization Rules</Typography>
               {rules && (

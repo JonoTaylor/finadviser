@@ -1,15 +1,21 @@
-// Warm premium palette for category identification
-const CATEGORY_COLORS = [
-  '#E8C547', // gold (primary)
-  '#B8A9E8', // lavender
-  '#FB923C', // orange
-  '#60A5FA', // blue
-  '#4ADE80', // emerald
-  '#FB7185', // rose
-  '#FBBF24', // amber
-  '#E879F9', // fuchsia
-  '#38BDF8', // sky
-  '#A3E635', // lime
+import { softTokens } from '@/theme/theme';
+
+// 10 visually distinct hues drawn from the Soft Surfaces v2 palette.
+// Used as the dot / chip / bar colour for category identification on
+// white pillow surfaces (categories are also tinted with `alpha(c,
+// 0.14)` for fills, so `.deep` variants give a readable but soft
+// look without overpowering the surface).
+const CATEGORY_COLORS: readonly string[] = [
+  softTokens.lavender.deep,
+  softTokens.mint.deep,
+  softTokens.peach.deep,
+  softTokens.lemon.deep,
+  softTokens.lavender.ink,
+  softTokens.mint.ink,
+  softTokens.peach.ink,
+  softTokens.lemon.ink,
+  softTokens.lavender.main,
+  softTokens.mint.main,
 ];
 
 function hashString(str: string): number {

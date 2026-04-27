@@ -23,6 +23,7 @@ import HistoryRoundedIcon from '@mui/icons-material/HistoryRounded';
 import useSWR from 'swr';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { softTokens } from '@/theme/theme';
 
 const fetcher = (url: string) => fetch(url).then(r => r.json());
 
@@ -242,10 +243,11 @@ export default function ChatPage() {
                 sx={{
                   width: 64, height: 64, borderRadius: 4, mx: 'auto', mb: 2,
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  background: 'linear-gradient(135deg, rgba(232,197,71,0.15), rgba(184,169,232,0.15))',
+                  bgcolor: softTokens.lavender.main,
+                  color: softTokens.lavender.ink,
                 }}
               >
-                <AutoAwesomeRoundedIcon sx={{ fontSize: 32, color: 'primary.main' }} />
+                <AutoAwesomeRoundedIcon sx={{ fontSize: 32 }} />
               </Box>
               <Typography variant="h5" sx={{ mb: 1 }}>
                 Ask me anything
@@ -278,12 +280,10 @@ export default function ChatPage() {
                     p: 2,
                     maxWidth: '80%',
                     alignSelf: msg.role === 'user' ? 'flex-end' : 'flex-start',
-                    bgcolor: msg.role === 'user'
-                      ? alpha('#E8C547', 0.1)
-                      : alpha('#B8A9E8', 0.06),
+                    bgcolor: msg.role === 'user' ? softTokens.lavender.main : softTokens.fog,
                     ml: msg.role === 'user' ? 'auto' : 0,
                     borderLeft: msg.role === 'assistant' ? '3px solid' : 'none',
-                    borderColor: msg.role === 'assistant' ? alpha('#B8A9E8', 0.3) : 'transparent',
+                    borderColor: msg.role === 'assistant' ? 'secondary.main' : 'transparent',
                     borderRadius: 4,
                   }}
                 >
@@ -321,7 +321,7 @@ export default function ChatPage() {
                   elevation={0}
                   sx={{
                     p: 2, maxWidth: '80%',
-                    bgcolor: alpha('#B8A9E8', 0.06),
+                    bgcolor: softTokens.fog,
                     borderLeft: '3px solid',
                     borderColor: 'secondary.main',
                     borderRadius: 4,
@@ -376,8 +376,8 @@ export default function ChatPage() {
             onClick={() => sendMessage(input)}
             disabled={loading || !input.trim()}
             sx={{
-              bgcolor: loading || !input.trim() ? 'transparent' : alpha('#E8C547', 0.12),
-              '&:hover': { bgcolor: alpha('#E8C547', 0.2) },
+              bgcolor: loading || !input.trim() ? 'transparent' : (theme) => alpha(theme.palette.primary.main, 0.08),
+              '&:hover': { bgcolor: (theme) => alpha(theme.palette.primary.main, 0.16) },
             }}
           >
             <SendRoundedIcon />

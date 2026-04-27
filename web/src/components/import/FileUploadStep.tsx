@@ -2,7 +2,7 @@
 
 import { useCallback, useState } from 'react';
 import { Box, Typography, Card, CardContent } from '@mui/material';
-import { alpha } from '@mui/material/styles';
+import { softTokens } from '@/theme/theme';
 import CloudUploadRoundedIcon from '@mui/icons-material/CloudUploadRounded';
 
 const ACCEPTED_EXTENSIONS = ['.csv', '.pdf'];
@@ -41,8 +41,8 @@ export default function FileUploadStep({ onFileSelect }: { onFileSelect: (file: 
             textAlign: 'center',
             cursor: 'pointer',
             transition: 'all 0.2s',
-            bgcolor: dragOver ? alpha('#818CF8', 0.04) : 'transparent',
-            '&:hover': { borderColor: 'primary.main', bgcolor: alpha('#818CF8', 0.04) },
+            bgcolor: dragOver ? softTokens.fog : 'transparent',
+            '&:hover': { borderColor: 'primary.main', bgcolor: softTokens.fog },
           }}
           onClick={() => document.getElementById('file-upload')?.click()}
         >
@@ -50,10 +50,11 @@ export default function FileUploadStep({ onFileSelect }: { onFileSelect: (file: 
             sx={{
               width: 64, height: 64, borderRadius: 4, mx: 'auto', mb: 2,
               display: 'flex', alignItems: 'center', justifyContent: 'center',
-              bgcolor: alpha('#818CF8', 0.1),
+              bgcolor: softTokens.lavender.main,
+              color: softTokens.lavender.ink,
             }}
           >
-            <CloudUploadRoundedIcon sx={{ fontSize: 32, color: 'primary.main' }} />
+            <CloudUploadRoundedIcon sx={{ fontSize: 32 }} />
           </Box>
           <Typography variant="h6">Drop CSV or PDF file here or click to upload</Typography>
           <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>

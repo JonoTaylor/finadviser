@@ -137,8 +137,8 @@ export async function calculatePersonalNetWorth(ownerId: number): Promise<Person
 
 /**
  * Adjust an investment account's balance to a new target value via a
- * journal entry — DR/CR the investment account and CR/DR the system
- * "Investment Adjustments" equity account by the delta — so:
+ * journal entry: DR/CR the investment account and CR/DR the system
+ * "Investment Adjustments" equity account by the delta. Effects:
  *   - the existing v_account_balances view picks the new balance up
  *     immediately,
  *   - the historical record of value changes is preserved as journals
@@ -150,15 +150,16 @@ export async function calculatePersonalNetWorth(ownerId: number): Promise<Person
  * The "Investment Adjustments" EQUITY account is seeded by
  * migration.sql so this never has to create it on the fly.
  *
- * Concurrency: the read-balance-then-write-delta is split across two
- * statements (the Neon HTTP driver doesn't expose multi-statement
- * transactions). The validation read is just a safety check; the
- * actual delta is computed INSIDE the second SQL statement using a
- * CTE that re-reads the live balance, so two concurrent updates
- * don't both compute against the same stale snapshot. Worst case
- * concurrent updates from the same user race for "last write wins"
- * on the latest delta — acceptable for a single-household app, and
- * the trigger keeps each entry self-consistent.
+ * Implementation: a Postgres function `set_investment_balance` does
+ * the read-balance + insert-journal + insert-book-entries flow
+ * imperatively. The TS layer just validates and calls the function
+ * with one SELECT. This sidesteps an earlier multi-data-modifying-CTE
+ * shape that the neon-http transport rejected with HTTP 400. The
+ * read-then-write race window (between the live balance read and the
+ * delta insert) is closed by locking the account row inside the
+ * function (FOR UPDATE), which serializes concurrent invocations on
+ * the same account. The validation read above is purely a safety
+ * check.
  */
 export async function setInvestmentBalance(params: {
   accountId: number;
@@ -191,53 +192,31 @@ export async function setInvestmentBalance(params: {
     throw new Error('System "Investment Adjustments" equity account is missing — re-run the database migration.');
   }
 
-  const description = params.description ?? `Investment balance update — ${acct.name}`;
+  const description = params.description ?? `Investment balance update - ${acct.name}`;
   const targetBalance = new Decimal(params.newBalance).toFixed(2);
 
-  // Single statement: insert the journal AND the two balanced book
-  // entries, computing the delta from the live balance via a CTE.
-  // Re-reading the balance inside the same statement (rather than
-  // passing in a value computed in JS) means the delta reflects the
-  // latest state at write time — closes the read-then-write race
-  // window for the common case. Returns the previous balance and
-  // delta so the caller can report what changed.
+  // Calls the set_investment_balance Postgres function (defined in
+  // migration.sql) as a single SELECT. The function reads the live
+  // balance, inserts a journal entry, inserts the two balanced book
+  // entries, and returns (journal_id, delta, previous_balance) in
+  // one row. Earlier versions of this code used a multi-data-
+  // modifying CTE inline, but the neon-http transport rejected that
+  // shape with HTTP 400 (cf. /api/investments/[id]/balance failures);
+  // wrapping the same logic in a server-side function sidesteps the
+  // CTE handling entirely.
   const result = await db.execute(sql`
-    WITH current_balance AS (
-      SELECT COALESCE(SUM(amount::numeric), 0) AS bal
-      FROM book_entries
-      WHERE account_id = ${params.accountId}
-    ),
-    new_journal AS (
-      INSERT INTO journal_entries (date, description)
-      VALUES (${params.asOfDate}, ${description})
-      RETURNING id
-    ),
-    delta AS (
-      SELECT
-        (${targetBalance}::numeric - cb.bal) AS amount,
-        cb.bal AS previous_balance
-      FROM current_balance cb
-    ),
-    inserted AS (
-      INSERT INTO book_entries (journal_entry_id, account_id, amount)
-      SELECT new_journal.id, ${params.accountId}, delta.amount
-        FROM new_journal, delta
-      UNION ALL
-      SELECT new_journal.id, ${adjAccountId}, -delta.amount
-        FROM new_journal, delta
-      RETURNING journal_entry_id
-    )
-    SELECT
-      new_journal.id AS journal_id,
-      delta.amount AS delta,
-      delta.previous_balance AS previous_balance
-    FROM new_journal, delta
-    WHERE EXISTS (SELECT 1 FROM inserted)
-    LIMIT 1
+    SELECT journal_id, delta, previous_balance
+      FROM set_investment_balance(
+        ${params.accountId}::integer,
+        ${targetBalance}::numeric,
+        ${params.asOfDate}::text,
+        ${description}::text,
+        ${adjAccountId}::integer
+      )
   `);
 
   if (result.rows.length === 0) {
-    throw new Error('Balance update statement produced no rows — unexpected.');
+    throw new Error('Balance update produced no rows (unexpected; the set_investment_balance function should always return one row).');
   }
   const row = result.rows[0];
   const journalId = row.journal_id as number;

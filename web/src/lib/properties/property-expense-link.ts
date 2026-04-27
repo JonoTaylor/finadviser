@@ -19,7 +19,11 @@ const SUBTREE_TTL_MS = 60_000;
 
 /**
  * Resolve every category id in the "Property expenses" subtree —
- * the parent itself plus every direct child seeded in migration.sql.
+ * the parent itself plus EVERY descendant (children, grandchildren,
+ * etc). Recursive CTE so user-created sub-sub-categories under e.g.
+ * "Repairs & maintenance" are still picked up — the seeded tree is
+ * only two levels today, but the user is free to add more depth.
+ *
  * In-memory cached for 60s because seed categories don't change at
  * runtime; the cache survives a request but not a deploy.
  */
@@ -29,15 +33,14 @@ export async function getPropertyExpenseCategoryIds(): Promise<number[]> {
   }
   const db = getDb();
   const rows = await db.execute(sql`
-    WITH parent AS (
+    WITH RECURSIVE subtree AS (
       SELECT id FROM categories
-      WHERE name = 'Property expenses' AND parent_id IS NULL
-      ORDER BY id ASC
-      LIMIT 1
+       WHERE name = 'Property expenses' AND parent_id IS NULL
+      UNION ALL
+      SELECT c.id FROM categories c
+        JOIN subtree s ON c.parent_id = s.id
     )
-    SELECT id FROM categories WHERE id IN (SELECT id FROM parent)
-    UNION
-    SELECT id FROM categories WHERE parent_id IN (SELECT id FROM parent)
+    SELECT id FROM subtree
   `);
   const ids = rows.rows.map(r => r.id as number);
   cachedSubtreeIds = { ids, fetchedAt: Date.now() };
@@ -93,9 +96,21 @@ export async function autoLinkPropertyExpenses(journalIds: number[]): Promise<nu
  * expenses" button to fix historical data after a categorisation
  * pass.
  *
- * Returns the count of rows updated.
+ * Refuses to run unless the system has exactly one property AND
+ * `propertyId` matches that single property. Without this check, a
+ * user with two properties hitting "Auto-link existing" on either
+ * one would attribute every unlinked property-expense journal to
+ * that property — a serious data-integrity hazard. Multi-property
+ * users get an explicit-choice flow later (out of scope here).
+ *
+ * Returns the count of rows updated. Returns 0 (no-op) when the
+ * single-property guard fails — the API surfaces that to the user
+ * as "no unlinked property expenses found".
  */
 export async function backfillPropertyExpensesForProperty(propertyId: number): Promise<number> {
+  const singleId = await singlePropertyId();
+  if (singleId === null || singleId !== propertyId) return 0;
+
   const subtree = await getPropertyExpenseCategoryIds();
   if (subtree.length === 0) return 0;
 

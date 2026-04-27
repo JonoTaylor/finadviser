@@ -692,8 +692,11 @@ async function executeCategorizeTransaction(input: Record<string, unknown>) {
   // otherwise the tax-year report (which filters by je.property_id)
   // can't see the expense even though it's correctly categorised.
   // Multi-property users have to specify explicitly.
-  const linked = await autoLinkPropertyExpenses([journalId]);
-  return { success: true, journalId, categoryId, propertyLinked: linked > 0 };
+  const propertyLinked = await autoLinkPropertyExpenses([journalId]);
+  // Return the count (0 or 1) so the response shape matches
+  // executeApplyCategorizationsBulk — keeps the AI's mental model
+  // consistent across the two categorisation tools.
+  return { success: true, journalId, categoryId, propertyLinked };
 }
 
 async function executeListMonthsNeedingCategorization() {

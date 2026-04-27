@@ -138,7 +138,10 @@ export default function TopCategoriesCard({ spending }: { spending: SpendingRow[
             {sorted.map(([cat, amount]) => {
               const previous = prevByCategory.get(cat) ?? new Decimal(0);
               const delta = amount.minus(previous);
-              const pct = amount.div(topAmount).mul(100).toNumber();
+              // Belt-and-braces: even though topAmount has a fallback
+              // above, guard the inline div by zero here too so the
+              // bar width is always a valid CSS percentage.
+              const pct = topAmount.lte(0) ? 0 : amount.div(topAmount).mul(100).toNumber();
               const color = getCategoryColor(cat);
               const deltaIsZero = delta.abs().lt('0.01');
               const deltaUp = delta.gt(0);

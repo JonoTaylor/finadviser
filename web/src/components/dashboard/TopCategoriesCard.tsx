@@ -1,5 +1,6 @@
 'use client';
 
+import { useMemo } from 'react';
 import { Card, CardContent, Typography, Box } from '@mui/material';
 import { alpha } from '@mui/material/styles';
 import DonutSmallRoundedIcon from '@mui/icons-material/DonutSmallRounded';
@@ -13,7 +14,7 @@ import Decimal from 'decimal.js';
 interface SpendingRow {
   month: string;          // YYYY-MM
   category_name: string | null;
-  account_type: string;
+  account_type: string;   // e.g. 'INCOME' | 'EXPENSE'
   total: string;
 }
 
@@ -31,6 +32,15 @@ function previousMonth(yyyyMm: string): string {
 }
 
 /**
+ * Human-readable month label, e.g. "Apr 2026". Hoisted out of the
+ * component so it isn't reallocated on every render.
+ */
+function monthLabel(yyyyMm: string): string {
+  const [y, m] = yyyyMm.split('-').map(Number);
+  return new Date(y, m - 1, 1).toLocaleDateString('en-GB', { month: 'short', year: 'numeric' });
+}
+
+/**
  * Top spending + income categories THIS MONTH, with a small delta
  * showing the change vs LAST MONTH for each. Earlier versions of
  * this card aggregated every row in `spending` regardless of
@@ -44,40 +54,53 @@ function previousMonth(yyyyMm: string): string {
  *   - previous = sum of rows where month = previousMonth
  *   - delta = amount - previous
  *
- * For income categories the "up" direction is good (green); for
- * expenses, "up" is bad (warning colour). We don't currently
- * inspect account_type per category — the colour just signals
- * direction with a generic up/down arrow.
+ * Delta colours respect account_type: for EXPENSE categories, an
+ * increase is a warning; for INCOME, an increase is a success.
+ * The arrow direction (▲/▼) always reflects raw direction; only
+ * the colour swaps based on whether more-of-this-thing is good or
+ * bad. account_type per category is captured during aggregation
+ * (one category → one type in this dataset).
  */
 export default function TopCategoriesCard({ spending }: { spending: SpendingRow[] }) {
   const today = londonTodayIso();              // YYYY-MM-DD
   const currentMonth = today.slice(0, 7);      // YYYY-MM
   const prevMonth = previousMonth(currentMonth);
 
-  const accumulate = (month: string) => {
-    const map = new Map<string, Decimal>();
+  // useMemo because aggregating + sorting can grow with the dataset
+  // and React re-renders this card on every parent state change.
+  const { thisByCategory, prevByCategory, typeByCategory } = useMemo(() => {
+    const thisMap = new Map<string, Decimal>();
+    const prevMap = new Map<string, Decimal>();
+    const typeMap = new Map<string, string>();
     for (const row of spending) {
-      if (row.month !== month) continue;
       const cat = row.category_name || 'Uncategorized';
-      const cur = map.get(cat) ?? new Decimal(0);
-      map.set(cat, cur.plus(new Decimal(row.total).abs()));
+      // First account_type seen wins; categories don't span types in
+      // v_monthly_spending (a category is either INCOME or EXPENSE).
+      if (!typeMap.has(cat)) typeMap.set(cat, row.account_type);
+      const val = new Decimal(row.total).abs();
+      if (row.month === currentMonth) {
+        thisMap.set(cat, (thisMap.get(cat) ?? new Decimal(0)).plus(val));
+      } else if (row.month === prevMonth) {
+        prevMap.set(cat, (prevMap.get(cat) ?? new Decimal(0)).plus(val));
+      }
     }
-    return map;
-  };
+    return { thisByCategory: thisMap, prevByCategory: prevMap, typeByCategory: typeMap };
+  }, [spending, currentMonth, prevMonth]);
 
-  const thisByCategory = accumulate(currentMonth);
-  const prevByCategory = accumulate(prevMonth);
+  const sorted = useMemo(
+    () =>
+      Array.from(thisByCategory.entries())
+        .sort(([, a], [, b]) => b.minus(a).toNumber())
+        .slice(0, 5),
+    [thisByCategory],
+  );
 
-  const sorted = Array.from(thisByCategory.entries())
-    .sort(([, a], [, b]) => b.minus(a).toNumber())
-    .slice(0, 5);
-
-  const topAmount = sorted.length > 0 ? sorted[0][1] : new Decimal(1);
-
-  const monthLabel = (yyyyMm: string) => {
-    const [y, m] = yyyyMm.split('-').map(Number);
-    return new Date(y, m - 1, 1).toLocaleDateString('en-GB', { month: 'short', year: 'numeric' });
-  };
+  // Guard the bar-width divisor: an empty list, or a top entry of
+  // exactly £0, both fall back to 1 so the percentage math stays
+  // well-defined.
+  const topAmount = sorted.length > 0 && !sorted[0][1].isZero()
+    ? sorted[0][1]
+    : new Decimal(1);
 
   return (
     <Card sx={{ height: '100%', position: 'relative', overflow: 'hidden' }}>
@@ -119,6 +142,13 @@ export default function TopCategoriesCard({ spending }: { spending: SpendingRow[
               const color = getCategoryColor(cat);
               const deltaIsZero = delta.abs().lt('0.01');
               const deltaUp = delta.gt(0);
+              // For INCOME categories, more-this-month is a success
+              // (green). For EXPENSE, more-this-month is a warning
+              // (orange). The arrow always reflects raw direction;
+              // only the colour swaps.
+              const isIncome = typeByCategory.get(cat) === 'INCOME';
+              const goodDirection = isIncome ? deltaUp : !deltaUp;
+              const deltaColor = goodDirection ? 'success.main' : 'warning.main';
               return (
                 <Box key={cat}>
                   <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.25 }}>
@@ -142,11 +172,11 @@ export default function TopCategoriesCard({ spending }: { spending: SpendingRow[
                       {!deltaIsZero && (
                         <Box sx={{ display: 'flex', alignItems: 'center', gap: 0 }}>
                           {deltaUp
-                            ? <ArrowDropUpRoundedIcon sx={{ fontSize: 16, color: 'warning.main', m: -0.5 }} />
-                            : <ArrowDropDownRoundedIcon sx={{ fontSize: 16, color: 'success.main', m: -0.5 }} />}
+                            ? <ArrowDropUpRoundedIcon sx={{ fontSize: 16, color: deltaColor, m: -0.5 }} />
+                            : <ArrowDropDownRoundedIcon sx={{ fontSize: 16, color: deltaColor, m: -0.5 }} />}
                           <Typography
                             variant="caption"
-                            color={deltaUp ? 'warning.main' : 'success.main'}
+                            color={deltaColor}
                             sx={{ fontWeight: 500 }}
                           >
                             {formatCurrency(delta.abs().toString())}

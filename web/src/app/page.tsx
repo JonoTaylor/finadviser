@@ -3,7 +3,7 @@
 import { Box, Grid, Typography, Skeleton } from '@mui/material';
 import { format } from 'date-fns';
 import useSWR from 'swr';
-import NetWorthCard from '@/components/dashboard/NetWorthCard';
+import YourShareCard from '@/components/dashboard/YourShareCard';
 import MonthlySummaryCard from '@/components/dashboard/MonthlySummaryCard';
 import SavingsRateCard from '@/components/dashboard/SavingsRateCard';
 import TopCategoriesCard from '@/components/dashboard/TopCategoriesCard';
@@ -40,17 +40,15 @@ export default function DashboardPage() {
       <Grid container spacing={2.5}>
         {/* Metric cards row */}
         <Grid size={{ xs: 12, sm: 6, lg: 3 }}>
-          {loadingBalances ? <Skeleton variant="rounded" height={180} sx={{ borderRadius: 5 }} /> : (
-            <NetWorthCard balances={balances ?? []} />
-          )}
+          <YourShareCard />
         </Grid>
         <Grid size={{ xs: 12, sm: 6, lg: 3 }}>
-          {loadingSpending ? <Skeleton variant="rounded" height={180} sx={{ borderRadius: 5 }} /> : (
+          {(loadingSpending || loadingBalances) ? <Skeleton variant="rounded" height={180} sx={{ borderRadius: 5 }} /> : (
             <MonthlySummaryCard spending={spending ?? []} balances={balances ?? []} />
           )}
         </Grid>
         <Grid size={{ xs: 12, sm: 6, lg: 3 }}>
-          {loadingSpending ? <Skeleton variant="rounded" height={180} sx={{ borderRadius: 5 }} /> : (
+          {(loadingSpending || loadingBalances) ? <Skeleton variant="rounded" height={180} sx={{ borderRadius: 5 }} /> : (
             <SavingsRateCard spending={spending ?? []} balances={balances ?? []} />
           )}
         </Grid>

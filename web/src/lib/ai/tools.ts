@@ -2,8 +2,10 @@ import Decimal from 'decimal.js';
 import { format, subMonths } from 'date-fns';
 import { accountRepo, journalRepo, categoryRepo, propertyRepo, tipRepo, budgetRepo, savingsGoalRepo, aiMemoryRepo } from '@/lib/repos';
 import { calculateEquity } from '@/lib/properties/equity-calculator';
+import { setInvestmentBalance } from '@/lib/properties/personal-net-worth';
 import { formatCurrency } from '@/lib/utils/formatting';
 import { matchRule } from '@/lib/import/categorizer';
+import { londonTodayIso } from '@/lib/dates/today';
 import { categorizeBatch } from './claude-client';
 
 /**
@@ -358,10 +360,88 @@ export const TOOL_DEFINITIONS: Tool[] = [
       required: [],
     },
   },
+  {
+    name: 'list_investments',
+    description:
+      'List every investment account (pension / S&S ISA / LISA / cash savings / crypto / other) with its current balance, owner, and type. Use this to answer "how much do I have invested?" or as a precursor to update_investment_balance.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {},
+      required: [],
+    },
+  },
+  {
+    name: 'add_investment_account',
+    description:
+      'Create a new investment account (an ASSET account flagged is_investment=true). Use when the user mentions a pension, ISA, savings pot, or similar that isn\'t yet tracked. The balance can be set in the same call by passing initial_balance, otherwise call update_investment_balance afterwards. Owner attribution is required so the dashboard\'s per-owner "Your share" view can include the account.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        name: { type: 'string', description: 'Account name (e.g. "Vanguard SIPP", "AJ Bell ISA"). Must be unique across all accounts.' },
+        owner_id: { type: 'number', description: 'The owner this investment belongs to.' },
+        investment_kind: {
+          type: 'string',
+          enum: ['pension', 'isa', 'lisa', 'savings', 'crypto', 'other'],
+          description: 'Bucket label so similar things group together on the dashboard.',
+        },
+        initial_balance: { type: 'string', description: 'Optional decimal string. If provided, an opening balance journal is created in the same call.' },
+        description: { type: 'string', description: 'Optional free-text note (e.g. "global all-cap fund").' },
+      },
+      required: ['name', 'owner_id', 'investment_kind'],
+    },
+  },
+  {
+    name: 'update_investment_balance',
+    description:
+      'Mark-to-market an investment account: set its current balance to a new value. Records a journal entry that DRs/CRs the account by the delta and offsets to the system "Investment Adjustments" equity account, so historical balance changes are preserved without losing the double-entry property. Use whenever the user gives a fresh statement value.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        account_id: { type: 'number', description: 'The investment account id (from list_investments).' },
+        new_balance: { type: 'string', description: 'The new total balance as a decimal string (e.g. "152400.00").' },
+        as_of_date: { type: 'string', description: 'Optional YYYY-MM-DD; defaults to today (Europe/London).' },
+        description: { type: 'string', description: 'Optional note ("Quarterly Vanguard statement").' },
+      },
+      required: ['account_id', 'new_balance'],
+    },
+  },
+  {
+    name: 'tag_account_owner',
+    description:
+      'Attribute an existing ASSET account to a specific owner (set its owner_id). Use this when the user wants a personal cash account to count toward their "Your share" net-worth — by default, untagged cash accounts are excluded. Pass owner_id=null to revert to shared.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        account_id: { type: 'number' },
+        owner_id: {
+          // Schema allows null because the executor explicitly handles
+          // owner_id=null as "mark account shared". Without nullable
+          // typing here the AI couldn't actually pass null.
+          type: ['number', 'null'],
+          description: 'Owner id, or null to mark as shared.',
+        },
+      },
+      required: ['account_id'],
+    },
+  },
+  {
+    name: 'list_owners',
+    description: 'List every property owner (their id + name). Needed before add_investment_account or tag_account_owner.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {},
+      required: [],
+    },
+  },
 ];
 
 // Human-readable labels for tool status display
 export const TOOL_LABELS: Record<string, string> = {
+  list_investments: 'Loading investments',
+  add_investment_account: 'Adding investment account',
+  update_investment_balance: 'Updating investment balance',
+  tag_account_owner: 'Tagging account owner',
+  list_owners: 'Listing owners',
   get_account_balances: 'Looking up account balances',
   search_transactions: 'Searching transactions',
   get_monthly_spending: 'Fetching spending data',
@@ -451,6 +531,16 @@ export async function executeTool(
       return executeListMemories();
     case 'forget':
       return executeForget(input);
+    case 'list_investments':
+      return executeListInvestments();
+    case 'add_investment_account':
+      return executeAddInvestmentAccount(input);
+    case 'update_investment_balance':
+      return executeUpdateInvestmentBalance(input);
+    case 'tag_account_owner':
+      return executeTagAccountOwner(input);
+    case 'list_owners':
+      return executeListOwners();
     default:
       return { error: `Unknown tool: ${name}` };
   }
@@ -1103,4 +1193,147 @@ function monthsBetween(startDate: string, endDate: string): number {
   const start = new Date(startDate);
   const end = new Date(endDate);
   return (end.getFullYear() - start.getFullYear()) * 12 + (end.getMonth() - start.getMonth());
+}
+
+// -------------------------------------------------------------------
+// Investments + owner tagging
+// -------------------------------------------------------------------
+
+const VALID_INVESTMENT_KINDS = ['pension', 'isa', 'lisa', 'savings', 'crypto', 'other'] as const;
+type InvestmentKind = typeof VALID_INVESTMENT_KINDS[number];
+
+async function executeListInvestments() {
+  const investments = await accountRepo.listInvestments();
+  // Resolve balances + owner names in one query for the AI's view.
+  const balances = await accountRepo.getBalances();
+  const balanceById = new Map<number, string>(balances.map(b => [b.account_id, b.balance]));
+  const owners = await propertyRepo.listOwners();
+  const ownerById = new Map<number, string>(owners.map(o => [o.id, o.name]));
+  return investments.map(inv => ({
+    id: inv.id,
+    name: inv.name,
+    kind: inv.investmentKind ?? 'other',
+    ownerId: inv.ownerId,
+    ownerName: inv.ownerId !== null ? ownerById.get(inv.ownerId) ?? null : null,
+    balance: formatCurrency(balanceById.get(inv.id) ?? '0'),
+    raw_balance: balanceById.get(inv.id) ?? '0',
+  }));
+}
+
+async function executeListOwners() {
+  const owners = await propertyRepo.listOwners();
+  return owners.map(o => ({ id: o.id, name: o.name }));
+}
+
+async function executeAddInvestmentAccount(input: Record<string, unknown>) {
+  const name = input.name;
+  const ownerId = input.owner_id;
+  const kind = input.investment_kind;
+  const initialBalance = input.initial_balance;
+  const description = input.description;
+
+  if (typeof name !== 'string' || name.trim().length === 0) return { error: 'name is required' };
+  if (typeof ownerId !== 'number') return { error: 'owner_id is required' };
+  if (typeof kind !== 'string' || !VALID_INVESTMENT_KINDS.includes(kind as InvestmentKind)) {
+    return { error: `investment_kind must be one of: ${VALID_INVESTMENT_KINDS.join(', ')}` };
+  }
+  const owner = await propertyRepo.getOwner(ownerId);
+  if (!owner) return { error: `Owner ${ownerId} not found` };
+
+  try {
+    const account = await accountRepo.create({
+      name: name.trim(),
+      accountType: 'ASSET',
+      isInvestment: true,
+      investmentKind: kind,
+      ownerId,
+      description: typeof description === 'string' ? description : null,
+    });
+    let openingResult: { delta: string; previousBalance: string } | null = null;
+    if (typeof initialBalance === 'string' && /^-?\d+(\.\d+)?$/.test(initialBalance.trim())) {
+      const r = await setInvestmentBalance({
+        accountId: account.id,
+        newBalance: initialBalance.trim(),
+        // londonTodayIso() so the journal date matches the rest of
+        // the app (UK calendar) regardless of where the function
+        // executor is running.
+        asOfDate: londonTodayIso(),
+        description: `Opening balance — ${account.name}`,
+      });
+      openingResult = { delta: r.delta, previousBalance: r.previousBalance };
+    }
+    return {
+      success: true,
+      account: { id: account.id, name: account.name, ownerId, kind },
+      openingBalance: openingResult,
+    };
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : 'Failed to create investment';
+    if (msg.includes('duplicate key') || msg.includes('unique')) {
+      return { error: `An account named "${name}" already exists. Pick a different name.` };
+    }
+    return { error: msg };
+  }
+}
+
+async function executeUpdateInvestmentBalance(input: Record<string, unknown>) {
+  const accountId = input.account_id;
+  const newBalance = input.new_balance;
+  const asOfDate = input.as_of_date;
+  const description = input.description;
+
+  if (typeof accountId !== 'number') return { error: 'account_id is required' };
+  if (typeof newBalance !== 'string' || !/^-?\d+(\.\d+)?$/.test(newBalance.trim())) {
+    return { error: 'new_balance must be a decimal number string' };
+  }
+  let dateIso: string;
+  if (typeof asOfDate === 'string') {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(asOfDate)) {
+      return { error: 'as_of_date must be YYYY-MM-DD' };
+    }
+    dateIso = asOfDate;
+  } else {
+    dateIso = londonTodayIso();
+  }
+
+  try {
+    const result = await setInvestmentBalance({
+      accountId,
+      newBalance: newBalance.trim(),
+      asOfDate: dateIso,
+      description: typeof description === 'string' ? description : undefined,
+    });
+    return {
+      success: true,
+      accountId,
+      previousBalance: formatCurrency(result.previousBalance),
+      newBalance: formatCurrency(newBalance),
+      delta: formatCurrency(result.delta),
+      journalId: result.journalId,
+      asOfDate: dateIso,
+    };
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : 'Failed to update balance' };
+  }
+}
+
+async function executeTagAccountOwner(input: Record<string, unknown>) {
+  const accountId = input.account_id;
+  const ownerId = input.owner_id ?? null;
+  if (typeof accountId !== 'number') return { error: 'account_id is required' };
+  if (ownerId !== null && typeof ownerId !== 'number') {
+    return { error: 'owner_id must be a number or null (for shared)' };
+  }
+  if (typeof ownerId === 'number') {
+    const owner = await propertyRepo.getOwner(ownerId);
+    if (!owner) return { error: `Owner ${ownerId} not found` };
+  }
+  const updated = await accountRepo.update(accountId, { ownerId: ownerId as number | null });
+  if (!updated) return { error: 'Account not found' };
+  return {
+    success: true,
+    accountId: updated.id,
+    accountName: updated.name,
+    ownerId: updated.ownerId ?? null,
+  };
 }

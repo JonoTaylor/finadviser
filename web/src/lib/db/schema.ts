@@ -50,6 +50,14 @@ export const accounts = pgTable('accounts', {
   parentId: integer('parent_id').references((): AnyPgColumn => accounts.id),
   description: text('description'),
   isSystem: boolean('is_system').notNull().default(false),
+  // Investment tagging — pension / S&S ISA / LISA / savings / crypto
+  // / other. is_investment splits asset accounts that grow via market
+  // value (manual balance updates) from cash/operational ones. owner_id
+  // attributes the account to a specific person; null means shared
+  // and excluded from per-owner net-worth calcs by default.
+  isInvestment: boolean('is_investment').notNull().default(false),
+  investmentKind: text('investment_kind'), // 'pension' | 'isa' | 'lisa' | 'savings' | 'crypto' | 'other' | null
+  ownerId: integer('owner_id').references((): AnyPgColumn => owners.id),
   createdAt: timestamp('created_at').notNull().defaultNow(),
 });
 

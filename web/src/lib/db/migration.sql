@@ -9,6 +9,39 @@ ALTER TABLE journal_entries
 ALTER TABLE mortgages
     ADD COLUMN IF NOT EXISTS interest_only BOOLEAN NOT NULL DEFAULT FALSE;
 
+-- Investment tagging on accounts. is_investment splits market-value
+-- assets (pension / S&S ISA / LISA / savings / crypto) from cash and
+-- operational asset accounts. owner_id attributes an account to a
+-- specific person; null means shared. investment_kind is a short
+-- bucket label so the dashboard can group similar things together.
+ALTER TABLE accounts
+    ADD COLUMN IF NOT EXISTS is_investment BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE accounts
+    ADD COLUMN IF NOT EXISTS investment_kind TEXT;
+ALTER TABLE accounts
+    ADD COLUMN IF NOT EXISTS owner_id INTEGER REFERENCES owners(id);
+
+CREATE INDEX IF NOT EXISTS idx_accounts_owner_investment
+    ON accounts(owner_id, is_investment) WHERE owner_id IS NOT NULL;
+
+-- A protected EQUITY account that the "update investment balance"
+-- flow uses as the contra side of each adjustment journal. Keeps
+-- double-entry intact even though investment growth isn't realised
+-- income — it flows through equity. is_system = true so the user
+-- can't accidentally delete it from the chart of accounts.
+--
+-- ON CONFLICT updates ALL critical fields (account_type, is_system,
+-- description) from EXCLUDED rather than just is_system — defends
+-- against an existing row with the same name but a different type
+-- (e.g. a user-created ASSET account they happened to call this)
+-- silently being "system-locked" with the wrong type underneath.
+INSERT INTO accounts (name, account_type, is_system, description)
+VALUES ('Investment Adjustments', 'EQUITY', true, 'Contra account for investment-balance updates. Captures unrealised gain/loss on pension / ISA / etc as the value of those accounts is marked-to-market each month.')
+ON CONFLICT (name) DO UPDATE SET
+    account_type = EXCLUDED.account_type,
+    is_system = EXCLUDED.is_system,
+    description = EXCLUDED.description;
+
 CREATE INDEX IF NOT EXISTS idx_journal_entries_property_date
     ON journal_entries(property_id, date)
     WHERE property_id IS NOT NULL;

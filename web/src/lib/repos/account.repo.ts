@@ -10,6 +10,9 @@ export const accountRepo = {
     parentId?: number | null;
     description?: string | null;
     isSystem?: boolean;
+    isInvestment?: boolean;
+    investmentKind?: string | null;
+    ownerId?: number | null;
   }) {
     const db = getDb();
     const [row] = await db
@@ -20,9 +23,44 @@ export const accountRepo = {
         parentId: data.parentId ?? null,
         description: data.description ?? null,
         isSystem: data.isSystem ?? false,
+        isInvestment: data.isInvestment ?? false,
+        investmentKind: data.investmentKind ?? null,
+        ownerId: data.ownerId ?? null,
       })
       .returning();
     return row;
+  },
+
+  async listInvestments() {
+    const db = getDb();
+    return db
+      .select()
+      .from(accounts)
+      .where(eq(accounts.isInvestment, true))
+      .orderBy(accounts.name);
+  },
+
+  async update(id: number, patch: Partial<{
+    name: string;
+    description: string | null;
+    isInvestment: boolean;
+    investmentKind: string | null;
+    ownerId: number | null;
+  }>) {
+    const db = getDb();
+    const updates: Record<string, unknown> = {};
+    if (patch.name !== undefined) updates.name = patch.name;
+    if (patch.description !== undefined) updates.description = patch.description;
+    if (patch.isInvestment !== undefined) updates.isInvestment = patch.isInvestment;
+    if (patch.investmentKind !== undefined) updates.investmentKind = patch.investmentKind;
+    if (patch.ownerId !== undefined) updates.ownerId = patch.ownerId;
+    if (Object.keys(updates).length === 0) return this.getById(id);
+    const [row] = await db
+      .update(accounts)
+      .set(updates)
+      .where(eq(accounts.id, id))
+      .returning();
+    return row ?? null;
   },
 
   async getById(id: number) {

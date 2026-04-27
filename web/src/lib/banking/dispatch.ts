@@ -91,6 +91,19 @@ export async function getMonzoAccessToken(connectionId: number): Promise<string>
       if (fresh.accessExpiresAtMs - REFRESH_MARGIN_MS > Date.now()) {
         return fresh.accessToken;
       }
+      // Bundle has no refresh token (manual / non-confidential
+      // playground path). Mark the connection expired so the cron
+      // and the connections UI prompt the user to paste a new
+      // token rather than throw a confusing 401 from a refresh
+      // attempt that can never succeed.
+      if (!fresh.refreshToken) {
+        await bankingRepo.setConnectionStatus(connectionId, 'expired', {
+          lastError: 'Access token expired. Paste a fresh token from https://developers.monzo.com/api/playground via the manual-token form on /settings/connections.',
+        }).catch(() => { /* best effort */ });
+        throw new MonzoAuthError({
+          message: 'Access token expired and no refresh token available; paste a new playground token to reconnect.',
+        });
+      }
       return await rotateAndPersist(connectionId, fresh);
     } finally {
       refreshInFlight.delete(connectionId);
@@ -116,6 +129,13 @@ async function readMonzoBundle(connectionId: number): Promise<MonzoTokenBundle> 
 }
 
 async function rotateAndPersist(connectionId: number, bundle: MonzoTokenBundle): Promise<string> {
+  // Caller guarantees refreshToken is present (it bails out
+  // earlier with MonzoAuthError if not). The non-null assertion
+  // makes the type explicit at the call site of refreshMonzoTokens
+  // without restructuring the surrounding flow.
+  if (!bundle.refreshToken) {
+    throw new Error('rotateAndPersist called with missing refreshToken (caller bug)');
+  }
   // Refresh. Per Monzo docs: the response includes both a new access
   // token AND a new refresh token; the old refresh token is now
   // dead. Persist the new bundle BEFORE returning the access token,

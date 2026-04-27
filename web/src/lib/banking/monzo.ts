@@ -71,7 +71,15 @@ export class MonzoAuthError extends MonzoApiError {
 
 export interface MonzoTokenBundle {
   accessToken: string;
-  refreshToken: string;
+  /**
+   * Refresh token. Only issued by Monzo to OAuth clients marked
+   * Confidential at create time. For non-confidential clients
+   * (the default for new developer-portal accounts) this is
+   * absent and tokens have to be rotated by manually pasting a
+   * fresh playground-issued token every 6 hours - see the manual-
+   * token connect path on /settings/connections.
+   */
+  refreshToken?: string;
   /** Unix ms when the access token stops being valid. */
   accessExpiresAtMs: number;
   /** Random URL-safe nonce that doubles as the webhook URL secret. */
@@ -105,23 +113,14 @@ export function decodeTokenBundle(raw: Buffer | Uint8Array | string | null | und
 
   const json = decryptSecret(buf);
   const parsed = JSON.parse(json) as MonzoTokenBundle;
-  // Specific error per missing field so the user / log reader can
-  // act on it. Missing refreshToken in particular is the canonical
-  // signal that the OAuth client wasn't marked Confidential at
-  // create time (Monzo only issues refresh tokens to confidential
-  // clients), which is by far the most common failure mode at this
-  // stage.
   if (typeof parsed.accessToken !== 'string') {
     throw new Error('Decrypted Monzo token bundle is missing accessToken (corrupt secret or schema drift)');
   }
-  if (typeof parsed.refreshToken !== 'string') {
-    throw new Error(
-      'Decrypted Monzo token bundle is missing refreshToken. '
-      + 'This usually means the OAuth client at https://developers.monzo.com/apps is not marked Confidential - '
-      + 'refresh tokens are only issued to confidential clients. '
-      + 'Set the client to Confidential, then disconnect + reconnect in /settings/connections.',
-    );
-  }
+  // refreshToken is optional - non-confidential clients (and
+  // playground-issued manual tokens) don't have one. Tokens without
+  // a refresh path are handled by getMonzoAccessToken: when the
+  // access token expires, the connection flips to 'expired' rather
+  // than attempting a refresh that can never succeed.
   return parsed;
 }
 

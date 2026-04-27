@@ -108,8 +108,12 @@ export async function backfillMetadata(
 
   const db = getDb();
 
-  // Pass 1: bulk-look-up existing matches by external_id. One round-trip
-  // for the whole file rather than N.
+  // Run bulk SELECTs in 1000-id chunks so the IN list never blows
+  // Postgres' 65 535-parameter cap. The id column we look up by is
+  // always indexed, so multiple round-trips are still fast.
+  const SELECT_CHUNK_SIZE = 1000;
+
+  // Pass 1: bulk-look-up existing matches by external_id.
   //
   // The `external_id` column is indexed but not unique (a future bank
   // could legitimately re-use the same id namespace, so we don't want
@@ -123,16 +127,19 @@ export async function backfillMetadata(
   const externalIdMatches = new Map<string, number>();
   const ambiguousExternalIds = new Set<string>();
   if (externalIds.length > 0) {
-    const rows = await db.execute(sql`
-      SELECT journal_entry_id, external_id
-      FROM transaction_metadata
-      WHERE external_id IN (${sql.join(externalIds.map(id => sql`${id}`), sql`, `)})
-    `);
     const byExternalId = new Map<string, number[]>();
-    for (const r of rows.rows) {
-      const list = byExternalId.get(r.external_id as string) ?? [];
-      list.push(r.journal_entry_id as number);
-      byExternalId.set(r.external_id as string, list);
+    for (let i = 0; i < externalIds.length; i += SELECT_CHUNK_SIZE) {
+      const chunk = externalIds.slice(i, i + SELECT_CHUNK_SIZE);
+      const rows = await db.execute(sql`
+        SELECT journal_entry_id, external_id
+        FROM transaction_metadata
+        WHERE external_id IN (${sql.join(chunk.map(id => sql`${id}`), sql`, `)})
+      `);
+      for (const r of rows.rows) {
+        const list = byExternalId.get(r.external_id as string) ?? [];
+        list.push(r.journal_entry_id as number);
+        byExternalId.set(r.external_id as string, list);
+      }
     }
     for (const [extId, list] of byExternalId) {
       if (list.length === 1) externalIdMatches.set(extId, list[0]);
@@ -275,19 +282,23 @@ export async function backfillMetadata(
   // Pass 4: figure out which payloads will create a new metadata row
   // vs which will update an existing one — for the response counts.
   // (The actual write below is a single upsert; we just want to tell
-  // the user what happened.)
+  // the user what happened.) Same SELECT_CHUNK_SIZE rationale as
+  // Pass 1.
   const journalIds = dedupedPayloads.map(p => p.journalEntryId);
-  const existingRows = await db.execute(sql`
-    SELECT journal_entry_id,
-           external_id, transaction_time, transaction_type, merchant_name,
-           merchant_emoji, bank_category, currency, local_amount,
-           local_currency, notes, address, receipt_url, raw
-    FROM transaction_metadata
-    WHERE journal_entry_id IN (${sql.join(journalIds.map(id => sql`${id}`), sql`, `)})
-  `);
   const existingByJournal = new Map<number, Record<string, unknown>>();
-  for (const r of existingRows.rows) {
-    existingByJournal.set(r.journal_entry_id as number, r);
+  for (let i = 0; i < journalIds.length; i += SELECT_CHUNK_SIZE) {
+    const chunk = journalIds.slice(i, i + SELECT_CHUNK_SIZE);
+    const existingRows = await db.execute(sql`
+      SELECT journal_entry_id,
+             external_id, transaction_time, transaction_type, merchant_name,
+             merchant_emoji, bank_category, currency, local_amount,
+             local_currency, notes, address, receipt_url, raw
+      FROM transaction_metadata
+      WHERE journal_entry_id IN (${sql.join(chunk.map(id => sql`${id}`), sql`, `)})
+    `);
+    for (const r of existingRows.rows) {
+      existingByJournal.set(r.journal_entry_id as number, r);
+    }
   }
 
   const FILLABLE_KEYS = [

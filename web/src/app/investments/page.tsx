@@ -280,8 +280,14 @@ function UpdateBalanceDialog({
 
   // Reset form when the dialog target changes (using "adjust state during
   // render" rather than useEffect, per React 19 idiom).
-  if (target?.id !== prevTargetId) {
-    setPrevTargetId(target?.id ?? null);
+  //
+  // Normalise to `number | null` on both sides — `target?.id` returns
+  // `undefined` when target is null, and `undefined !== null`, which
+  // would fire setState on every render and crash the page with
+  // "Too many re-renders" (caught at prerender time on Vercel).
+  const targetId: number | null = target?.id ?? null;
+  if (targetId !== prevTargetId) {
+    setPrevTargetId(targetId);
     setNewBalance(target?.balance ?? '');
     setAsOfDate(londonTodayIso());
   }

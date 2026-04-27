@@ -72,14 +72,19 @@ export async function calculatePersonalNetWorth(ownerId: number): Promise<Person
   }
 
   // Investments + personal cash + shared unattributed cash. Single
-  // round-trip; we partition in memory based on the new flags.
+  // round-trip via v_account_balances (single source of truth for
+  // balance arithmetic — don't re-implement SUM(book_entries) here).
+  // Filtered to ASSET type and to rows the user could care about for
+  // a personal-net-worth calc: their own accounts plus any shared
+  // (owner_id IS NULL) accounts so we can report the sharedCashUnattributed
+  // diagnostic.
   const accountRows = await db.execute(sql`
-    SELECT a.id, a.name, a.account_type, a.is_investment, a.investment_kind, a.owner_id,
-           COALESCE(SUM(be.amount::numeric), 0) AS balance
+    SELECT a.id, a.name, a.is_investment, a.investment_kind, a.owner_id,
+           COALESCE(v.balance, 0) AS balance
     FROM accounts a
-    LEFT JOIN book_entries be ON be.account_id = a.id
+    LEFT JOIN v_account_balances v ON v.account_id = a.id
     WHERE a.account_type = 'ASSET'
-    GROUP BY a.id, a.name, a.account_type, a.is_investment, a.investment_kind, a.owner_id
+      AND (a.owner_id = ${ownerId} OR a.owner_id IS NULL)
   `);
 
   let investments = new Decimal(0);
@@ -127,19 +132,29 @@ export async function calculatePersonalNetWorth(ownerId: number): Promise<Person
 }
 
 /**
- * Adjust an investment account's balance to a new target value. We
- * implement this as a journal entry — DR/CR the investment account
- * and CR/DR the system "Investment Adjustments" equity account by
- * the delta — so:
+ * Adjust an investment account's balance to a new target value via a
+ * journal entry — DR/CR the investment account and CR/DR the system
+ * "Investment Adjustments" equity account by the delta — so:
  *   - the existing v_account_balances view picks the new balance up
  *     immediately,
  *   - the historical record of value changes is preserved as journals
  *     (so we can derive month-over-month deltas later without a
  *     separate snapshot table),
- *   - double-entry stays balanced (the trigger enforces this).
+ *   - double-entry stays balanced (the journal-balance trigger
+ *     enforces this).
  *
- * The "Investment Adjustments" equity account is seeded by
+ * The "Investment Adjustments" EQUITY account is seeded by
  * migration.sql so this never has to create it on the fly.
+ *
+ * Concurrency: the read-balance-then-write-delta is split across two
+ * statements (the Neon HTTP driver doesn't expose multi-statement
+ * transactions). The validation read is just a safety check; the
+ * actual delta is computed INSIDE the second SQL statement using a
+ * CTE that re-reads the live balance, so two concurrent updates
+ * don't both compute against the same stale snapshot. Worst case
+ * concurrent updates from the same user race for "last write wins"
+ * on the latest delta — acceptable for a single-household app, and
+ * the trigger keeps each entry self-consistent.
  */
 export async function setInvestmentBalance(params: {
   accountId: number;
@@ -149,55 +164,81 @@ export async function setInvestmentBalance(params: {
 }): Promise<{ journalId: number; delta: string; previousBalance: string }> {
   const db = getDb();
 
-  // Validate target account is an investment account.
-  const acctRows = await db.execute(sql`
-    SELECT id, name, account_type, is_investment
-    FROM accounts
-    WHERE id = ${params.accountId}
+  // Validate target account + look up the seeded adjustment account
+  // in a single query.
+  const validation = await db.execute(sql`
+    SELECT
+      a.id, a.name, a.account_type, a.is_investment,
+      (SELECT id FROM accounts WHERE name = 'Investment Adjustments' AND is_system = true LIMIT 1) AS adj_account_id
+    FROM accounts a
+    WHERE a.id = ${params.accountId}
     LIMIT 1
   `);
-  if (acctRows.rows.length === 0) throw new Error(`Account ${params.accountId} not found`);
-  const acct = acctRows.rows[0];
+  if (validation.rows.length === 0) throw new Error(`Account ${params.accountId} not found`);
+  const acct = validation.rows[0];
   if (!acct.is_investment) {
     throw new Error(`Account ${params.accountId} (${acct.name}) is not flagged as an investment.`);
   }
   if (acct.account_type !== 'ASSET') {
     throw new Error(`Investment accounts must be ASSET type; ${acct.name} is ${acct.account_type}.`);
   }
-
-  // Current balance and the seeded equity account in one round-trip.
-  const balanceRows = await db.execute(sql`
-    SELECT
-      (SELECT COALESCE(SUM(amount::numeric), 0) FROM book_entries WHERE account_id = ${params.accountId}) AS current_balance,
-      (SELECT id FROM accounts WHERE name = 'Investment Adjustments' AND is_system = true LIMIT 1) AS adj_account_id
-  `);
-  const previousBalance = new Decimal((balanceRows.rows[0].current_balance as string) ?? '0');
-  const adjAccountId = balanceRows.rows[0].adj_account_id as number | null;
+  const adjAccountId = acct.adj_account_id as number | null;
   if (adjAccountId === null) {
     throw new Error('System "Investment Adjustments" equity account is missing — re-run the database migration.');
   }
 
-  const target = new Decimal(params.newBalance);
-  const delta = target.minus(previousBalance);
+  const description = params.description ?? `Investment balance update — ${acct.name}`;
+  const targetBalance = new Decimal(params.newBalance).toFixed(2);
 
-  if (delta.abs().lt('0.01')) {
-    return { journalId: 0, delta: '0.00', previousBalance: previousBalance.toFixed(2) };
+  // Single statement: insert the journal AND the two balanced book
+  // entries, computing the delta from the live balance via a CTE.
+  // Re-reading the balance inside the same statement (rather than
+  // passing in a value computed in JS) means the delta reflects the
+  // latest state at write time — closes the read-then-write race
+  // window for the common case. Returns the previous balance and
+  // delta so the caller can report what changed.
+  const result = await db.execute(sql`
+    WITH current_balance AS (
+      SELECT COALESCE(SUM(amount::numeric), 0) AS bal
+      FROM book_entries
+      WHERE account_id = ${params.accountId}
+    ),
+    new_journal AS (
+      INSERT INTO journal_entries (date, description)
+      VALUES (${params.asOfDate}, ${description})
+      RETURNING id
+    ),
+    delta AS (
+      SELECT
+        (${targetBalance}::numeric - cb.bal) AS amount,
+        cb.bal AS previous_balance
+      FROM current_balance cb
+    ),
+    inserted AS (
+      INSERT INTO book_entries (journal_entry_id, account_id, amount)
+      SELECT new_journal.id, ${params.accountId}, delta.amount
+        FROM new_journal, delta
+      UNION ALL
+      SELECT new_journal.id, ${adjAccountId}, -delta.amount
+        FROM new_journal, delta
+      RETURNING journal_entry_id
+    )
+    SELECT
+      new_journal.id AS journal_id,
+      delta.amount AS delta,
+      delta.previous_balance AS previous_balance
+    FROM new_journal, delta
+    WHERE EXISTS (SELECT 1 FROM inserted)
+    LIMIT 1
+  `);
+
+  if (result.rows.length === 0) {
+    throw new Error('Balance update statement produced no rows — unexpected.');
   }
-
-  // Double-entry: DR investment +delta, CR adjustments -delta.
-  const journalRows = await db.execute(sql`
-    INSERT INTO journal_entries (date, description)
-    VALUES (${params.asOfDate}, ${params.description ?? `Investment balance update — ${acct.name}`})
-    RETURNING id
-  `);
-  const journalId = journalRows.rows[0].id as number;
-
-  await db.execute(sql`
-    INSERT INTO book_entries (journal_entry_id, account_id, amount)
-    VALUES
-      (${journalId}, ${params.accountId}, ${delta.toFixed(2)}),
-      (${journalId}, ${adjAccountId}, ${delta.neg().toFixed(2)})
-  `);
+  const row = result.rows[0];
+  const journalId = row.journal_id as number;
+  const delta = new Decimal((row.delta as string) ?? '0');
+  const previousBalance = new Decimal((row.previous_balance as string) ?? '0');
 
   return {
     journalId,

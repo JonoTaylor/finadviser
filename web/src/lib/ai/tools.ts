@@ -5,6 +5,7 @@ import { calculateEquity } from '@/lib/properties/equity-calculator';
 import { setInvestmentBalance } from '@/lib/properties/personal-net-worth';
 import { formatCurrency } from '@/lib/utils/formatting';
 import { matchRule } from '@/lib/import/categorizer';
+import { londonTodayIso } from '@/lib/dates/today';
 import { categorizeBatch } from './claude-client';
 
 /**
@@ -1247,7 +1248,10 @@ async function executeAddInvestmentAccount(input: Record<string, unknown>) {
       const r = await setInvestmentBalance({
         accountId: account.id,
         newBalance: initialBalance.trim(),
-        asOfDate: format(new Date(), 'yyyy-MM-dd'),
+        // londonTodayIso() so the journal date matches the rest of
+        // the app (UK calendar) regardless of where the function
+        // executor is running.
+        asOfDate: londonTodayIso(),
         description: `Opening balance — ${account.name}`,
       });
       openingResult = { delta: r.delta, previousBalance: r.previousBalance };
@@ -1283,7 +1287,7 @@ async function executeUpdateInvestmentBalance(input: Record<string, unknown>) {
     }
     dateIso = asOfDate;
   } else {
-    dateIso = format(new Date(), 'yyyy-MM-dd');
+    dateIso = londonTodayIso();
   }
 
   try {

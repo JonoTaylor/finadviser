@@ -14,17 +14,17 @@ type InvestmentKind = typeof VALID_KINDS[number];
 export async function GET() {
   try {
     const db = getDb();
-    // Single query joining accounts + balance — we want every
-    // investment with its current value in one shot.
+    // Single query joining accounts + the v_account_balances view
+    // (single source of truth for balance arithmetic) so we don't
+    // re-implement the SUM(book_entries.amount) here.
     const rows = await db.execute(sql`
       SELECT a.id, a.name, a.investment_kind, a.owner_id,
              o.name AS owner_name,
-             COALESCE(SUM(be.amount::numeric), 0) AS balance
+             COALESCE(v.balance, 0) AS balance
       FROM accounts a
       LEFT JOIN owners o ON o.id = a.owner_id
-      LEFT JOIN book_entries be ON be.account_id = a.id
+      LEFT JOIN v_account_balances v ON v.account_id = a.id
       WHERE a.is_investment = true
-      GROUP BY a.id, a.name, a.investment_kind, a.owner_id, o.name
       ORDER BY a.name
     `);
     return NextResponse.json(rows.rows.map(r => ({

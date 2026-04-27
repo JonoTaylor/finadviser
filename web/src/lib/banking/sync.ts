@@ -5,11 +5,17 @@
  * transaction_metadata in the existing schema. Returns counts so the
  * caller can record a sync_runs row.
  *
+ * Atomicity: each transaction lands via the `ingest_bank_transaction`
+ * Postgres function, so the journal entry + the two balanced book
+ * entries + the transaction_metadata row commit together or not at
+ * all. The function is idempotent on `provider_txn_id`: a re-sync
+ * returns `was_inserted = false` for a row already on file and
+ * skips the side-effect inserts.
+ *
  * What this PR (B) does not yet do:
  *   - Pending -> settled status flip on re-sync. Today we ingest both
- *     and the dedup index keeps us idempotent on aggregatorTxnId, but
- *     a status field on journal_entries to flip "pending" rows is
- *     deferred to PR D.
+ *     and the dedup keeps us idempotent, but a status field on
+ *     journal_entries to flip "pending" rows is deferred to PR D.
  *   - AI categorisation pass. Inserts go into the system "Bank" /
  *     "Uncategorized Income/Expense" accounts and the user can pick
  *     up the categorisation pass via /chat as before.
@@ -22,18 +28,16 @@
 import Decimal from 'decimal.js';
 import { sql } from 'drizzle-orm';
 import { format, subDays } from 'date-fns';
-import { getDb, schema } from '@/lib/db';
+import { getDb } from '@/lib/db';
 import { gocardless } from './gocardless';
 import { bankingRepo } from './repo';
 import { accountRepo } from '@/lib/repos';
 import type { AggregatorTransaction } from './aggregator';
 
-const { journalEntries, bookEntries, transactionMetadata } = schema;
-
 // On every sync after the first, re-pull a small overlap window before
 // last_synced_at so any transactions that were pending on the previous
-// run and have since cleared can be reconciled. The dedup index on
-// provider_txn_id makes this safe and idempotent.
+// run and have since cleared can be reconciled. The dedup primitive
+// (ingest_bank_transaction's idempotent insert) makes this safe.
 const RESYNC_OVERLAP_DAYS = 7;
 
 export interface SyncOutcome {
@@ -83,9 +87,10 @@ export async function syncConnection(connectionId: number, syncRunId: number): P
 }
 
 /**
- * Idempotent insert of a single aggregator transaction. Returns true
- * if a new journal_entry was created, false if the provider_txn_id
- * was already on file (no-op).
+ * Idempotent insert of a single aggregator transaction via the
+ * `ingest_bank_transaction` Postgres function. Returns true if a
+ * new journal_entry was created, false if `provider_txn_id` was
+ * already on file (no-op).
  *
  * Double-entry shape: amount > 0 (money in) credits the asset
  * account and debits Uncategorized Income; amount < 0 (money out)
@@ -99,56 +104,43 @@ async function ingestTransaction(
 ): Promise<boolean> {
   const db = getDb();
 
-  // Resolve the contra account (Uncategorized Income/Expense). Both
-  // are seeded by migration.sql with is_system=true; cached at module
-  // scope across calls within the same invocation.
-  const contraAccountId = await resolveContraAccount(parseFloat(txn.amount));
+  // Decimal for the sign check too, matching the rest of this
+  // function's monetary handling. parseFloat works in practice for
+  // sign but mixing primitives with Decimal makes the data flow
+  // harder to reason about.
+  const amount = new Decimal(txn.amount);
+  const contraAccountId = await resolveContraAccount(amount.gte(0));
 
-  // Check if we already have this txn. The partial UNIQUE index on
-  // journal_entries.provider_txn_id makes this constant-time.
-  const existing = await db.execute(sql`
-    SELECT id FROM journal_entries WHERE provider_txn_id = ${txn.aggregatorTxnId} LIMIT 1
-  `);
-  if (existing.rows.length > 0) {
-    return false;
-  }
-
-  // The amount in book_entries is signed: subject account gets the
-  // raw bank amount, contra gets the inverse. journal-balance trigger
-  // enforces sum=0.
-  const subjectAmount = new Decimal(txn.amount).toFixed(2);
-  const contraAmount = new Decimal(txn.amount).neg().toFixed(2);
   const description = (txn.merchantName?.trim() || txn.description.trim() || 'Bank transaction').slice(0, 500);
+  const amountStr = amount.toFixed(2);
 
-  const [journal] = await db
-    .insert(journalEntries)
-    .values({
-      date: txn.date,
-      description,
-      providerTxnId: txn.aggregatorTxnId,
-      syncRunId,
-    })
-    .returning({ id: journalEntries.id });
+  // Normalise nullable money strings; Decimal-format anything present.
+  const originalAmount = txn.originalAmount ? new Decimal(txn.originalAmount).toFixed(2) : null;
+  const fxRate = txn.fxRate ? new Decimal(txn.fxRate).toFixed(8) : null;
 
-  await db.insert(bookEntries).values([
-    { journalEntryId: journal.id, accountId: internalAccountId, amount: subjectAmount },
-    { journalEntryId: journal.id, accountId: contraAccountId,   amount: contraAmount },
-  ]);
-
-  await db.insert(transactionMetadata).values({
-    journalEntryId: journal.id,
-    externalId: txn.aggregatorTxnId,
-    transactionType: txn.status,
-    merchantName: txn.merchantName,
-    bankCategory: txn.bankCategory,
-    currency: txn.currency,
-    originalAmount: txn.originalAmount,
-    originalCurrency: txn.originalCurrency,
-    fxRate: txn.fxRate,
-    raw: txn.raw,
-  });
-
-  return true;
+  const result = await db.execute(sql`
+    SELECT journal_id, was_inserted
+      FROM ingest_bank_transaction(
+        ${txn.aggregatorTxnId}::text,
+        ${internalAccountId}::integer,
+        ${contraAccountId}::integer,
+        ${txn.date}::text,
+        ${description}::text,
+        ${amountStr}::numeric,
+        ${syncRunId}::integer,
+        ${txn.aggregatorTxnId}::text,
+        ${txn.status}::text,
+        ${txn.merchantName}::text,
+        ${txn.bankCategory}::text,
+        ${txn.currency}::text,
+        ${originalAmount}::numeric,
+        ${txn.originalCurrency}::text,
+        ${fxRate}::numeric,
+        ${JSON.stringify(txn.raw)}::jsonb
+      )
+  `);
+  if (result.rows.length === 0) return false;
+  return Boolean(result.rows[0].was_inserted);
 }
 
 // ── Contra-account lookup with module-level caching ────────────────
@@ -156,8 +148,8 @@ async function ingestTransaction(
 let cachedContraIncome: number | null = null;
 let cachedContraExpense: number | null = null;
 
-async function resolveContraAccount(amount: number): Promise<number> {
-  if (amount >= 0) {
+async function resolveContraAccount(isCredit: boolean): Promise<number> {
+  if (isCredit) {
     if (cachedContraIncome !== null) return cachedContraIncome;
     const acc = await accountRepo.getByName('Uncategorized Income');
     if (!acc) throw new Error('System "Uncategorized Income" account is missing; re-run the migration');

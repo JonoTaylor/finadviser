@@ -490,6 +490,81 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+-- Bank-feed transaction ingest. Used by the daily-sync engine to
+-- write one aggregator transaction into the journal model
+-- atomically: a journal entry, two balanced book entries (subject
+-- account + contra), and a transaction_metadata row. Wrapping it in
+-- a Postgres function avoids the Drizzle/neon-http multi-statement
+-- gap that bit set_investment_balance, and gives us atomicity that
+-- the previous TS-side sequence couldn't (a partial failure between
+-- INSERT INTO journal_entries and INSERT INTO book_entries would
+-- have left an orphan journal with a provider_txn_id but no double
+-- entry).
+--
+-- Idempotent: if the provider_txn_id is already on file, returns
+-- the existing journal_id with was_inserted = false and skips the
+-- side-effect inserts. The unique violation on insert is caught
+-- inside the function rather than via ON CONFLICT, because the
+-- partial UNIQUE INDEX (... WHERE provider_txn_id IS NOT NULL)
+-- requires the same WHERE on ON CONFLICT and the matching syntax
+-- is fiddly across Postgres versions.
+CREATE OR REPLACE FUNCTION ingest_bank_transaction(
+    p_provider_txn_id   TEXT,
+    p_account_id        INTEGER,
+    p_contra_account_id INTEGER,
+    p_date              TEXT,
+    p_description       TEXT,
+    p_amount            NUMERIC,
+    p_sync_run_id       INTEGER,
+    p_external_id       TEXT,
+    p_transaction_type  TEXT,
+    p_merchant_name     TEXT,
+    p_bank_category     TEXT,
+    p_currency          TEXT,
+    p_original_amount   NUMERIC,
+    p_original_currency TEXT,
+    p_fx_rate           NUMERIC,
+    p_raw               JSONB
+) RETURNS TABLE (
+    journal_id   INTEGER,
+    was_inserted BOOLEAN
+) AS $$
+DECLARE
+    v_journal_id INTEGER;
+BEGIN
+    BEGIN
+        INSERT INTO journal_entries (date, description, provider_txn_id, sync_run_id)
+             VALUES (p_date, p_description, p_provider_txn_id, p_sync_run_id)
+          RETURNING id INTO v_journal_id;
+    EXCEPTION WHEN unique_violation THEN
+        SELECT je.id INTO v_journal_id
+          FROM journal_entries je
+         WHERE je.provider_txn_id = p_provider_txn_id
+         LIMIT 1;
+        RETURN QUERY SELECT v_journal_id, false;
+        RETURN;
+    END;
+
+    INSERT INTO book_entries (journal_entry_id, account_id, amount)
+    VALUES
+        (v_journal_id, p_account_id,        p_amount),
+        (v_journal_id, p_contra_account_id, -p_amount);
+
+    INSERT INTO transaction_metadata (
+        journal_entry_id, external_id, transaction_type, merchant_name,
+        bank_category, currency, original_amount, original_currency,
+        fx_rate, raw
+    )
+    VALUES (
+        v_journal_id, p_external_id, p_transaction_type, p_merchant_name,
+        p_bank_category, p_currency, p_original_amount, p_original_currency,
+        p_fx_rate, p_raw
+    );
+
+    RETURN QUERY SELECT v_journal_id, true;
+END;
+$$ LANGUAGE plpgsql;
+
 -- Itemised UK BTL deductible expense categories (children of 'Property
 -- expenses'). Mortgage interest is intentionally NOT seeded here: under
 -- S.24 it's not an ordinary deductible expense and it's already isolated

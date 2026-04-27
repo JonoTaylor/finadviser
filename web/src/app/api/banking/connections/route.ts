@@ -90,20 +90,13 @@ export async function POST(req: Request) {
         maxHistoricalDays: match.transactionsMaxHistoricalDays,
       });
       // Patch the placeholder ref to the real requisition_id and
-      // refresh consentExpiresAt with what the aggregator actually
-      // returned (PR C will refresh again post-consent).
-      const db = (await import('@/lib/db')).getDb();
-      const { connections } = (await import('@/lib/db')).schema;
-      const { eq } = await import('drizzle-orm');
-      await db
-        .update(connections)
-        .set({
-          aggregatorRef: consent.aggregatorRef,
-          consentExpiresAt: consent.consentExpiresAt,
-          updatedAt: new Date(),
-        })
-        .where(eq(connections.id, conn.id));
-
+      // refresh consentExpiresAt with what the aggregator returned
+      // at agreement creation. PR C will refresh again post-consent
+      // once the requisition status flips to LN.
+      await bankingRepo.updateConnectionAfterConsent(conn.id, {
+        aggregatorRef: consent.aggregatorRef,
+        consentExpiresAt: consent.consentExpiresAt,
+      });
       return NextResponse.json({ connectionId: conn.id, consentUrl: consent.consentUrl });
     } catch (err) {
       // Roll back the placeholder row on failure so the user can

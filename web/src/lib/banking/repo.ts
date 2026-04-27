@@ -150,6 +150,28 @@ export const bankingRepo = {
       .where(eq(connections.id, id));
   },
 
+  /**
+   * Patch the placeholder aggregator_ref + consent expiry on a
+   * pending connection once the aggregator has returned the real
+   * requisition id. Called by POST /api/banking/connections after
+   * createConsent succeeds. Status stays pending until the
+   * post-consent callback flips it to active.
+   */
+  async updateConnectionAfterConsent(
+    id: number,
+    data: { aggregatorRef: string; consentExpiresAt: Date },
+  ) {
+    const db = getDb();
+    await db
+      .update(connections)
+      .set({
+        aggregatorRef: data.aggregatorRef,
+        consentExpiresAt: data.consentExpiresAt,
+        updatedAt: new Date(),
+      })
+      .where(eq(connections.id, id));
+  },
+
   async markSynced(id: number, when: Date = new Date()) {
     const db = getDb();
     await db
@@ -182,6 +204,13 @@ export const bankingRepo = {
     return rows.rows.map(rowToProviderAccount);
   },
 
+  /**
+   * Bind an aggregator account to one of our internal accounts (or
+   * update an existing binding). Returns the minimal shape the map
+   * route needs for its response: id + the two refs. Callers that
+   * want the joined-with-accounts.name view should call
+   * `listProviderAccounts(connectionId)` instead.
+   */
   async upsertProviderAccount(data: {
     connectionId: number;
     accountId: number;
@@ -190,7 +219,7 @@ export const bankingRepo = {
     currency: string;
     product: string | null;
     cutoverDate: string | null;
-  }): Promise<ProviderAccountRow> {
+  }): Promise<{ id: number; connectionId: number; accountId: number; aggregatorAccountRef: string }> {
     const db = getDb();
     await db
       .insert(providerAccounts)
@@ -215,7 +244,12 @@ export const bankingRepo = {
         },
       });
     const rows = await db
-      .select()
+      .select({
+        id: providerAccounts.id,
+        connectionId: providerAccounts.connectionId,
+        accountId: providerAccounts.accountId,
+        aggregatorAccountRef: providerAccounts.aggregatorAccountRef,
+      })
       .from(providerAccounts)
       .where(
         and(
@@ -224,18 +258,7 @@ export const bankingRepo = {
         ),
       )
       .limit(1);
-    const r = rows[0];
-    return {
-      id: r.id,
-      connectionId: r.connectionId,
-      accountId: r.accountId,
-      accountName: '',  // filled by listProviderAccounts; unused on this code path
-      aggregatorAccountRef: r.aggregatorAccountRef,
-      iban: r.iban,
-      currency: r.currency,
-      product: r.product,
-      cutoverDate: r.cutoverDate,
-    };
+    return rows[0];
   },
 
   // ── Sync runs ──────────────────────────────────────────────────

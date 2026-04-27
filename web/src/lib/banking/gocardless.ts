@@ -35,9 +35,12 @@ import type {
 
 const BASE_URL = 'https://bankaccountdata.gocardless.com/api/v2';
 
-// PSD2 caps consent at 90 days; default a touch lower so the UI clock
-// matches what the bank actually granted (some banks return 89 in
-// edge cases).
+// PSD2 caps consent at 90 days; use that as the requested value when
+// creating an agreement, and as the fallback on `consentMaxDays` when
+// the institution's own metadata is silent. Banks may still cap below
+// 90 (rare, but documented for some EU institutions); callers that
+// need the actually-granted value should re-read the requisition
+// after consent completes.
 const DEFAULT_CONSENT_DAYS = 90;
 const DEFAULT_HISTORICAL_DAYS = 730; // GoCardless caps most banks at ~730 (24m)
 
@@ -94,6 +97,13 @@ interface TokenState {
 }
 
 let tokenCache: TokenState | null = null;
+// In-flight promise so concurrent callers in the same runtime share a
+// single mint/refresh round-trip. Without it, two requests landing on
+// the same Vercel invocation right after a cold start (or after the
+// access token's expiry) would both detect the stale cache and both
+// hit /token/new/ or /token/refresh/, doubling auth pressure for no
+// gain.
+let tokenInFlight: Promise<TokenState> | null = null;
 const ACCESS_REFRESH_MARGIN_MS = 60_000;
 
 async function postJson<T>(path: string, body: unknown, headers: Record<string, string> = {}): Promise<T> {
@@ -185,22 +195,41 @@ async function getAccessToken(): Promise<string> {
   if (tokenCache && tokenCache.accessExpiresAtMs - ACCESS_REFRESH_MARGIN_MS > now) {
     return tokenCache.access;
   }
-  if (tokenCache && tokenCache.refreshExpiresAtMs > now) {
-    try {
-      tokenCache = await refreshAccess(tokenCache);
-      return tokenCache.access;
-    } catch (err) {
-      // Refresh failed; fall through to a clean mint.
-      if (!(err instanceof GoCardlessAuthError)) throw err;
-    }
+  // If another caller is already minting/refreshing, await the same
+  // promise so we don't fire a second round-trip in parallel.
+  if (tokenInFlight) {
+    const fresh = await tokenInFlight;
+    return fresh.access;
   }
-  tokenCache = await mintTokens(secretId, secretKey);
-  return tokenCache.access;
+
+  tokenInFlight = (async () => {
+    try {
+      if (tokenCache && tokenCache.refreshExpiresAtMs > Date.now()) {
+        try {
+          const refreshed = await refreshAccess(tokenCache);
+          tokenCache = refreshed;
+          return refreshed;
+        } catch (err) {
+          // Refresh failed; fall through to a clean mint.
+          if (!(err instanceof GoCardlessAuthError)) throw err;
+        }
+      }
+      const minted = await mintTokens(secretId, secretKey);
+      tokenCache = minted;
+      return minted;
+    } finally {
+      tokenInFlight = null;
+    }
+  })();
+
+  const fresh = await tokenInFlight;
+  return fresh.access;
 }
 
 // Module-internal export so tests can reset the cache between cases.
 export function _resetTokenCacheForTests() {
   tokenCache = null;
+  tokenInFlight = null;
 }
 
 // ----- Wire-format types ------------------------------------------
@@ -301,10 +330,16 @@ export const gocardless: BankingAggregator = {
   async createConsent(input: CreateConsentInput): Promise<CreateConsentResult> {
     const access = await getAccessToken();
 
-    // Step 1: end-user agreement. Setting max_historical_days +
-    // access_valid_for_days here gives us deterministic expiry maths
-    // even when the bank silently caps lower (we re-read the agreement
-    // on the next step to capture the actual accepted value).
+    // Step 1: end-user agreement. We pass max_historical_days +
+    // access_valid_for_days as our request, and use the create
+    // response's access_valid_for_days for `consentExpiresAt` below.
+    // Important caveat: until the user actually completes consent on
+    // the bank's screen, the granted-by-bank window can be shorter
+    // than what we requested (rare, but documented). The accurate
+    // expiry is only known after re-reading the requisition once
+    // status flips to LN. Today this returns the requested value;
+    // PR C (cron + reauth notifications) refreshes it from the
+    // requisition state on first sync.
     const agreement = await postJson<RawAgreement>(
       '/agreements/enduser/',
       {

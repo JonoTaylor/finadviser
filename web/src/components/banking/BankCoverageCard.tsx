@@ -8,21 +8,27 @@ import AccountBalanceRoundedIcon from '@mui/icons-material/AccountBalanceRounded
 import CheckCircleRoundedIcon from '@mui/icons-material/CheckCircleRounded';
 import ErrorOutlineRoundedIcon from '@mui/icons-material/ErrorOutlineRounded';
 import RefreshRoundedIcon from '@mui/icons-material/RefreshRounded';
+import type { InstitutionInfo, ProviderSlug } from '@/lib/banking/aggregator';
 import { softTokens } from '@/theme/theme';
 
-interface CoverageEntry {
-  status: 'available' | 'missing';
-  institutionId?: string;
-  name?: string;
-  consentMaxDays?: number;
-  transactionsMaxHistoricalDays?: number;
+// Discriminated union: when status is 'available' the institution
+// fields are guaranteed to be set by the API, so consumers can read
+// them without optional-chaining gymnastics.
+interface AvailableCoverageEntry {
+  status: 'available';
+  institutionId: string;
+  name: string;
+  consentMaxDays: number;
+  transactionsMaxHistoricalDays: number;
 }
-
-type ProviderSlug = 'monzo' | 'barclays' | 'amex_uk' | 'yonder';
+interface MissingCoverageEntry {
+  status: 'missing';
+}
+type CoverageEntry = AvailableCoverageEntry | MissingCoverageEntry;
 
 interface CoverageResponse {
   coverage: Record<ProviderSlug, CoverageEntry>;
-  institutions: Array<{ id: string; name: string }>;
+  institutions: InstitutionInfo[];
 }
 
 const PROVIDER_LABEL: Record<ProviderSlug, string> = {

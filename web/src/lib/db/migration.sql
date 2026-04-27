@@ -591,7 +591,14 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_journal_entries_provider_txn_id
 ALTER TABLE transaction_metadata
     ADD COLUMN IF NOT EXISTS original_amount NUMERIC(14,2);
 ALTER TABLE transaction_metadata
-    ADD COLUMN IF NOT EXISTS original_currency CHAR(3);
+    ADD COLUMN IF NOT EXISTS original_currency TEXT;
 ALTER TABLE transaction_metadata
     ADD COLUMN IF NOT EXISTS fx_rate NUMERIC(18,8);
+
+-- The original spec for `original_currency` was CHAR(3); align it to
+-- TEXT to match `transaction_metadata.currency` and the rest of the
+-- codebase's currency columns. ALTER TYPE TEXT is a metadata-only
+-- change and a no-op if already TEXT, so safe on every redeploy.
+ALTER TABLE transaction_metadata
+    ALTER COLUMN original_currency TYPE TEXT;
 

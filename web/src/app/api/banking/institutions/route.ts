@@ -47,7 +47,18 @@ export async function GET(req: Request) {
       );
     }
     if (err instanceof GoCardlessApiError) {
-      return NextResponse.json({ error: `GoCardless ${err.status}: ${err.message}` }, { status: 502 });
+      // err.message stringifies the upstream body, which may carry
+      // unexpected detail. Log it for diagnosis and return a stable
+      // user-facing message + the upstream status so the coverage
+      // card can still render an actionable "Y502 / 503" hint.
+      console.error('GoCardless institutions API error:', {
+        upstreamStatus: err.status,
+        message: err.message,
+      });
+      return NextResponse.json(
+        { error: `Failed to fetch institutions from GoCardless (upstream status ${err.status})` },
+        { status: 502 },
+      );
     }
     // Catch-all: log the real error server-side (Vercel logs only,
     // never reachable by an end user) and return a generic message

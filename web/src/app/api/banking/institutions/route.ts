@@ -49,7 +49,11 @@ export async function GET(req: Request) {
     if (err instanceof GoCardlessApiError) {
       return NextResponse.json({ error: `GoCardless ${err.status}: ${err.message}` }, { status: 502 });
     }
-    const msg = err instanceof Error ? err.message : 'unknown error';
-    return NextResponse.json({ error: msg }, { status: 500 });
+    // Catch-all: log the real error server-side (Vercel logs only,
+    // never reachable by an end user) and return a generic message
+    // so internal stack traces / third-party error bodies don't
+    // leak in the response.
+    console.error('Institutions API error:', err);
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }

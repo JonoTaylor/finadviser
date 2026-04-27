@@ -348,22 +348,24 @@ export const gocardless: BankingAggregator = {
 
     // Each account id needs a separate /details/ call to populate
     // IBAN, currency, product, ownerName. GoCardless doesn't return
-    // these on the requisition payload itself.
-    const out: AggregatorAccount[] = [];
-    for (const accountId of requisition.accounts) {
-      const detail = await getJson<RawAccountDetailsWrapper>(
-        `/accounts/${encodeURIComponent(accountId)}/details/`,
-        access,
-      );
-      out.push({
-        aggregatorAccountRef: accountId,
-        iban: detail.account.iban ?? null,
-        currency: detail.account.currency ?? 'GBP',
-        ownerName: detail.account.ownerName ?? null,
-        product: detail.account.product ?? detail.account.name ?? detail.account.cashAccountType ?? null,
-      });
-    }
-    return out;
+    // these on the requisition payload itself. Parallel because this
+    // is a once-per-connect call (not the daily sync), so the
+    // rate-limit budget is not a concern here.
+    return Promise.all(
+      requisition.accounts.map(async (accountId) => {
+        const detail = await getJson<RawAccountDetailsWrapper>(
+          `/accounts/${encodeURIComponent(accountId)}/details/`,
+          access,
+        );
+        return {
+          aggregatorAccountRef: accountId,
+          iban: detail.account.iban ?? null,
+          currency: detail.account.currency ?? 'GBP',
+          ownerName: detail.account.ownerName ?? null,
+          product: detail.account.product ?? detail.account.name ?? detail.account.cashAccountType ?? null,
+        };
+      }),
+    );
   },
 
   async listTransactions(input: ListTransactionsInput): Promise<AggregatorTransaction[]> {
@@ -377,10 +379,13 @@ export const gocardless: BankingAggregator = {
 
     const settled = raw.transactions.booked.map((t) => normaliseTxn(t, 'settled'));
     const pending = raw.transactions.pending.map((t) => normaliseTxn(t, 'pending'));
-    // Settled before pending so when both lists contain the same id
-    // (rare; happens in the milliseconds around the booking flip), the
-    // settled record wins downstream.
-    return [...settled, ...pending];
+    // Pending first, settled second. Downstream consumers do
+    // last-write-wins (Map.set keyed by aggregatorTxnId, or an UPSERT
+    // loop on provider_txn_id), so the trailing item with a given id
+    // wins. Putting settled last guarantees the settled record is the
+    // final state when both lists carry the same id during the
+    // milliseconds around a booking flip.
+    return [...pending, ...settled];
   },
 };
 

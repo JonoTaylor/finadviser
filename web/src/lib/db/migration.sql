@@ -759,13 +759,16 @@ ALTER TABLE transaction_metadata
 -- keeps it forward-compatible for future aggregator types without
 -- another schema change. The enum is dropped only if no rows still
 -- reference it, which is true once the column type is TEXT.
-ALTER TABLE providers
-    ALTER COLUMN aggregator TYPE TEXT USING aggregator::text;
+-- Drop the enum-typed default first; ALTER COLUMN ... TYPE doesn't
+-- always re-cast the column default expression, which trips the
+-- migration on a fresh deploy. Re-set as a plain TEXT literal after
+-- the column is converted.
+ALTER TABLE providers ALTER COLUMN aggregator DROP DEFAULT;
+ALTER TABLE providers ALTER COLUMN aggregator TYPE TEXT USING aggregator::text;
+ALTER TABLE providers ALTER COLUMN aggregator SET DEFAULT 'gocardless_bad';
 
 -- providers.aggregator was the only column that referenced the enum,
--- so the type is now unused and safe to drop. CASCADE just in case
--- a future migration left a stray dependency: we own the type, and
--- if any other column still uses it that's a bug we want to surface.
+-- so the type is now unused and safe to drop.
 DROP TYPE IF EXISTS banking_aggregator;
 
 DO $$ BEGIN

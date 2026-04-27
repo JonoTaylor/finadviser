@@ -86,7 +86,7 @@ export default function TransactionTable({
                 const amount = parseAmount(entry.entries_summary);
                 const numAmount = parseFloat(amount);
                 const catName = entry.category_name || 'Uncategorized';
-                const catColor = getCategoryColor(catName);
+                const cat = getCategoryColor(catName);
                 return (
                   <TableRow
                     key={entry.id}
@@ -103,8 +103,8 @@ export default function TransactionTable({
                         label={catName}
                         size="small"
                         sx={{
-                          bgcolor: alpha(catColor, 0.1),
-                          color: catColor,
+                          bgcolor: alpha(cat.fill, 0.1),
+                          color: cat.ink,
                           fontWeight: 500,
                         }}
                       />

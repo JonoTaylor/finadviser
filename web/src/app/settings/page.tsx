@@ -1,7 +1,6 @@
 'use client';
 
-import { Box, Typography, Card, CardContent, Button, Stack, Chip, Divider } from '@mui/material';
-import { alpha } from '@mui/material/styles';
+import { Box, Typography, Card, CardContent, Button, Stack, Divider } from '@mui/material';
 import DownloadRoundedIcon from '@mui/icons-material/DownloadRounded';
 import KeyRoundedIcon from '@mui/icons-material/KeyRounded';
 import CurrencyPoundRoundedIcon from '@mui/icons-material/CurrencyPoundRounded';
@@ -11,6 +10,7 @@ import MemoryRoundedIcon from '@mui/icons-material/MemoryRounded';
 import RulesManager from '@/components/settings/RulesManager';
 import AiModelSelector from '@/components/settings/AiModelSelector';
 import AiMemoryManager from '@/components/settings/AiMemoryManager';
+import { softTokens } from '@/theme/theme';
 
 export default function SettingsPage() {
   const handleExportCSV = () => { window.open('/api/export/csv', '_blank'); };
@@ -28,7 +28,8 @@ export default function SettingsPage() {
       <Stack spacing={2.5}>
         <SettingsCard
           icon={<KeyRoundedIcon />}
-          iconColor="#60A5FA"
+          tile={softTokens.lavender.main}
+          ink={softTokens.lavender.ink}
           title="AI Model"
         >
           <AiModelSelector />
@@ -42,7 +43,8 @@ export default function SettingsPage() {
 
         <SettingsCard
           icon={<MemoryRoundedIcon />}
-          iconColor="#B8A9E8"
+          tile={softTokens.lavender.main}
+          ink={softTokens.lavender.ink}
           title="AI Memory"
         >
           <AiMemoryManager />
@@ -50,7 +52,8 @@ export default function SettingsPage() {
 
         <SettingsCard
           icon={<CurrencyPoundRoundedIcon />}
-          iconColor="#FB923C"
+          tile={softTokens.lemon.main}
+          ink={softTokens.lemon.ink}
           title="Currency"
         >
           <Typography variant="body2" color="text.secondary">
@@ -62,7 +65,8 @@ export default function SettingsPage() {
 
         <SettingsCard
           icon={<StorageRoundedIcon />}
-          iconColor="#4ADE80"
+          tile={softTokens.mint.main}
+          ink={softTokens.mint.ink}
           title="Database"
         >
           <Typography variant="body2" color="text.secondary">
@@ -89,7 +93,8 @@ export default function SettingsPage() {
 
         <SettingsCard
           icon={<InfoRoundedIcon />}
-          iconColor="#818CF8"
+          tile={softTokens.fog}
+          ink={softTokens.lavender.ink}
           title="About"
         >
           <Typography variant="body2" fontWeight={600}>FinAdviser v0.1.0</Typography>
@@ -108,12 +113,14 @@ export default function SettingsPage() {
 
 function SettingsCard({
   icon,
-  iconColor,
+  tile,
+  ink,
   title,
   children,
 }: {
   icon: React.ReactNode;
-  iconColor: string;
+  tile: string;
+  ink: string;
   title: string;
   children: React.ReactNode;
 }) {
@@ -125,8 +132,8 @@ function SettingsCard({
             sx={{
               width: 36, height: 36, borderRadius: 2.5,
               display: 'flex', alignItems: 'center', justifyContent: 'center',
-              bgcolor: alpha(iconColor, 0.12),
-              color: iconColor,
+              bgcolor: tile,
+              color: ink,
               '& svg': { fontSize: 20 },
             }}
           >

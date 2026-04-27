@@ -219,6 +219,68 @@ VALUES
     ('Property Expenses', 'EXPENSE', true, 'Itemised property/BTL expenses (category provides the breakdown on the tax-year report)')
 ON CONFLICT (name) DO UPDATE SET is_system = true;
 
+-- ai_tips, budgets, savings_goals: tables that were declared in
+-- schema.ts but never had a corresponding CREATE TABLE in this
+-- migration file. Without them the AI's add_tip / set_budget /
+-- set_savings_goal tools all 500 with `relation … does not exist`.
+-- Idempotent — safe to run repeatedly even on databases that
+-- already happen to have them.
+--
+-- Created BEFORE the category-dedup DO block below because that
+-- block references `budgets` (re-pointing FKs from duplicate
+-- categories). On a fresh database without `budgets`, the dedup
+-- block would fail before reaching a CREATE TABLE placed at the
+-- bottom of the file — so the tables have to come first.
+
+DO $$ BEGIN
+    CREATE TYPE tip_type AS ENUM ('tip', 'warning', 'insight');
+EXCEPTION
+    WHEN duplicate_object THEN null;
+END $$;
+
+CREATE TABLE IF NOT EXISTS ai_tips (
+    id SERIAL PRIMARY KEY,
+    content TEXT NOT NULL,
+    tip_type tip_type NOT NULL DEFAULT 'tip',
+    priority INTEGER NOT NULL DEFAULT 0,
+    created_at TIMESTAMP NOT NULL DEFAULT now(),
+    dismissed_at TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_ai_tips_active
+    ON ai_tips(priority DESC, created_at DESC)
+    WHERE dismissed_at IS NULL;
+
+CREATE TABLE IF NOT EXISTS budgets (
+    id SERIAL PRIMARY KEY,
+    category_id INTEGER NOT NULL UNIQUE REFERENCES categories(id),
+    monthly_limit TEXT NOT NULL,
+    effective_from TEXT NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT now(),
+    updated_at TIMESTAMP NOT NULL DEFAULT now()
+);
+
+DO $$ BEGIN
+    CREATE TYPE savings_goal_status AS ENUM ('active', 'completed', 'cancelled');
+EXCEPTION
+    WHEN duplicate_object THEN null;
+END $$;
+
+CREATE TABLE IF NOT EXISTS savings_goals (
+    id SERIAL PRIMARY KEY,
+    name TEXT NOT NULL,
+    target_amount TEXT NOT NULL,
+    current_amount TEXT NOT NULL DEFAULT '0',
+    target_date TEXT,
+    account_id INTEGER REFERENCES accounts(id),
+    status savings_goal_status NOT NULL DEFAULT 'active',
+    created_at TIMESTAMP NOT NULL DEFAULT now(),
+    updated_at TIMESTAMP NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_savings_goals_status
+    ON savings_goals(status);
+
 -- One-shot cleanup of duplicate root categories accumulated by the
 -- pre-PR-6 non-idempotent seed (Postgres ON CONFLICT didn't dedupe rows
 -- where parent_id IS NULL). For each set of same-named root duplicates:
@@ -363,59 +425,3 @@ SELECT child.child_name, p.id, true
     ORDER BY id ASC LIMIT 1
  ) AS p
 ON CONFLICT (name, parent_id) DO NOTHING;
-
--- ai_tips, budgets, savings_goals: tables that were declared in
--- schema.ts but never had a corresponding CREATE TABLE in this
--- migration file. Without them the AI's add_tip / set_budget /
--- set_savings_goal tools all 500 with `relation … does not exist`.
--- Idempotent — safe to run repeatedly even on databases that
--- already happen to have them.
-
-DO $$ BEGIN
-    CREATE TYPE tip_type AS ENUM ('tip', 'warning', 'insight');
-EXCEPTION
-    WHEN duplicate_object THEN null;
-END $$;
-
-CREATE TABLE IF NOT EXISTS ai_tips (
-    id SERIAL PRIMARY KEY,
-    content TEXT NOT NULL,
-    tip_type tip_type NOT NULL DEFAULT 'tip',
-    priority INTEGER NOT NULL DEFAULT 0,
-    created_at TIMESTAMP NOT NULL DEFAULT now(),
-    dismissed_at TIMESTAMP
-);
-
-CREATE INDEX IF NOT EXISTS idx_ai_tips_active
-    ON ai_tips(priority DESC, created_at DESC)
-    WHERE dismissed_at IS NULL;
-
-CREATE TABLE IF NOT EXISTS budgets (
-    id SERIAL PRIMARY KEY,
-    category_id INTEGER NOT NULL UNIQUE REFERENCES categories(id),
-    monthly_limit TEXT NOT NULL,
-    effective_from TEXT NOT NULL,
-    created_at TIMESTAMP NOT NULL DEFAULT now(),
-    updated_at TIMESTAMP NOT NULL DEFAULT now()
-);
-
-DO $$ BEGIN
-    CREATE TYPE savings_goal_status AS ENUM ('active', 'completed', 'cancelled');
-EXCEPTION
-    WHEN duplicate_object THEN null;
-END $$;
-
-CREATE TABLE IF NOT EXISTS savings_goals (
-    id SERIAL PRIMARY KEY,
-    name TEXT NOT NULL,
-    target_amount TEXT NOT NULL,
-    current_amount TEXT NOT NULL DEFAULT '0',
-    target_date TEXT,
-    account_id INTEGER REFERENCES accounts(id),
-    status savings_goal_status NOT NULL DEFAULT 'active',
-    created_at TIMESTAMP NOT NULL DEFAULT now(),
-    updated_at TIMESTAMP NOT NULL DEFAULT now()
-);
-
-CREATE INDEX IF NOT EXISTS idx_savings_goals_status
-    ON savings_goals(status);

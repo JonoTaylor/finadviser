@@ -75,6 +75,18 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
         { status: 200 },
       );
     }
+    // Decode-side errors (decryption, JSON parse, schema validation)
+    // are user-actionable - the message itself tells them what to do
+    // (e.g. "OAuth client must be Confidential"). Surface as a 200
+    // with the status='error' shape so the SCA-pending page can
+    // render the message verbatim instead of showing a generic
+    // "something went wrong" through the 500 path.
+    if (err instanceof Error && err.message.startsWith('Decrypted Monzo token bundle')) {
+      return NextResponse.json(
+        { status: 'error', message: err.message },
+        { status: 200 },
+      );
+    }
     console.error('SCA poll failed:', err);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }

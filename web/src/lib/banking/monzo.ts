@@ -105,8 +105,22 @@ export function decodeTokenBundle(raw: Buffer | Uint8Array | string | null | und
 
   const json = decryptSecret(buf);
   const parsed = JSON.parse(json) as MonzoTokenBundle;
-  if (typeof parsed.accessToken !== 'string' || typeof parsed.refreshToken !== 'string') {
-    throw new Error('Decrypted Monzo token bundle is malformed');
+  // Specific error per missing field so the user / log reader can
+  // act on it. Missing refreshToken in particular is the canonical
+  // signal that the OAuth client wasn't marked Confidential at
+  // create time (Monzo only issues refresh tokens to confidential
+  // clients), which is by far the most common failure mode at this
+  // stage.
+  if (typeof parsed.accessToken !== 'string') {
+    throw new Error('Decrypted Monzo token bundle is missing accessToken (corrupt secret or schema drift)');
+  }
+  if (typeof parsed.refreshToken !== 'string') {
+    throw new Error(
+      'Decrypted Monzo token bundle is missing refreshToken. '
+      + 'This usually means the OAuth client at https://developers.monzo.com/apps is not marked Confidential - '
+      + 'refresh tokens are only issued to confidential clients. '
+      + 'Set the client to Confidential, then disconnect + reconnect in /settings/connections.',
+    );
   }
   return parsed;
 }

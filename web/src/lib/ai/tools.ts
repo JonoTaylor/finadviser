@@ -125,7 +125,7 @@ export const TOOL_DEFINITIONS: Tool[] = [
   {
     name: 'list_uncategorized_in_month',
     description:
-      'List uncategorised journal entries within a specific YYYY-MM month, with their id / date / description / amount, plus rich metadata when present (merchant name, emoji, transaction type, bank category, user notes, address — captured at import time for Monzo and similar rich exports). Use after picking a month from list_months_needing_categorization to see exactly what needs review. ALWAYS prefer merchant + bank-category over the raw description — the description is usually a cryptic bank reference like "tx_0000Ah…" while merchant is human-readable.',
+      'List uncategorised journal entries within a specific YYYY-MM month, with their id / date / description / amounts (a pipe-delimited per-account breakdown like "Bank:-12.34|Uncategorized Expense:12.34", not a single scalar), plus rich metadata when present (merchant name, emoji, transaction type, bank category, user notes, address — captured at import time for Monzo and similar rich exports). Use after picking a month from list_months_needing_categorization to see exactly what needs review. ALWAYS prefer merchant + bank-category over the raw description — the description is usually a cryptic bank reference like "tx_0000Ah…" while merchant is human-readable.',
     input_schema: {
       type: 'object' as const,
       properties: {
@@ -535,7 +535,7 @@ async function executeSearchTransactions(input: Record<string, unknown>) {
     emoji: e.merchant_emoji ?? undefined,
     type: e.transaction_type ?? undefined,
     bankCategory: e.bank_category ?? undefined,
-    notes: e.metadata_notes ?? undefined,
+    notes: e.notes ?? undefined,
     address: e.address ?? undefined,
   }));
 }

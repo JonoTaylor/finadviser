@@ -158,7 +158,7 @@ export const journalRepo = {
              c.name AS category_name,
              STRING_AGG(a.name || ':' || be.amount, '|' ORDER BY CASE a.account_type WHEN 'ASSET' THEN 0 ELSE 1 END) AS entries_summary,
              tm.merchant_name, tm.merchant_emoji, tm.transaction_type,
-             tm.bank_category, tm.notes AS metadata_notes, tm.address
+             tm.bank_category, tm.notes, tm.address
       FROM journal_entries je
       LEFT JOIN categories c ON c.id = je.category_id
       LEFT JOIN book_entries be ON be.journal_entry_id = je.id

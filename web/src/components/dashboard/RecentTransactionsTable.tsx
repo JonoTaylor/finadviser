@@ -83,7 +83,7 @@ export default function RecentTransactionsTable({ entries }: { entries: Entry[] 
                 const amount = parseAmount(entry.entries_summary);
                 const numAmount = parseFloat(amount);
                 const catName = entry.category_name || 'Uncategorized';
-                const catColor = getCategoryColor(catName);
+                const cat = getCategoryColor(catName);
                 return (
                   <TableRow key={entry.id}>
                     <TableCell sx={{ whiteSpace: 'nowrap', color: 'text.secondary' }}>{entry.date}</TableCell>
@@ -93,8 +93,8 @@ export default function RecentTransactionsTable({ entries }: { entries: Entry[] 
                         label={catName}
                         size="small"
                         sx={{
-                          bgcolor: alpha(catColor, 0.14),
-                          color: catColor,
+                          bgcolor: alpha(cat.fill, 0.14),
+                          color: cat.ink,
                           fontWeight: 500,
                         }}
                       />

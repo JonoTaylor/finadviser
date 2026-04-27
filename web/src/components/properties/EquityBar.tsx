@@ -26,10 +26,17 @@ interface OwnerEquity {
 }
 
 export default function EquityBar({ owners }: { owners: OwnerEquity[] }) {
+  // Sort by ownerId before indexing into BANDS so colours stay
+  // consistent across renders — propertyRepo.getOwnership has no
+  // ORDER BY, so the prop order isn't otherwise guaranteed to be
+  // stable. Sorting also has the desirable property that adding a
+  // new owner appends rather than reshuffling existing ones.
+  const sorted = [...owners].sort((a, b) => a.ownerId - b.ownerId);
+
   return (
     <Box>
       <Box sx={{ display: 'flex', height: 32, borderRadius: 2, overflow: 'hidden', mb: 2 }}>
-        {owners.map((owner, i) => {
+        {sorted.map((owner, i) => {
           const width = Math.max(owner.equityPct, 1);
           const band = BANDS[i % BANDS.length];
           return (
@@ -58,7 +65,7 @@ export default function EquityBar({ owners }: { owners: OwnerEquity[] }) {
         })}
       </Box>
       <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
-        {owners.map((owner, i) => (
+        {sorted.map((owner, i) => (
           <Box key={owner.ownerId} sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
             <Box sx={{ width: 12, height: 12, borderRadius: '50%', bgcolor: BANDS[i % BANDS.length].fill }} />
             <Typography variant="caption">{owner.name}</Typography>

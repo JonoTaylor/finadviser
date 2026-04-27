@@ -1,21 +1,28 @@
 import { softTokens } from '@/theme/theme';
 
-// 10 visually distinct hues drawn from the Soft Surfaces v2 palette.
-// Used as the dot / chip / bar colour for category identification on
-// white pillow surfaces (categories are also tinted with `alpha(c,
-// 0.14)` for fills, so `.deep` variants give a readable but soft
-// look without overpowering the surface).
-const CATEGORY_COLORS: readonly string[] = [
-  softTokens.lavender.deep,
-  softTokens.mint.deep,
-  softTokens.peach.deep,
-  softTokens.lemon.deep,
-  softTokens.lavender.ink,
-  softTokens.mint.ink,
-  softTokens.peach.ink,
-  softTokens.lemon.ink,
-  softTokens.lavender.main,
-  softTokens.mint.main,
+export interface CategoryColor {
+  /** Saturated tone — use as the fill for dots / bars / `alpha(fill, 0.1-0.14)` chip backgrounds. */
+  fill: string;
+  /** Dark companion guaranteed to clear WCAG AA on white / pastel surfaces — use for chip text. */
+  ink: string;
+}
+
+// 8 distinct (fill, ink) pairings drawn from the Soft Surfaces v2
+// palette. Every fill is either a `.deep` saturated tone or an `.ink`
+// darker variant — both readable as text on white, and both
+// recognisable as a solid dot/bar at full opacity. The duplicated
+// inks (each family contributes two entries) are intentional:
+// callers use `ink` only as a text colour on a pale fill, where
+// matching the family reads as cohesive.
+const PALETTE: readonly CategoryColor[] = [
+  { fill: softTokens.mint.deep,     ink: softTokens.mint.ink },
+  { fill: softTokens.lavender.deep, ink: softTokens.lavender.ink },
+  { fill: softTokens.peach.deep,    ink: softTokens.peach.ink },
+  { fill: softTokens.lemon.deep,    ink: softTokens.lemon.ink },
+  { fill: softTokens.mint.ink,      ink: softTokens.mint.ink },
+  { fill: softTokens.lavender.ink,  ink: softTokens.lavender.ink },
+  { fill: softTokens.peach.ink,     ink: softTokens.peach.ink },
+  { fill: softTokens.lemon.ink,     ink: softTokens.lemon.ink },
 ];
 
 function hashString(str: string): number {
@@ -27,7 +34,7 @@ function hashString(str: string): number {
   return Math.abs(hash);
 }
 
-export function getCategoryColor(categoryName: string): string {
-  const index = hashString(categoryName) % CATEGORY_COLORS.length;
-  return CATEGORY_COLORS[index];
+export function getCategoryColor(categoryName: string): CategoryColor {
+  const index = hashString(categoryName) % PALETTE.length;
+  return PALETTE[index];
 }

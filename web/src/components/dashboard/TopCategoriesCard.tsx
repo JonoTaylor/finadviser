@@ -109,7 +109,7 @@ export default function TopCategoriesCard({ spending }: { spending: SpendingRow[
               const previous = prevByCategory.get(cat) ?? new Decimal(0);
               const delta = amount.minus(previous);
               const pct = topAmount.lte(0) ? 0 : amount.div(topAmount).mul(100).toNumber();
-              const color = getCategoryColor(cat);
+              const { fill } = getCategoryColor(cat);
               const deltaIsZero = delta.abs().lt('0.01');
               const deltaUp = delta.gt(0);
               const isIncome = typeByCategory.get(cat) === 'INCOME';
@@ -124,7 +124,7 @@ export default function TopCategoriesCard({ spending }: { spending: SpendingRow[
                           width: 8,
                           height: 8,
                           borderRadius: '50%',
-                          bgcolor: color,
+                          bgcolor: fill,
                           flexShrink: 0,
                         }}
                       />
@@ -152,13 +152,13 @@ export default function TopCategoriesCard({ spending }: { spending: SpendingRow[
                       )}
                     </Box>
                   </Box>
-                  <Box sx={{ ml: 2.5, height: 6, borderRadius: 3, bgcolor: alpha(color, 0.14) }}>
+                  <Box sx={{ ml: 2.5, height: 6, borderRadius: 3, bgcolor: alpha(fill, 0.14) }}>
                     <Box
                       sx={{
                         width: `${pct}%`,
                         height: '100%',
                         borderRadius: 3,
-                        bgcolor: color,
+                        bgcolor: fill,
                         transition: 'width 0.4s ease',
                       }}
                     />

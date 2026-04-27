@@ -82,7 +82,27 @@ export function encodeTokenBundle(bundle: MonzoTokenBundle): Buffer {
   return encryptSecret(JSON.stringify(bundle));
 }
 
-export function decodeTokenBundle(buf: Buffer): MonzoTokenBundle {
+export function decodeTokenBundle(raw: Buffer | Uint8Array | string | null | undefined): MonzoTokenBundle {
+  // The neon-http transport surfaces BYTEA columns as a Postgres-
+  // wire-format hex-prefixed string ("\xABCD...") when read via raw
+  // db.execute(sql`...`); only the typed Drizzle ORM path runs the
+  // bytea-customType decoder. Accept all three shapes here so
+  // callers don't have to know which path they took.
+  if (raw === null || raw === undefined) {
+    throw new Error('Decrypted Monzo token bundle is empty (no encrypted_secret recorded)');
+  }
+  let buf: Buffer;
+  if (Buffer.isBuffer(raw)) {
+    buf = raw;
+  } else if (raw instanceof Uint8Array) {
+    buf = Buffer.from(raw);
+  } else if (typeof raw === 'string') {
+    const hex = raw.startsWith('\\x') ? raw.slice(2) : raw;
+    buf = Buffer.from(hex, 'hex');
+  } else {
+    throw new Error(`Unsupported encrypted_secret driver value type: ${typeof raw}`);
+  }
+
   const json = decryptSecret(buf);
   const parsed = JSON.parse(json) as MonzoTokenBundle;
   if (typeof parsed.accessToken !== 'string' || typeof parsed.refreshToken !== 'string') {

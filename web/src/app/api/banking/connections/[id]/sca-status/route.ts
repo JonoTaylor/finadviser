@@ -39,15 +39,17 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
 
     // Read the encrypted token bundle. listConnections doesn't
     // include encrypted_secret (it's BYTEA), so fetch directly here.
+    // decodeTokenBundle handles the multiple shapes that Neon HTTP
+    // returns BYTEA in (Buffer / Uint8Array / hex-prefixed string).
     const db = getDb();
     const rows = await db.execute(sql`
       SELECT encrypted_secret FROM connections WHERE id = ${connectionId} LIMIT 1
     `);
-    const raw = rows.rows[0]?.encrypted_secret as Buffer | Uint8Array | null;
-    if (!raw) {
+    const raw = rows.rows[0]?.encrypted_secret;
+    if (raw === null || raw === undefined) {
       return NextResponse.json({ status: 'error', message: 'No tokens recorded for this connection. Reconnect.' }, { status: 200 });
     }
-    const bundle = decodeTokenBundle(Buffer.isBuffer(raw) ? raw : Buffer.from(raw));
+    const bundle = decodeTokenBundle(raw as Buffer | Uint8Array | string);
 
     const ok = await checkMonzoAuth(bundle.accessToken);
     if (!ok) {

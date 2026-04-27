@@ -105,10 +105,14 @@ async function readMonzoBundle(connectionId: number): Promise<MonzoTokenBundle> 
   const rows = await db.execute(sql`
     SELECT encrypted_secret FROM connections WHERE id = ${connectionId} LIMIT 1
   `);
-  const raw = rows.rows[0]?.encrypted_secret as Buffer | Uint8Array | null;
-  if (!raw) throw new Error(`Connection ${connectionId} has no encrypted_secret recorded`);
-  const buf = Buffer.isBuffer(raw) ? raw : Buffer.from(raw);
-  return decodeTokenBundle(buf);
+  const raw = rows.rows[0]?.encrypted_secret;
+  if (raw === null || raw === undefined) {
+    throw new Error(`Connection ${connectionId} has no encrypted_secret recorded`);
+  }
+  // decodeTokenBundle accepts Buffer / Uint8Array / hex-prefixed
+  // string, which is what neon-http hands back from a raw db.execute
+  // against a BYTEA column.
+  return decodeTokenBundle(raw as Buffer | Uint8Array | string);
 }
 
 async function rotateAndPersist(connectionId: number, bundle: MonzoTokenBundle): Promise<string> {

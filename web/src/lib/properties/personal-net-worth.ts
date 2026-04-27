@@ -156,8 +156,9 @@ export async function calculatePersonalNetWorth(ownerId: number): Promise<Person
  * with one SELECT. This sidesteps an earlier multi-data-modifying-CTE
  * shape that the neon-http transport rejected with HTTP 400. The
  * read-then-write race window (between the live balance read and the
- * delta insert) is still narrow because both happen within the same
- * function invocation; the validation read above is purely a safety
+ * delta insert) is closed by locking the account row inside the
+ * function (FOR UPDATE), which serializes concurrent invocations on
+ * the same account. The validation read above is purely a safety
  * check.
  */
 export async function setInvestmentBalance(params: {

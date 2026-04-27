@@ -459,6 +459,18 @@ DECLARE
     v_delta      NUMERIC;
     v_journal_id INTEGER;
 BEGIN
+    -- Serialize concurrent invocations on the same account. Without
+    -- this lock, two concurrent set_investment_balance calls under
+    -- READ COMMITTED would each read the same balance, compute the
+    -- same delta, and write twice. The lock makes the read + write
+    -- below logically atomic against other invocations of this
+    -- function. Other unrelated write paths (CSV import, manual
+    -- journals) don't take this lock, but they don't race with the
+    -- balance read here in any way that matters: this function
+    -- recomputes the live balance immediately after acquiring the
+    -- lock, so anything those other paths landed will be picked up.
+    PERFORM 1 FROM accounts WHERE id = p_account_id FOR UPDATE;
+
     SELECT COALESCE(SUM(amount::numeric), 0) INTO v_bal
       FROM book_entries
      WHERE account_id = p_account_id;

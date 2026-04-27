@@ -45,7 +45,7 @@ export const TOOL_DEFINITIONS: Tool[] = [
   {
     name: 'search_transactions',
     description:
-      'Search and filter journal entries / transactions. Returns date, description, category, and amounts. Use for analysing spending patterns, finding specific transactions, or reviewing recent activity.',
+      'Search and filter journal entries / transactions. Returns date, description, category, amounts, plus rich metadata when present (merchant name, emoji, transaction type, bank category, user notes, address — populated for Monzo and any other bank with a "rich" import profile). Use for analysing spending patterns, finding specific transactions, or reviewing recent activity. Prefer the merchant + bank-category fields over the raw description when categorising — the description is often a cryptic bank reference, while the merchant name is human-readable.',
     input_schema: {
       type: 'object' as const,
       properties: {
@@ -103,7 +103,7 @@ export const TOOL_DEFINITIONS: Tool[] = [
   {
     name: 'list_uncategorized',
     description:
-      'List uncategorized transactions with their id, date, description, and amount. Use this before auto_categorize to show the user what needs attention, or to review what is uncategorized.',
+      'List uncategorized transactions with their id, date, description, amount, plus rich metadata when present (merchant name, emoji, transaction type, bank category, user notes, address). Use this before auto_categorize to show the user what needs attention, or to review what is uncategorized. The merchant + bank-category fields are usually a much better basis for categorisation than the raw description.',
     input_schema: {
       type: 'object' as const,
       properties: {
@@ -125,7 +125,7 @@ export const TOOL_DEFINITIONS: Tool[] = [
   {
     name: 'list_uncategorized_in_month',
     description:
-      'List uncategorised journal entries within a specific YYYY-MM month, with their id / date / description / amount. Use after picking a month from list_months_needing_categorization to see exactly what needs review.',
+      'List uncategorised journal entries within a specific YYYY-MM month, with their id / date / description / amounts (a pipe-delimited per-account breakdown like "Bank:-12.34|Uncategorized Expense:12.34", not a single scalar), plus rich metadata when present (merchant name, emoji, transaction type, bank category, user notes, address — captured at import time for Monzo and similar rich exports). Use after picking a month from list_months_needing_categorization to see exactly what needs review. ALWAYS prefer merchant + bank-category over the raw description — the description is usually a cryptic bank reference like "tx_0000Ah…" while merchant is human-readable.',
     input_schema: {
       type: 'object' as const,
       properties: {
@@ -520,12 +520,23 @@ async function executeSearchTransactions(input: Record<string, unknown>) {
     categoryId: input.category_id as number | undefined,
     limit,
   });
+  // Surface the rich metadata fields (Monzo merchant name / emoji /
+  // type / bank category / user notes / address) when present, so the
+  // AI has enough context to identify cryptic bank descriptions.
+  // `undefined` keys are dropped on JSON serialisation, so legacy
+  // entries without metadata stay compact.
   return (entries as Record<string, unknown>[]).map((e) => ({
     id: e.id,
     date: e.date,
     description: e.description,
     category: e.category_name ?? 'Uncategorised',
     amounts: e.entries_summary,
+    merchant: e.merchant_name ?? undefined,
+    emoji: e.merchant_emoji ?? undefined,
+    type: e.transaction_type ?? undefined,
+    bankCategory: e.bank_category ?? undefined,
+    notes: e.notes ?? undefined,
+    address: e.address ?? undefined,
   }));
 }
 
@@ -621,6 +632,15 @@ async function executeListUncategorizedInMonth(input: Record<string, unknown>) {
       date: e.date,
       description: e.description,
       amounts: e.entries_summary,
+      // Surface the import-time metadata sidecar (PR #23 +
+      // backfilled via PR #25). Without these the AI is matching
+      // categories on the cryptic bank reference alone.
+      merchant: e.merchant_name ?? undefined,
+      emoji: e.merchant_emoji ?? undefined,
+      type: e.transaction_type ?? undefined,
+      bankCategory: e.bank_category ?? undefined,
+      notes: e.notes ?? undefined,
+      address: e.address ?? undefined,
     })),
   };
 }
@@ -654,6 +674,12 @@ async function executeListUncategorized(input: Record<string, unknown>) {
     date: e.date,
     description: e.description,
     amount: e.entries_summary,
+    merchant: e.merchant_name ?? undefined,
+    emoji: e.merchant_emoji ?? undefined,
+    type: e.transaction_type ?? undefined,
+    bankCategory: e.bank_category ?? undefined,
+    notes: e.notes ?? undefined,
+    address: e.address ?? undefined,
   }));
 }
 

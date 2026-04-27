@@ -156,13 +156,18 @@ export const journalRepo = {
     const rows = await db.execute(sql`
       SELECT je.id, je.date, je.description, je.reference, je.category_id,
              c.name AS category_name,
-             STRING_AGG(a.name || ':' || be.amount, '|' ORDER BY CASE a.account_type WHEN 'ASSET' THEN 0 ELSE 1 END) AS entries_summary
+             STRING_AGG(a.name || ':' || be.amount, '|' ORDER BY CASE a.account_type WHEN 'ASSET' THEN 0 ELSE 1 END) AS entries_summary,
+             tm.merchant_name, tm.merchant_emoji, tm.transaction_type,
+             tm.bank_category, tm.notes, tm.address
       FROM journal_entries je
       LEFT JOIN categories c ON c.id = je.category_id
       LEFT JOIN book_entries be ON be.journal_entry_id = je.id
       LEFT JOIN accounts a ON a.id = be.account_id
+      LEFT JOIN transaction_metadata tm ON tm.journal_entry_id = je.id
       WHERE ${whereClause}
-      GROUP BY je.id, je.date, je.description, je.reference, je.category_id, c.name
+      GROUP BY je.id, je.date, je.description, je.reference, je.category_id, c.name,
+               tm.merchant_name, tm.merchant_emoji, tm.transaction_type,
+               tm.bank_category, tm.notes, tm.address
       ORDER BY je.date DESC, je.id DESC
       LIMIT ${limit} OFFSET ${offset}
     `);
@@ -242,11 +247,29 @@ export const journalRepo = {
 
   /**
    * All uncategorised journal entries within a YYYY-MM window, with
-   * the same `entries_summary` shape as `listUncategorizedWithAmounts`.
-   * The AI categorisation workflow uses this when it picks a month to
-   * review.
+   * the same `entries_summary` shape as `listUncategorizedWithAmounts`,
+   * plus any rich metadata captured at import time
+   * (transaction_metadata sidecar — Monzo merchant name / emoji /
+   * type / bank category / notes / address). The AI categorisation
+   * workflow uses this when it picks a month to review; without the
+   * metadata it can only see the often-cryptic bank description and
+   * has no chance of identifying recurring payees.
    */
-  async listUncategorizedInMonth(month: string, limit = 200): Promise<Array<{ id: number; date: string; description: string; entries_summary: string | null }>> {
+  async listUncategorizedInMonth(
+    month: string,
+    limit = 200,
+  ): Promise<Array<{
+    id: number;
+    date: string;
+    description: string;
+    entries_summary: string | null;
+    merchant_name: string | null;
+    merchant_emoji: string | null;
+    transaction_type: string | null;
+    bank_category: string | null;
+    notes: string | null;
+    address: string | null;
+  }>> {
     const db = getDb();
     // SARGable filter: prefix-match `je.date` (text, ISO YYYY-MM-DD)
     // with `month + '-%'` instead of wrapping the column in to_char.
@@ -254,20 +277,41 @@ export const journalRepo = {
     // full scan + per-row function call. Caller is responsible for
     // validating `month` against /^\d{4}-\d{2}$/ — done in the
     // tools.ts executor before reaching this repo.
+    //
+    // LEFT JOIN transaction_metadata so the rich fields (merchant
+    // name / emoji / type / bank category / user notes / address)
+    // are available to the AI categorisation workflow. Sparse —
+    // legacy imports without metadata return NULLs.
     const monthPrefix = `${month}-%`;
     const rows = await db.execute(sql`
       SELECT je.id, je.date, je.description,
-             STRING_AGG(a.name || ':' || be.amount, '|' ORDER BY CASE a.account_type WHEN 'ASSET' THEN 0 ELSE 1 END) AS entries_summary
+             STRING_AGG(a.name || ':' || be.amount, '|' ORDER BY CASE a.account_type WHEN 'ASSET' THEN 0 ELSE 1 END) AS entries_summary,
+             tm.merchant_name, tm.merchant_emoji, tm.transaction_type,
+             tm.bank_category, tm.notes, tm.address
       FROM journal_entries je
       LEFT JOIN book_entries be ON be.journal_entry_id = je.id
       LEFT JOIN accounts a ON a.id = be.account_id
+      LEFT JOIN transaction_metadata tm ON tm.journal_entry_id = je.id
       WHERE je.category_id IS NULL
         AND je.date LIKE ${monthPrefix}
-      GROUP BY je.id, je.date, je.description
+      GROUP BY je.id, je.date, je.description,
+               tm.merchant_name, tm.merchant_emoji, tm.transaction_type,
+               tm.bank_category, tm.notes, tm.address
       ORDER BY je.date ASC, je.id ASC
       LIMIT ${limit}
     `);
-    return rows.rows as Array<{ id: number; date: string; description: string; entries_summary: string | null }>;
+    return rows.rows as Array<{
+      id: number;
+      date: string;
+      description: string;
+      entries_summary: string | null;
+      merchant_name: string | null;
+      merchant_emoji: string | null;
+      transaction_type: string | null;
+      bank_category: string | null;
+      notes: string | null;
+      address: string | null;
+    }>;
   },
 
   /**
@@ -314,16 +358,32 @@ export const journalRepo = {
     const db = getDb();
     const rows = await db.execute(sql`
       SELECT je.id, je.date, je.description,
-             STRING_AGG(a.name || ':' || be.amount, '|' ORDER BY CASE a.account_type WHEN 'ASSET' THEN 0 ELSE 1 END) AS entries_summary
+             STRING_AGG(a.name || ':' || be.amount, '|' ORDER BY CASE a.account_type WHEN 'ASSET' THEN 0 ELSE 1 END) AS entries_summary,
+             tm.merchant_name, tm.merchant_emoji, tm.transaction_type,
+             tm.bank_category, tm.notes, tm.address
       FROM journal_entries je
       LEFT JOIN book_entries be ON be.journal_entry_id = je.id
       LEFT JOIN accounts a ON a.id = be.account_id
+      LEFT JOIN transaction_metadata tm ON tm.journal_entry_id = je.id
       WHERE je.category_id IS NULL
-      GROUP BY je.id, je.date, je.description
+      GROUP BY je.id, je.date, je.description,
+               tm.merchant_name, tm.merchant_emoji, tm.transaction_type,
+               tm.bank_category, tm.notes, tm.address
       ORDER BY je.date DESC
       LIMIT ${limit}
     `);
-    return rows.rows as Array<{ id: number; date: string; description: string; entries_summary: string | null }>;
+    return rows.rows as Array<{
+      id: number;
+      date: string;
+      description: string;
+      entries_summary: string | null;
+      merchant_name: string | null;
+      merchant_emoji: string | null;
+      transaction_type: string | null;
+      bank_category: string | null;
+      notes: string | null;
+      address: string | null;
+    }>;
   },
 
   async search(query: string, limit = 50) {

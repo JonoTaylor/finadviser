@@ -8,6 +8,7 @@ import { alpha } from '@mui/material/styles';
 import ReceiptLongRoundedIcon from '@mui/icons-material/ReceiptLongRounded';
 import { formatCurrency } from '@/lib/utils/formatting';
 import { getCategoryColor } from '@/lib/utils/category-colors';
+import { softTokens } from '@/theme/theme';
 
 interface Entry {
   id: number;
@@ -32,7 +33,6 @@ function parseAmount(summary: string | null): string {
     const num = parseFloat(amt);
     if (num !== 0) return amt;
   }
-  // Fallback: first non-zero amount
   for (const part of parts) {
     const idx = part.lastIndexOf(':');
     if (idx === -1) continue;
@@ -46,24 +46,23 @@ function parseAmount(summary: string | null): string {
 export default function RecentTransactionsTable({ entries }: { entries: Entry[] }) {
   return (
     <Card>
-      {/* Clean data treatment — no accent bar */}
       <CardContent>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
           <Box
             sx={{
               width: 36, height: 36, borderRadius: 2.5,
               display: 'flex', alignItems: 'center', justifyContent: 'center',
-              bgcolor: alpha('#B8A9E8', 0.12),
+              bgcolor: softTokens.lavender.main, color: softTokens.lavender.ink,
             }}
           >
-            <ReceiptLongRoundedIcon sx={{ fontSize: 20, color: 'secondary.main' }} />
+            <ReceiptLongRoundedIcon sx={{ fontSize: 20 }} />
           </Box>
           <Typography variant="h6">Recent Transactions</Typography>
         </Box>
 
         {entries.length === 0 ? (
           <Box sx={{ textAlign: 'center', py: 6 }}>
-            <ReceiptLongRoundedIcon sx={{ fontSize: 48, color: 'text.secondary', opacity: 0.3, mb: 1 }} />
+            <ReceiptLongRoundedIcon sx={{ fontSize: 48, color: 'text.disabled', mb: 1 }} />
             <Typography color="text.secondary">No transactions yet</Typography>
             <Typography variant="caption" color="text.secondary">
               Import a CSV or PDF to get started
@@ -72,9 +71,7 @@ export default function RecentTransactionsTable({ entries }: { entries: Entry[] 
         ) : (
           <Table size="small">
             <TableHead>
-              <TableRow
-                sx={{ bgcolor: alpha('#E8C547', 0.04) }}
-              >
+              <TableRow>
                 <TableCell>Date</TableCell>
                 <TableCell>Description</TableCell>
                 <TableCell>Category</TableCell>
@@ -82,18 +79,13 @@ export default function RecentTransactionsTable({ entries }: { entries: Entry[] 
               </TableRow>
             </TableHead>
             <TableBody>
-              {entries.map((entry, i) => {
+              {entries.map((entry) => {
                 const amount = parseAmount(entry.entries_summary);
                 const numAmount = parseFloat(amount);
                 const catName = entry.category_name || 'Uncategorized';
                 const catColor = getCategoryColor(catName);
                 return (
-                  <TableRow
-                    key={entry.id}
-                    sx={{
-                      bgcolor: i % 2 === 1 ? alpha('#fff', 0.015) : 'transparent',
-                    }}
-                  >
+                  <TableRow key={entry.id}>
                     <TableCell sx={{ whiteSpace: 'nowrap', color: 'text.secondary' }}>{entry.date}</TableCell>
                     <TableCell>{entry.description}</TableCell>
                     <TableCell>
@@ -101,7 +93,7 @@ export default function RecentTransactionsTable({ entries }: { entries: Entry[] 
                         label={catName}
                         size="small"
                         sx={{
-                          bgcolor: alpha(catColor, 0.1),
+                          bgcolor: alpha(catColor, 0.14),
                           color: catColor,
                           fontWeight: 500,
                         }}
@@ -110,7 +102,7 @@ export default function RecentTransactionsTable({ entries }: { entries: Entry[] 
                     <TableCell
                       align="right"
                       sx={{
-                        color: numAmount >= 0 ? 'success.main' : 'error.main',
+                        color: numAmount >= 0 ? softTokens.mint.ink : softTokens.peach.ink,
                         fontWeight: 600,
                         fontFeatureSettings: '"tnum"',
                         whiteSpace: 'nowrap',

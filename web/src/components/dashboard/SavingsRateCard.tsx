@@ -4,6 +4,7 @@ import { Card, CardContent, Typography, Box } from '@mui/material';
 import { alpha } from '@mui/material/styles';
 import SavingsRoundedIcon from '@mui/icons-material/SavingsRounded';
 import Decimal from 'decimal.js';
+import { softTokens, serifFamily } from '@/theme/theme';
 
 interface SpendingRow {
   month: string;
@@ -40,10 +41,11 @@ export default function SavingsRateCard({
   const clampedRate = Math.max(0, Math.min(100, savingsRate));
   const target = 20;
 
-  const color =
-    savingsRate < 10 ? '#FB7185' : savingsRate < 20 ? '#FBBF24' : '#4ADE80';
+  // Map rate -> mint (good) / lemon (getting there) / peach (off track)
+  const palette = savingsRate < 10
+    ? softTokens.peach
+    : savingsRate < 20 ? softTokens.lemon : softTokens.mint;
 
-  // Ring SVG params — larger ring
   const size = 88;
   const stroke = 7;
   const radius = (size - stroke) / 2;
@@ -51,60 +53,34 @@ export default function SavingsRateCard({
   const offset = circumference - (clampedRate / 100) * circumference;
 
   return (
-    <Card sx={{ height: '100%', position: 'relative', overflow: 'hidden' }}>
-      <Box
-        sx={{
-          position: 'absolute', top: 0, left: 0, right: 0, height: 3,
-          background: `linear-gradient(90deg, ${color}, ${alpha(color, 0.4)})`,
-        }}
-      />
+    <Card sx={{ height: '100%' }}>
       <CardContent>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
           <Box
             sx={{
               width: 36, height: 36, borderRadius: 2.5,
               display: 'flex', alignItems: 'center', justifyContent: 'center',
-              bgcolor: alpha(color, 0.12),
+              bgcolor: palette.main, color: palette.ink,
             }}
           >
-            <SavingsRoundedIcon sx={{ fontSize: 20, color }} />
+            <SavingsRoundedIcon sx={{ fontSize: 20 }} />
           </Box>
-          <Typography variant="subtitle2" color="text.secondary">Savings Rate</Typography>
+          <Typography variant="subtitle2">Savings Rate</Typography>
         </Box>
 
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 2.5 }}>
-          {/* Ring gauge with glow */}
           <Box sx={{ position: 'relative', width: size, height: size, flexShrink: 0 }}>
-            {/* Radial glow behind ring */}
-            <Box
-              sx={{
-                position: 'absolute',
-                inset: -8,
-                borderRadius: '50%',
-                background: `radial-gradient(circle, ${alpha(color, 0.12)} 0%, transparent 70%)`,
-              }}
-            />
-            <svg width={size} height={size} style={{ transform: 'rotate(-90deg)', position: 'relative' }}>
-              <defs>
-                <filter id="ring-glow">
-                  <feGaussianBlur stdDeviation="3" result="blur" />
-                  <feMerge>
-                    <feMergeNode in="blur" />
-                    <feMergeNode in="SourceGraphic" />
-                  </feMerge>
-                </filter>
-              </defs>
+            <svg width={size} height={size} style={{ transform: 'rotate(-90deg)' }}>
               <circle
                 cx={size / 2} cy={size / 2} r={radius}
-                fill="none" stroke={alpha(color, 0.1)} strokeWidth={stroke}
+                fill="none" stroke={alpha(palette.deep, 0.18)} strokeWidth={stroke}
               />
               <circle
                 cx={size / 2} cy={size / 2} r={radius}
-                fill="none" stroke={color} strokeWidth={stroke}
+                fill="none" stroke={palette.deep} strokeWidth={stroke}
                 strokeLinecap="round"
                 strokeDasharray={circumference}
                 strokeDashoffset={offset}
-                filter="url(#ring-glow)"
                 style={{ transition: 'stroke-dashoffset 0.6s ease' }}
               />
             </svg>
@@ -114,7 +90,16 @@ export default function SavingsRateCard({
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
               }}
             >
-              <Typography variant="h6" sx={{ fontWeight: 800, fontSize: '1.1rem', color }}>
+              <Typography
+                sx={{
+                  fontFamily: serifFamily,
+                  fontStyle: 'italic',
+                  fontWeight: 400,
+                  fontSize: '1.5rem',
+                  lineHeight: 1,
+                  color: palette.ink,
+                }}
+              >
                 {savingsRate.toFixed(0)}%
               </Typography>
             </Box>

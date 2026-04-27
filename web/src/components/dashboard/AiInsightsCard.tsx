@@ -9,6 +9,7 @@ import LightbulbRoundedIcon from '@mui/icons-material/LightbulbRounded';
 import WarningAmberRoundedIcon from '@mui/icons-material/WarningAmberRounded';
 import InsightsRoundedIcon from '@mui/icons-material/InsightsRounded';
 import useSWR from 'swr';
+import { softTokens } from '@/theme/theme';
 
 const fetcher = (url: string) => fetch(url).then(r => r.json());
 
@@ -19,10 +20,16 @@ interface Tip {
   createdAt: string;
 }
 
-const TYPE_CONFIG: Record<string, { icon: React.ReactNode; color: string }> = {
-  tip:     { icon: <LightbulbRoundedIcon sx={{ fontSize: 18 }} />,     color: '#E8C547' },
-  warning: { icon: <WarningAmberRoundedIcon sx={{ fontSize: 18 }} />,  color: '#FB7185' },
-  insight: { icon: <InsightsRoundedIcon sx={{ fontSize: 18 }} />,      color: '#60A5FA' },
+interface TypeStyle {
+  icon: React.ReactNode;
+  fill: string;
+  ink: string;
+}
+
+const TYPE_CONFIG: Record<string, TypeStyle> = {
+  tip:     { icon: <LightbulbRoundedIcon sx={{ fontSize: 18 }} />,    fill: softTokens.lemon.main,    ink: softTokens.lemon.ink },
+  warning: { icon: <WarningAmberRoundedIcon sx={{ fontSize: 18 }} />, fill: softTokens.peach.main,    ink: softTokens.peach.ink },
+  insight: { icon: <InsightsRoundedIcon sx={{ fontSize: 18 }} />,     fill: softTokens.lavender.main, ink: softTokens.lavender.ink },
 };
 
 export default function AiInsightsCard() {
@@ -36,35 +43,17 @@ export default function AiInsightsCard() {
   if (!tips || tips.length === 0) return null;
 
   return (
-    <Card
-      sx={{
-        position: 'relative',
-        overflow: 'hidden',
-        // Gradient border via pseudo-element mask trick
-        '&::before': {
-          content: '""',
-          position: 'absolute',
-          inset: 0,
-          borderRadius: 'inherit',
-          padding: '1px',
-          background: 'linear-gradient(135deg, #E8C547, #B8A9E8, #F472B6)',
-          WebkitMask: 'linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0)',
-          WebkitMaskComposite: 'xor',
-          maskComposite: 'exclude',
-          pointerEvents: 'none',
-        },
-      }}
-    >
+    <Card>
       <CardContent>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1.5 }}>
           <Box
             sx={{
               width: 36, height: 36, borderRadius: 2.5,
               display: 'flex', alignItems: 'center', justifyContent: 'center',
-              bgcolor: alpha('#E8C547', 0.12),
+              bgcolor: softTokens.lemon.main, color: softTokens.lemon.ink,
             }}
           >
-            <LightbulbRoundedIcon sx={{ fontSize: 20, color: '#E8C547' }} />
+            <LightbulbRoundedIcon sx={{ fontSize: 20 }} />
           </Box>
           <Typography variant="h6">AI Insights</Typography>
           <Chip label={tips.length} size="small" sx={{ ml: 'auto', fontWeight: 600 }} />
@@ -79,18 +68,14 @@ export default function AiInsightsCard() {
                   display: 'flex',
                   alignItems: 'flex-start',
                   gap: 1.25,
-                  p: 1.25,
+                  p: 1.5,
                   borderRadius: 2.5,
-                  bgcolor: alpha(config.color, 0.06),
-                  border: `1px solid ${alpha(config.color, 0.1)}`,
-                  transition: 'background-color 0.15s, border-color 0.15s',
-                  '&:hover': {
-                    bgcolor: alpha(config.color, 0.1),
-                    borderColor: alpha(config.color, 0.2),
-                  },
+                  bgcolor: alpha(config.fill, 0.4),
+                  transition: 'background-color 0.15s',
+                  '&:hover': { bgcolor: alpha(config.fill, 0.6) },
                 }}
               >
-                <Box sx={{ color: config.color, mt: 0.25, flexShrink: 0 }}>
+                <Box sx={{ color: config.ink, mt: 0.25, flexShrink: 0 }}>
                   {config.icon}
                 </Box>
                 <Typography variant="body2" sx={{ flex: 1, lineHeight: 1.5, color: 'text.primary' }}>
@@ -99,7 +84,8 @@ export default function AiInsightsCard() {
                 <IconButton
                   size="small"
                   onClick={() => handleDismiss(tip.id)}
-                  sx={{ flexShrink: 0, opacity: 0.4, '&:hover': { opacity: 1 } }}
+                  sx={{ flexShrink: 0, opacity: 0.5, '&:hover': { opacity: 1 } }}
+                  aria-label="Dismiss"
                 >
                   <CloseRoundedIcon sx={{ fontSize: 16 }} />
                 </IconButton>

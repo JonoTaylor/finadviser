@@ -1,32 +1,106 @@
 'use client';
 
+import { useMemo } from 'react';
 import { Card, CardContent, Typography, Box } from '@mui/material';
 import { alpha } from '@mui/material/styles';
 import DonutSmallRoundedIcon from '@mui/icons-material/DonutSmallRounded';
+import ArrowDropUpRoundedIcon from '@mui/icons-material/ArrowDropUpRounded';
+import ArrowDropDownRoundedIcon from '@mui/icons-material/ArrowDropDownRounded';
 import { formatCurrency } from '@/lib/utils/formatting';
 import { getCategoryColor } from '@/lib/utils/category-colors';
+import { londonTodayIso } from '@/lib/dates/today';
 import Decimal from 'decimal.js';
 
 interface SpendingRow {
-  month: string;
+  month: string;          // YYYY-MM
   category_name: string | null;
-  account_type: string;
+  account_type: string;   // e.g. 'INCOME' | 'EXPENSE'
   total: string;
 }
 
+/**
+ * Convert a YYYY-MM string to the previous month's YYYY-MM. Pure
+ * arithmetic — no DST edge cases since we're working on (year,
+ * month) tuples, not Date objects.
+ */
+function previousMonth(yyyyMm: string): string {
+  const [y, m] = yyyyMm.split('-').map(Number);
+  if (!Number.isFinite(y) || !Number.isFinite(m)) return yyyyMm;
+  const prevMonth = m === 1 ? 12 : m - 1;
+  const prevYear = m === 1 ? y - 1 : y;
+  return `${prevYear}-${String(prevMonth).padStart(2, '0')}`;
+}
+
+/**
+ * Human-readable month label, e.g. "Apr 2026". Hoisted out of the
+ * component so it isn't reallocated on every render.
+ */
+function monthLabel(yyyyMm: string): string {
+  const [y, m] = yyyyMm.split('-').map(Number);
+  return new Date(y, m - 1, 1).toLocaleDateString('en-GB', { month: 'short', year: 'numeric' });
+}
+
+/**
+ * Top spending + income categories THIS MONTH, with a small delta
+ * showing the change vs LAST MONTH for each. Earlier versions of
+ * this card aggregated every row in `spending` regardless of
+ * month, so it was effectively showing lifetime totals (matching
+ * the £119k Income / £107k Uncategorized bug seen on the
+ * dashboard). Filtering to a specific month was always the intent;
+ * the comparison-vs-last-month is the new bit the user asked for.
+ *
+ * For each category in the top-5 by absolute this-month total:
+ *   - amount = sum of rows where month = currentMonth
+ *   - previous = sum of rows where month = previousMonth
+ *   - delta = amount - previous
+ *
+ * Delta colours respect account_type: for EXPENSE categories, an
+ * increase is a warning; for INCOME, an increase is a success.
+ * The arrow direction (▲/▼) always reflects raw direction; only
+ * the colour swaps based on whether more-of-this-thing is good or
+ * bad. account_type per category is captured during aggregation
+ * (one category → one type in this dataset).
+ */
 export default function TopCategoriesCard({ spending }: { spending: SpendingRow[] }) {
-  const byCategory: Record<string, Decimal> = {};
-  for (const row of spending) {
-    const cat = row.category_name || 'Uncategorized';
-    if (!byCategory[cat]) byCategory[cat] = new Decimal(0);
-    byCategory[cat] = byCategory[cat].plus(new Decimal(row.total).abs());
-  }
+  const today = londonTodayIso();              // YYYY-MM-DD
+  const currentMonth = today.slice(0, 7);      // YYYY-MM
+  const prevMonth = previousMonth(currentMonth);
 
-  const sorted = Object.entries(byCategory)
-    .sort(([, a], [, b]) => b.minus(a).toNumber())
-    .slice(0, 5);
+  // useMemo because aggregating + sorting can grow with the dataset
+  // and React re-renders this card on every parent state change.
+  const { thisByCategory, prevByCategory, typeByCategory } = useMemo(() => {
+    const thisMap = new Map<string, Decimal>();
+    const prevMap = new Map<string, Decimal>();
+    const typeMap = new Map<string, string>();
+    for (const row of spending) {
+      const cat = row.category_name || 'Uncategorized';
+      // First account_type seen wins; categories don't span types in
+      // v_monthly_spending (a category is either INCOME or EXPENSE).
+      if (!typeMap.has(cat)) typeMap.set(cat, row.account_type);
+      const val = new Decimal(row.total).abs();
+      if (row.month === currentMonth) {
+        thisMap.set(cat, (thisMap.get(cat) ?? new Decimal(0)).plus(val));
+      } else if (row.month === prevMonth) {
+        prevMap.set(cat, (prevMap.get(cat) ?? new Decimal(0)).plus(val));
+      }
+    }
+    return { thisByCategory: thisMap, prevByCategory: prevMap, typeByCategory: typeMap };
+  }, [spending, currentMonth, prevMonth]);
 
-  const topAmount = sorted.length > 0 ? sorted[0][1] : new Decimal(1);
+  const sorted = useMemo(
+    () =>
+      Array.from(thisByCategory.entries())
+        .sort(([, a], [, b]) => b.minus(a).toNumber())
+        .slice(0, 5),
+    [thisByCategory],
+  );
+
+  // Guard the bar-width divisor: an empty list, or a top entry of
+  // exactly £0, both fall back to 1 so the percentage math stays
+  // well-defined.
+  const topAmount = sorted.length > 0 && !sorted[0][1].isZero()
+    ? sorted[0][1]
+    : new Decimal(1);
 
   return (
     <Card sx={{ height: '100%', position: 'relative', overflow: 'hidden' }}>
@@ -37,7 +111,7 @@ export default function TopCategoriesCard({ spending }: { spending: SpendingRow[
         }}
       />
       <CardContent>
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
           <Box
             sx={{
               width: 36, height: 36, borderRadius: 2.5,
@@ -47,16 +121,37 @@ export default function TopCategoriesCard({ spending }: { spending: SpendingRow[
           >
             <DonutSmallRoundedIcon sx={{ fontSize: 20, color: '#E8C547' }} />
           </Box>
-          <Typography variant="subtitle2" color="text.secondary">Top Categories</Typography>
+          <Box>
+            <Typography variant="subtitle2" color="text.secondary">Top Categories</Typography>
+            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', lineHeight: 1.2 }}>
+              {monthLabel(currentMonth)} · vs {monthLabel(prevMonth)}
+            </Typography>
+          </Box>
         </Box>
 
         {sorted.length === 0 ? (
-          <Typography variant="body2" color="text.secondary">No spending data yet</Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mt: 2 }}>
+            No spending data yet for {monthLabel(currentMonth)}.
+          </Typography>
         ) : (
-          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.75 }}>
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.75, mt: 1.25 }}>
             {sorted.map(([cat, amount]) => {
-              const pct = amount.div(topAmount).mul(100).toNumber();
+              const previous = prevByCategory.get(cat) ?? new Decimal(0);
+              const delta = amount.minus(previous);
+              // Belt-and-braces: even though topAmount has a fallback
+              // above, guard the inline div by zero here too so the
+              // bar width is always a valid CSS percentage.
+              const pct = topAmount.lte(0) ? 0 : amount.div(topAmount).mul(100).toNumber();
               const color = getCategoryColor(cat);
+              const deltaIsZero = delta.abs().lt('0.01');
+              const deltaUp = delta.gt(0);
+              // For INCOME categories, more-this-month is a success
+              // (green). For EXPENSE, more-this-month is a warning
+              // (orange). The arrow always reflects raw direction;
+              // only the colour swaps.
+              const isIncome = typeByCategory.get(cat) === 'INCOME';
+              const goodDirection = isIncome ? deltaUp : !deltaUp;
+              const deltaColor = goodDirection ? 'success.main' : 'warning.main';
               return (
                 <Box key={cat}>
                   <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.25 }}>
@@ -73,9 +168,28 @@ export default function TopCategoriesCard({ spending }: { spending: SpendingRow[
                       />
                       <Typography variant="body2" noWrap sx={{ maxWidth: 120 }}>{cat}</Typography>
                     </Box>
-                    <Typography variant="body2" fontWeight={600}>
-                      {formatCurrency(amount.toString())}
-                    </Typography>
+                    <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 0.5 }}>
+                      <Typography variant="body2" fontWeight={600}>
+                        {formatCurrency(amount.toString())}
+                      </Typography>
+                      {!deltaIsZero && (
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0 }}>
+                          {deltaUp
+                            ? <ArrowDropUpRoundedIcon sx={{ fontSize: 16, color: deltaColor, m: -0.5 }} />
+                            : <ArrowDropDownRoundedIcon sx={{ fontSize: 16, color: deltaColor, m: -0.5 }} />}
+                          <Typography
+                            variant="caption"
+                            color={deltaColor}
+                            sx={{ fontWeight: 500 }}
+                          >
+                            {formatCurrency(delta.abs().toString())}
+                          </Typography>
+                        </Box>
+                      )}
+                      {deltaIsZero && (
+                        <Typography variant="caption" color="text.disabled">·</Typography>
+                      )}
+                    </Box>
                   </Box>
                   <Box sx={{ ml: 2.5, height: 6, borderRadius: 3, bgcolor: alpha(color, 0.12) }}>
                     <Box

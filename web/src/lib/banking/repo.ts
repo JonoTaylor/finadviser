@@ -186,6 +186,26 @@ export const bankingRepo = {
     await db.delete(connections).where(eq(connections.id, id));
   },
 
+  /**
+   * Removes non-active connection rows for the given provider so
+   * a fresh connect attempt does not accumulate duplicates. Called
+   * by POST /api/banking/connections at the start of a connect
+   * flow: an `active` row is left alone (the user opening a second
+   * concurrent connection on the same provider is deliberate or a
+   * mistake we want to surface, not silently overwrite), but
+   * `pending` / `expired` / `revoked` / `error` rows for the same
+   * provider are cleaned up first. Returns the count removed.
+   */
+  async deleteStaleConnectionsForProvider(providerId: number): Promise<number> {
+    const db = getDb();
+    const result = await db.execute(sql`
+      DELETE FROM connections
+       WHERE provider_id = ${providerId}
+         AND status IN ('pending', 'expired', 'revoked', 'error')
+    `);
+    return result.rowCount ?? 0;
+  },
+
   // ── Provider accounts ─────────────────────────────────────────
   async listProviderAccounts(connectionId: number): Promise<ProviderAccountRow[]> {
     const db = getDb();

@@ -42,13 +42,22 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
           { status: 400 },
         );
       }
-      // Defence in depth: confirm the internal account exists before
-      // we bind to it. The FK on provider_accounts.account_id would
-      // catch this too, but a 404 here is more actionable than a
-      // generic 23503 from Postgres.
+      // Defence in depth: confirm the internal account exists AND
+      // is an ASSET. The sync engine writes the bank-side amount on
+      // the mapped account; binding a non-ASSET (e.g. EQUITY or
+      // EXPENSE) would produce nonsense ledger entries that the
+      // journal-balance trigger can't catch because the per-journal
+      // sums still net to zero. The FK on provider_accounts.
+      // account_id only enforces existence, not type.
       const target = await accountRepo.getById(m.accountId);
       if (!target) {
         return NextResponse.json({ error: `Internal account ${m.accountId} not found` }, { status: 400 });
+      }
+      if (target.accountType !== 'ASSET') {
+        return NextResponse.json(
+          { error: `Internal account ${m.accountId} (${target.name}) must be ASSET; got ${target.accountType}` },
+          { status: 400 },
+        );
       }
 
       const row = await bankingRepo.upsertProviderAccount({

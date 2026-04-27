@@ -66,8 +66,12 @@ export default function MappingWizardPage({ params }: { params: Promise<{ id: st
   const connectionId = parseInt(id, 10);
   const router = useRouter();
 
+  // SWR key conditional on a valid id so we don't fire a request to
+  // /api/banking/connections/NaN when the route param is malformed.
+  // (We can't conditionally call useSWR; we condition the key
+  // instead.)
   const { data, error, isLoading, mutate } = useSWR<ConnectionDetail>(
-    `/api/banking/connections/${connectionId}`,
+    Number.isNaN(connectionId) ? null : `/api/banking/connections/${connectionId}`,
     fetcher,
     { revalidateOnFocus: false },
   );

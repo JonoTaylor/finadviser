@@ -69,7 +69,15 @@ export async function syncConnection(connectionId: number, syncRunId: number): P
     // (a conservative default so an inadvertent connect doesn't pull
     // 2 years of history without explicit consent from the user).
     // Subsequent syncs: last_synced_at minus the overlap window.
-    const dateFrom = sinceIsoFromConnection ?? pa.cutoverDate ?? format(subDays(new Date(), 7), 'yyyy-MM-dd');
+    //
+    // cutover_date wins over the lastSyncedAt window when it's later
+    // than the overlap-window start, otherwise an account mapped
+    // with a cutover after the last sync would have its cutover
+    // ignored.
+    const overlapStart = sinceIsoFromConnection ?? format(subDays(new Date(), 7), 'yyyy-MM-dd');
+    const dateFrom = pa.cutoverDate && pa.cutoverDate > overlapStart
+      ? pa.cutoverDate
+      : overlapStart;
 
     const txns = await gocardless.listTransactions({
       aggregatorAccountRef: pa.aggregatorAccountRef,

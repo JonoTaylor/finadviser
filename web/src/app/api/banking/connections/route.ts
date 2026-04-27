@@ -42,6 +42,14 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: `Provider ${slug} is not seeded; re-run migration` }, { status: 500 });
     }
 
+    // Clear out any prior non-active rows for this provider before
+    // creating a new pending one. Without this, a "Resume connect" /
+    // "Reconnect" click would accumulate duplicate rows alongside
+    // the original. Active rows are intentionally left alone: if
+    // the user wants a fresh consent on a working connection, they
+    // disconnect via the UI first.
+    await bankingRepo.deleteStaleConnectionsForProvider(provider.id);
+
     // Discover the institution id from the aggregator's GB catalogue.
     // We classified it during the smoke test, so this is just a
     // re-lookup; cached briefly in the access-token round-trip.

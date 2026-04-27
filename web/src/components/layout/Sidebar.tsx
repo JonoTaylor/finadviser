@@ -139,10 +139,10 @@ export default function Sidebar({ children }: { children: React.ReactNode }) {
             top: 12,
             left: 12,
             zIndex: 1300,
-            backgroundColor: '#fff',
+            backgroundColor: 'background.paper',
             boxShadow: softTokens.shadowPillow,
-            borderRadius: 999,
-            '&:hover': { backgroundColor: '#fff' },
+            borderRadius: softTokens.radius.pill,
+            '&:hover': { backgroundColor: 'background.paper' },
           }}
         >
           <MenuRoundedIcon />

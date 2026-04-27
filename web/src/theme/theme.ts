@@ -1,6 +1,6 @@
 'use client';
 
-import { createTheme } from '@mui/material/styles';
+import { createTheme, alpha } from '@mui/material/styles';
 
 // ── Soft Surfaces v2 ────────────────────────────────────────────────
 // Light pastel canvas + white "pillow" cards + Instrument Serif italic
@@ -8,9 +8,13 @@ import { createTheme } from '@mui/material/styles';
 // fixed mint / lemon / lavender / peach palette.
 //
 // MUI's `palette.*` is mapped to the v2 tokens that have natural
-// equivalents (success=mint, warning=lemon, error=peach, info=fog,
-// secondary=lavender). Everything else lives on `softTokens`, exported
-// alongside this theme for use via `sx`.
+// equivalents (success=mint, warning=lemon, error=peach, secondary=
+// lavender). `palette.info.main` is also lavender.deep so contained
+// "info" CTAs have enough contrast for white text — the softer
+// `softTokens.fog` tint that the spec calls "info" is applied via
+// the explicit `MuiAlert.standardInfo` and `MuiChip.colorInfo`
+// component overrides instead. Everything else lives on `softTokens`,
+// exported alongside this theme for use via `sx`.
 // ─────────────────────────────────────────────────────────────────────
 
 export const softTokens = {
@@ -28,10 +32,14 @@ export const softTokens = {
   ink3: '#6E6886',
   ink4: '#9A95B0',
 
+  // Shadow strings keep their literal rgba — the multi-layer recipe is
+  // composed once here and consumed as a string. Converting to alpha()
+  // would require template-literal interpolation per layer with no
+  // runtime benefit.
   shadowPillow: '0 24px 56px -24px rgba(26,23,48,0.22), 0 4px 12px -2px rgba(26,23,48,0.08), 0 0 0 1px rgba(26,23,48,0.04)',
   shadowPillowLift: '0 32px 72px -24px rgba(26,23,48,0.28), 0 6px 16px -2px rgba(26,23,48,0.10), 0 0 0 1px rgba(26,23,48,0.04)',
 
-  radius: { md: 16, lg: 20, xl: 24, '2xl': 24, '3xl': 28, '4xl': 32, pill: 999 },
+  radius: { sm: 14, md: 16, lg: 20, xl: 24, '2xl': 28, '3xl': 32, pill: 999 },
 } as const;
 
 // Used via sx={{ fontFamily: serifFamily, fontStyle: 'italic' }} for
@@ -40,17 +48,9 @@ export const softTokens = {
 export const serifFamily = 'var(--font-instrument-serif), "Instrument Serif", "Times New Roman", serif';
 
 // ── Helper-export shims ─────────────────────────────────────────────
-// Pre-existing callers in Sidebar.tsx + four dashboard cards still
-// import these. They're being phased out — in PR 2 (dashboard rebuild)
-// the dashboard-card imports go; in PR 3 the Sidebar one goes. The
-// shims keep the build green while each call site is migrated.
-
-/** @deprecated Use plain Card defaults; will be removed in PR 3. */
-export const glassCard = {
-  backgroundColor: '#fff',
-  borderRadius: softTokens.radius['3xl'],
-  boxShadow: softTokens.shadowPillow,
-};
+// YourShareCard.tsx + NetWorthCard.tsx still import these. They get
+// their proper redesign in PR 2 (dashboard rebuild), at which point
+// these exports go away.
 
 /** @deprecated v2 has no glow shadows; will be removed in PR 2. */
 export const glowShadow = {
@@ -75,7 +75,7 @@ const theme = createTheme({
     info:       { main: softTokens.lavender.deep, contrastText: softTokens.lavender.ink },
     background: { default: '#FAF6EC',             paper: '#FFFFFF' },
     text:       { primary: softTokens.ink, secondary: softTokens.ink2, disabled: softTokens.ink4 },
-    divider:    'rgba(26,23,48,0.06)',
+    divider:    alpha(softTokens.ink, 0.06),
   },
 
   typography: {
@@ -103,7 +103,7 @@ const theme = createTheme({
         },
         '::-webkit-scrollbar': { width: 8, height: 8 },
         '::-webkit-scrollbar-track': { background: 'transparent' },
-        '::-webkit-scrollbar-thumb': { background: 'rgba(26,23,48,0.18)', borderRadius: 999 },
+        '::-webkit-scrollbar-thumb': { background: alpha(softTokens.ink, 0.18), borderRadius: softTokens.radius.pill },
       },
     },
 
@@ -118,7 +118,7 @@ const theme = createTheme({
         root: {
           backgroundImage: 'none',
           backgroundColor: '#fff',
-          borderRadius: softTokens.radius['3xl'],
+          borderRadius: softTokens.radius['2xl'],
           boxShadow: softTokens.shadowPillow,
           border: 'none',
           transition: 'box-shadow 0.2s ease',
@@ -159,13 +159,13 @@ const theme = createTheme({
           '&:hover': { backgroundColor: softTokens.mint.main },
         },
         outlined: {
-          borderColor: 'rgba(26,23,48,0.12)',
+          borderColor: alpha(softTokens.ink, 0.12),
           color: softTokens.ink,
-          '&:hover': { borderColor: 'rgba(26,23,48,0.24)', backgroundColor: 'rgba(26,23,48,0.04)' },
+          '&:hover': { borderColor: alpha(softTokens.ink, 0.24), backgroundColor: alpha(softTokens.ink, 0.04) },
         },
         text: {
           color: softTokens.ink,
-          '&:hover': { backgroundColor: 'rgba(26,23,48,0.04)' },
+          '&:hover': { backgroundColor: alpha(softTokens.ink, 0.04) },
         },
       },
     },
@@ -180,10 +180,10 @@ const theme = createTheme({
       styleOverrides: {
         root: {
           '& .MuiOutlinedInput-root': {
-            borderRadius: 14,
+            borderRadius: softTokens.radius.sm,
             backgroundColor: '#fff',
-            '& fieldset': { borderColor: 'rgba(26,23,48,0.12)' },
-            '&:hover fieldset': { borderColor: 'rgba(26,23,48,0.24)' },
+            '& fieldset': { borderColor: alpha(softTokens.ink, 0.12) },
+            '&:hover fieldset': { borderColor: alpha(softTokens.ink, 0.24) },
             '&.Mui-focused fieldset': { borderColor: softTokens.ink, borderWidth: 1.5 },
           },
         },
@@ -233,13 +233,13 @@ const theme = createTheme({
         colorError:   { backgroundColor: softTokens.peach.main, color: softTokens.peach.ink },
         colorInfo:    { backgroundColor: softTokens.fog,        color: softTokens.lavender.ink },
         colorDefault: { backgroundColor: softTokens.stone,      color: softTokens.ink },
-        outlined: { borderColor: 'rgba(26,23,48,0.12)', backgroundColor: 'transparent' },
+        outlined: { borderColor: alpha(softTokens.ink, 0.12), backgroundColor: 'transparent' },
       },
     },
 
     MuiTableCell: {
       styleOverrides: {
-        root: { borderColor: 'rgba(26,23,48,0.06)', padding: '14px 16px', color: softTokens.ink },
+        root: { borderColor: alpha(softTokens.ink, 0.06), padding: '14px 16px', color: softTokens.ink },
         head: { fontWeight: 600, color: softTokens.ink3, fontSize: '0.78rem' },
       },
     },
@@ -247,7 +247,7 @@ const theme = createTheme({
       styleOverrides: {
         root: {
           transition: 'background-color 0.15s',
-          '&:hover': { backgroundColor: 'rgba(26,23,48,0.03)' },
+          '&:hover': { backgroundColor: alpha(softTokens.ink, 0.03) },
         },
       },
     },
@@ -258,7 +258,7 @@ const theme = createTheme({
           backgroundColor: 'rgba(255,253,247,0.55)',
           backdropFilter: 'blur(20px) saturate(180%)',
           WebkitBackdropFilter: 'blur(20px) saturate(180%)',
-          borderRight: '1px solid rgba(26,23,48,0.04)',
+          borderRight: `1px solid ${alpha(softTokens.ink, 0.04)}`,
           backgroundImage: 'none',
         },
       },
@@ -266,12 +266,12 @@ const theme = createTheme({
     MuiListItemButton: {
       styleOverrides: {
         root: {
-          borderRadius: 14,
+          borderRadius: softTokens.radius.sm,
           margin: '2px 8px',
           padding: '10px 14px',
           color: softTokens.ink2,
           transition: 'background-color 0.15s, color 0.15s',
-          '&:hover': { backgroundColor: 'rgba(26,23,48,0.06)' },
+          '&:hover': { backgroundColor: alpha(softTokens.ink, 0.06) },
           '&.Mui-selected': {
             backgroundColor: softTokens.ink,
             color: '#FFFFFF',

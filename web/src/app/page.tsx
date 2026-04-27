@@ -3,7 +3,7 @@
 import { Box, Grid, Typography, Skeleton } from '@mui/material';
 import { format } from 'date-fns';
 import useSWR from 'swr';
-import NetWorthCard from '@/components/dashboard/NetWorthCard';
+import YourShareCard from '@/components/dashboard/YourShareCard';
 import MonthlySummaryCard from '@/components/dashboard/MonthlySummaryCard';
 import SavingsRateCard from '@/components/dashboard/SavingsRateCard';
 import TopCategoriesCard from '@/components/dashboard/TopCategoriesCard';
@@ -15,7 +15,7 @@ import SavingsGoalsCard from '@/components/dashboard/SavingsGoalsCard';
 const fetcher = (url: string) => fetch(url).then(r => r.json());
 
 export default function DashboardPage() {
-  const { data: balances, isLoading: loadingBalances } = useSWR('/api/accounts?balances=true', fetcher);
+  const { data: balances } = useSWR('/api/accounts?balances=true', fetcher);
   const { data: spending, isLoading: loadingSpending } = useSWR('/api/journal/monthly-spending', fetcher);
   const { data: journalData, isLoading: loadingJournal } = useSWR('/api/journal?limit=10', fetcher);
 
@@ -40,9 +40,7 @@ export default function DashboardPage() {
       <Grid container spacing={2.5}>
         {/* Metric cards row */}
         <Grid size={{ xs: 12, sm: 6, lg: 3 }}>
-          {loadingBalances ? <Skeleton variant="rounded" height={180} sx={{ borderRadius: 5 }} /> : (
-            <NetWorthCard balances={balances ?? []} />
-          )}
+          <YourShareCard />
         </Grid>
         <Grid size={{ xs: 12, sm: 6, lg: 3 }}>
           {loadingSpending ? <Skeleton variant="rounded" height={180} sx={{ borderRadius: 5 }} /> : (

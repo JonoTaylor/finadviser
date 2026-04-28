@@ -25,7 +25,13 @@ export default function ImportPage() {
   const [fileType, setFileType] = useState<'csv' | 'pdf'>('csv');
   const [csvContent, setCsvContent] = useState('');
   const [bankConfig, setBankConfig] = useState('generic-csv');
-  const [accountName, setAccountName] = useState('');
+  // Default kept as 'Bank' so the PDF flow (which skips ConfigStep
+  // entirely - handleFileSelect routes straight to /api/import/preview)
+  // doesn't 400 on empty accountName. Users on the CSV path see the
+  // dropdown with "Bank" pre-selected if such an account exists, or
+  // the placeholder otherwise; either way an explicit pick still
+  // lands a real account on Preview.
+  const [accountName, setAccountName] = useState('Bank');
   const [preview, setPreview] = useState<Array<Record<string, unknown>> | null>(null);
   const [previewing, setPreviewing] = useState(false);
   const [importing, setImporting] = useState(false);

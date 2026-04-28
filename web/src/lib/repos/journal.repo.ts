@@ -156,6 +156,7 @@ export const journalRepo = {
     const rows = await db.execute(sql`
       SELECT je.id, je.date, je.description, je.reference, je.category_id,
              c.name AS category_name,
+             je.is_transfer, je.transfer_kind,
              STRING_AGG(a.name || ':' || be.amount, '|' ORDER BY CASE a.account_type WHEN 'ASSET' THEN 0 ELSE 1 END) AS entries_summary,
              tm.merchant_name, tm.merchant_emoji, tm.transaction_type,
              tm.bank_category, tm.notes, tm.address
@@ -166,6 +167,7 @@ export const journalRepo = {
       LEFT JOIN transaction_metadata tm ON tm.journal_entry_id = je.id
       WHERE ${whereClause}
       GROUP BY je.id, je.date, je.description, je.reference, je.category_id, c.name,
+               je.is_transfer, je.transfer_kind,
                tm.merchant_name, tm.merchant_emoji, tm.transaction_type,
                tm.bank_category, tm.notes, tm.address
       ORDER BY je.date DESC, je.id DESC
@@ -236,6 +238,7 @@ export const journalRepo = {
       SELECT substring(date, 1, 7) AS month, COUNT(*)::int AS uncategorized_count
       FROM journal_entries
       WHERE category_id IS NULL
+        AND COALESCE(is_transfer, FALSE) = FALSE
       GROUP BY substring(date, 1, 7)
       ORDER BY month DESC
     `);
@@ -293,6 +296,7 @@ export const journalRepo = {
       LEFT JOIN accounts a ON a.id = be.account_id
       LEFT JOIN transaction_metadata tm ON tm.journal_entry_id = je.id
       WHERE je.category_id IS NULL
+        AND COALESCE(je.is_transfer, FALSE) = FALSE
         AND je.date LIKE ${monthPrefix}
       GROUP BY je.id, je.date, je.description,
                tm.merchant_name, tm.merchant_emoji, tm.transaction_type,
@@ -348,6 +352,7 @@ export const journalRepo = {
       SELECT id, description
       FROM journal_entries
       WHERE category_id IS NULL
+        AND COALESCE(is_transfer, FALSE) = FALSE
       ORDER BY date DESC
       LIMIT ${limit}
     `);
@@ -366,6 +371,7 @@ export const journalRepo = {
       LEFT JOIN accounts a ON a.id = be.account_id
       LEFT JOIN transaction_metadata tm ON tm.journal_entry_id = je.id
       WHERE je.category_id IS NULL
+        AND COALESCE(je.is_transfer, FALSE) = FALSE
       GROUP BY je.id, je.date, je.description,
                tm.merchant_name, tm.merchant_emoji, tm.transaction_type,
                tm.bank_category, tm.notes, tm.address
@@ -384,6 +390,128 @@ export const journalRepo = {
       notes: string | null;
       address: string | null;
     }>;
+  },
+
+  /**
+   * Mark a single journal as a transfer. Used when the user flags one
+   * side of an inter-account movement that has no synced partner (e.g.
+   * paid an external person). The contra side may still book to
+   * Uncategorized; the dashboards filter on is_transfer so the
+   * movement no longer pollutes monthly income/expense totals.
+   */
+  async markAsTransfer(journalId: number, kind: string): Promise<void> {
+    const db = getDb();
+    await db.execute(sql`
+      UPDATE journal_entries
+         SET is_transfer = TRUE,
+             transfer_kind = ${kind}
+       WHERE id = ${journalId}
+    `);
+  },
+
+  /** Inverse of markAsTransfer / mergePair: recover from a misclick. */
+  async unmarkTransfer(journalId: number): Promise<void> {
+    const db = getDb();
+    await db.execute(sql`
+      UPDATE journal_entries
+         SET is_transfer = FALSE,
+             transfer_kind = NULL,
+             transfer_group_id = NULL,
+             transfer_partner_journal_id = NULL
+       WHERE id = ${journalId}
+    `);
+  },
+
+  /**
+   * Calls the merge_transfer_pair Postgres function (defined in
+   * migration.sql). The function is wrapped in plpgsql because the
+   * neon-http transport can't run multi-statement transactions, and
+   * the merge has to be atomic; a partial failure would corrupt the
+   * books (orphaned book_entries, missing contras).
+   *
+   * Returns the new merged journal id.
+   */
+  async mergeTransferPair(
+    journalAId: number,
+    journalBId: number,
+    kind: string,
+  ): Promise<number> {
+    const db = getDb();
+    const rows = await db.execute(sql`
+      SELECT merge_transfer_pair(${journalAId}, ${journalBId}, ${kind}) AS journal_id
+    `);
+    const r = rows.rows[0] as { journal_id: number } | undefined;
+    if (!r || r.journal_id == null) {
+      throw new Error('merge_transfer_pair returned no row');
+    }
+    return r.journal_id;
+  },
+
+  /**
+   * Find candidate partner journals for a given journal id. Used by
+   * the "Mark as transfer" UI on /transactions and by the
+   * find_transfer_pair_candidates AI tool. Looks for opposite-sign
+   * transactions on a different real account within +/- windowDays of
+   * the source journal's date, ranked by how close the dates are.
+   * Excludes already-flagged transfers and rows the user has dismissed.
+   *
+   * The query joins through book_entries to read the *real* (non-
+   * Uncategorized) account on each side, the same way merge_transfer_pair
+   * picks legs.
+   */
+  async findTransferCandidates(
+    journalId: number,
+    windowDays = 3,
+    limit = 5,
+  ): Promise<Array<{
+    id: number;
+    date: string;
+    description: string;
+    accountName: string;
+    amount: string;
+    dateDriftDays: number;
+  }>> {
+    const db = getDb();
+    const rows = await db.execute(sql`
+      WITH source AS (
+        SELECT je.id, je.date::date AS dt,
+               be.account_id AS real_account_id,
+               be.amount::numeric AS real_amount
+          FROM journal_entries je
+          JOIN book_entries be ON be.journal_entry_id = je.id
+          JOIN accounts a ON a.id = be.account_id
+         WHERE je.id = ${journalId}
+           AND a.name NOT IN ('Uncategorized Income', 'Uncategorized Expense')
+         LIMIT 1
+      )
+      SELECT je.id,
+             je.date,
+             je.description,
+             a.name AS account_name,
+             be.amount::text AS amount,
+             ABS((je.date::date - source.dt)) AS date_drift_days
+        FROM journal_entries je
+        JOIN book_entries be ON be.journal_entry_id = je.id
+        JOIN accounts a ON a.id = be.account_id
+        CROSS JOIN source
+       WHERE je.id <> source.id
+         AND je.is_transfer = FALSE
+         AND je.transfer_review_dismissed_at IS NULL
+         AND a.name NOT IN ('Uncategorized Income', 'Uncategorized Expense')
+         AND a.id <> source.real_account_id
+         AND ABS((je.date::date - source.dt)) <= ${windowDays}
+         AND ROUND(be.amount::numeric + source.real_amount, 2) = 0
+       ORDER BY ABS((je.date::date - source.dt)) ASC, je.id DESC
+       LIMIT ${limit}
+    `);
+    return rows.rows.map(r => ({
+      id: r.id as number,
+      date: r.date as string,
+      description: r.description as string,
+      accountName: r.account_name as string,
+      amount: r.amount as string,
+      dateDriftDays: Number(r.date_drift_days),
+    }));
   },
 
   async search(query: string, limit = 50) {

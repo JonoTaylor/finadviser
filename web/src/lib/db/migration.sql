@@ -214,6 +214,9 @@ LEFT JOIN categories c ON c.id = je.category_id
 WHERE a.account_type IN ('EXPENSE', 'INCOME')
 GROUP BY to_char(je.date::date, 'YYYY-MM'), c.name, a.account_type
 ORDER BY month DESC;
+-- NOTE: this view is re-created at the bottom of the migration with an
+-- additional `is_transfer` filter once that column has been added by
+-- the inter-account-transfer schema additions later in this file.
 
 -- Balance enforcement trigger
 CREATE OR REPLACE FUNCTION check_journal_balance() RETURNS TRIGGER AS $$
@@ -799,4 +802,289 @@ ALTER TABLE connections
 -- encrypted_secret alongside the OAuth tokens.
 ALTER TABLE connections
     ADD COLUMN IF NOT EXISTS monzo_webhook_id TEXT;
+
+-- Inter-account transfer reconciliation (Phase A: schema + manual mark).
+-- Inter-account money movements (statement payments, pot top-ups,
+-- self-transfers) currently book as two independent journals (one per
+-- side), both with Uncategorized contras. Dashboards aggregating
+-- INCOME/EXPENSE then double-count the movement. The reconciliation
+-- pipeline merges the pair into one balanced journal mirroring the
+-- shape used by transferEquity() in lib/properties/transfer-engine.ts:
+-- one journal entry, two opposing book_entries, no Uncategorized
+-- residue. is_transfer is the load-bearing flag that dashboards filter
+-- on; net-worth ignores it (asset/liability movements are still real).
+--
+-- transfer_kind: statement_payment | pot_transfer | cross_bank
+--                | self_transfer | refund | manual (NULL when not a transfer).
+-- transfer_group_id: links a half-resolved candidate pair while waiting
+--                    for the partner side to sync or for user review.
+-- transfer_partner_journal_id: candidate-not-yet-merged interim link.
+-- transfer_review_dismissed_at: user-rejected candidate, do not re-suggest.
+ALTER TABLE journal_entries
+    ADD COLUMN IF NOT EXISTS is_transfer BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE journal_entries
+    ADD COLUMN IF NOT EXISTS transfer_kind TEXT;
+ALTER TABLE journal_entries
+    ADD COLUMN IF NOT EXISTS transfer_group_id UUID;
+ALTER TABLE journal_entries
+    ADD COLUMN IF NOT EXISTS transfer_partner_journal_id INTEGER
+        REFERENCES journal_entries(id) ON DELETE SET NULL;
+ALTER TABLE journal_entries
+    ADD COLUMN IF NOT EXISTS transfer_review_dismissed_at TIMESTAMP;
+
+DO $$ BEGIN
+    ALTER TABLE journal_entries
+        ADD CONSTRAINT journal_entries_transfer_kind_check
+        CHECK (transfer_kind IS NULL OR transfer_kind IN (
+            'statement_payment', 'pot_transfer', 'cross_bank',
+            'self_transfer', 'refund', 'manual'
+        ));
+EXCEPTION WHEN duplicate_object THEN null;
+END $$;
+
+CREATE INDEX IF NOT EXISTS idx_je_transfer_pending
+    ON journal_entries(transfer_group_id)
+    WHERE transfer_group_id IS NOT NULL AND is_transfer = FALSE;
+
+CREATE INDEX IF NOT EXISTS idx_je_is_transfer
+    ON journal_entries(is_transfer)
+    WHERE is_transfer = TRUE;
+
+-- Account-level hints used by the auto-pair scorer in PR-B and the
+-- mapping wizard UI in PR-C. pays_off_account_id declares "this ASSET
+-- pays off this LIABILITY" (Bank -> Amex) so a negative on the asset
+-- and a positive-from-the-liability-perspective payment auto-pair with
+-- maximum confidence. parent_account_id collapses Monzo Pots under
+-- their main current account; is_pot is a UI hint for hierarchy.
+ALTER TABLE accounts
+    ADD COLUMN IF NOT EXISTS pays_off_account_id INTEGER
+        REFERENCES accounts(id) ON DELETE SET NULL;
+ALTER TABLE accounts
+    ADD COLUMN IF NOT EXISTS parent_account_id INTEGER
+        REFERENCES accounts(id) ON DELETE SET NULL;
+ALTER TABLE accounts
+    ADD COLUMN IF NOT EXISTS is_pot BOOLEAN NOT NULL DEFAULT FALSE;
+
+CREATE INDEX IF NOT EXISTS idx_accounts_parent
+    ON accounts(parent_account_id)
+    WHERE parent_account_id IS NOT NULL;
+
+-- Transfer subcategories (children of 'Transfer' seeded above). Used
+-- for filtering and reporting clarity; the journal-level is_transfer
+-- flag remains the load-bearing signal.
+INSERT INTO categories (name, parent_id, is_system)
+SELECT child.child_name, p.id, true
+  FROM (VALUES
+    ('Statement Payment'),
+    ('Pot Transfer'),
+    ('Self Transfer'),
+    ('Cross-Owner Transfer'),
+    ('Refund')
+  ) AS child(child_name)
+ CROSS JOIN (
+   SELECT id FROM categories
+    WHERE name = 'Transfer' AND parent_id IS NULL
+    ORDER BY id ASC LIMIT 1
+ ) AS p
+ON CONFLICT (name, parent_id) DO NOTHING;
+
+-- merge_transfer_pair: collapses two existing journals (each booking a
+-- single side of a transfer to an Uncategorized contra) into one
+-- balanced journal with two real-account book_entries. Mirrors the
+-- shape produced by transferEquity() in lib/properties/transfer-engine.ts.
+--
+-- Procedure:
+--   1. Validate both journals exist, are not already transfers, and
+--      sum to zero between them (i.e. one positive, one negative on
+--      the real accounts).
+--   2. Find the "real" (non-Uncategorized) account on each side.
+--   3. Insert a fresh journal_entry with is_transfer = TRUE, the
+--      richer description from either side, and the requested
+--      transfer_kind.
+--   4. Insert two book_entries on the merged journal (real account
+--      DR/CR), summing to zero so the balance trigger passes.
+--   5. Re-point the transaction_metadata row(s) to the new journal so
+--      provider/external IDs survive the merge.
+--   6. Delete the two source journals; CASCADE drops their book_entries
+--      (including the Uncategorized contras).
+--   7. Return the new journal_id.
+--
+-- Wrapped in a Postgres function because the neon-http transport
+-- can't run multi-statement transactions and this whole sequence has
+-- to be atomic (a partial failure mid-merge would corrupt the books).
+CREATE OR REPLACE FUNCTION merge_transfer_pair(
+    p_journal_a_id INTEGER,
+    p_journal_b_id INTEGER,
+    p_kind         TEXT
+) RETURNS INTEGER AS $$
+DECLARE
+    v_real_a_account_id INTEGER;
+    v_real_b_account_id INTEGER;
+    v_amount_a          NUMERIC;
+    v_amount_b          NUMERIC;
+    v_date              TEXT;
+    v_desc_a            TEXT;
+    v_desc_b            TEXT;
+    v_desc              TEXT;
+    v_category_id       INTEGER;
+    v_property_id       INTEGER;
+    v_provider_txn_id   TEXT;
+    v_sync_run_id       INTEGER;
+    v_new_journal_id    INTEGER;
+    v_uncat_income_id   INTEGER;
+    v_uncat_expense_id  INTEGER;
+BEGIN
+    IF p_journal_a_id = p_journal_b_id THEN
+        RAISE EXCEPTION 'merge_transfer_pair: cannot merge a journal with itself';
+    END IF;
+    IF p_kind IS NULL OR p_kind NOT IN (
+        'statement_payment', 'pot_transfer', 'cross_bank',
+        'self_transfer', 'refund', 'manual'
+    ) THEN
+        RAISE EXCEPTION 'merge_transfer_pair: invalid transfer_kind %', p_kind;
+    END IF;
+
+    SELECT id INTO v_uncat_income_id
+      FROM accounts WHERE name = 'Uncategorized Income' LIMIT 1;
+    SELECT id INTO v_uncat_expense_id
+      FROM accounts WHERE name = 'Uncategorized Expense' LIMIT 1;
+
+    -- Lock both journals for the duration of the merge so a concurrent
+    -- run on the same pair sees one of them already gone.
+    PERFORM 1 FROM journal_entries
+              WHERE id IN (p_journal_a_id, p_journal_b_id)
+                FOR UPDATE;
+
+    SELECT je.date, je.description, je.category_id, je.property_id,
+           je.provider_txn_id, je.sync_run_id
+      INTO v_date, v_desc_a, v_category_id, v_property_id,
+           v_provider_txn_id, v_sync_run_id
+      FROM journal_entries je
+     WHERE je.id = p_journal_a_id;
+
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'merge_transfer_pair: journal % not found', p_journal_a_id;
+    END IF;
+
+    SELECT je.description INTO v_desc_b
+      FROM journal_entries je
+     WHERE je.id = p_journal_b_id;
+
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'merge_transfer_pair: journal % not found', p_journal_b_id;
+    END IF;
+
+    -- Pick the longer / more specific description as the merged label.
+    IF v_desc_b IS NOT NULL AND length(coalesce(v_desc_b, '')) > length(coalesce(v_desc_a, '')) THEN
+        v_desc := v_desc_b;
+    ELSE
+        v_desc := v_desc_a;
+    END IF;
+
+    -- Identify the "real" (non-Uncategorized) account and signed amount on each side.
+    SELECT be.account_id, be.amount::numeric INTO v_real_a_account_id, v_amount_a
+      FROM book_entries be
+     WHERE be.journal_entry_id = p_journal_a_id
+       AND be.account_id NOT IN (
+           coalesce(v_uncat_income_id, -1),
+           coalesce(v_uncat_expense_id, -1)
+       )
+     LIMIT 1;
+
+    IF v_real_a_account_id IS NULL THEN
+        RAISE EXCEPTION 'merge_transfer_pair: journal % has no real-account leg', p_journal_a_id;
+    END IF;
+
+    SELECT be.account_id, be.amount::numeric INTO v_real_b_account_id, v_amount_b
+      FROM book_entries be
+     WHERE be.journal_entry_id = p_journal_b_id
+       AND be.account_id NOT IN (
+           coalesce(v_uncat_income_id, -1),
+           coalesce(v_uncat_expense_id, -1)
+       )
+     LIMIT 1;
+
+    IF v_real_b_account_id IS NULL THEN
+        RAISE EXCEPTION 'merge_transfer_pair: journal % has no real-account leg', p_journal_b_id;
+    END IF;
+
+    IF v_real_a_account_id = v_real_b_account_id THEN
+        RAISE EXCEPTION 'merge_transfer_pair: both journals book to the same account %', v_real_a_account_id;
+    END IF;
+
+    -- Sides must oppose (one positive, one negative) and sum to zero on the real accounts.
+    IF round(v_amount_a + v_amount_b, 2) <> 0 THEN
+        RAISE EXCEPTION 'merge_transfer_pair: real-account legs do not net to zero (% + %)', v_amount_a, v_amount_b;
+    END IF;
+
+    INSERT INTO journal_entries (
+        date, description, category_id, property_id,
+        is_transfer, transfer_kind, provider_txn_id, sync_run_id
+    )
+    VALUES (
+        v_date, v_desc, v_category_id, v_property_id,
+        TRUE, p_kind, v_provider_txn_id, v_sync_run_id
+    )
+    RETURNING id INTO v_new_journal_id;
+
+    INSERT INTO book_entries (journal_entry_id, account_id, amount)
+    VALUES
+        (v_new_journal_id, v_real_a_account_id, v_amount_a),
+        (v_new_journal_id, v_real_b_account_id, v_amount_b);
+
+    -- Preserve transaction_metadata: re-point any rows on the source
+    -- journals to the new merged journal so provider IDs and FX info
+    -- aren't lost. The unique constraint on (journal_entry_id) means
+    -- at most one row per source journal; if both sides have one we
+    -- only keep the first (B's row gets dropped via CASCADE below).
+    UPDATE transaction_metadata
+       SET journal_entry_id = v_new_journal_id
+     WHERE journal_entry_id = p_journal_a_id;
+
+    -- Best-effort move from B too. If A's already there, leave B's row
+    -- to be deleted by the upcoming CASCADE.
+    BEGIN
+        UPDATE transaction_metadata
+           SET journal_entry_id = v_new_journal_id
+         WHERE journal_entry_id = p_journal_b_id
+           AND NOT EXISTS (
+               SELECT 1 FROM transaction_metadata
+                WHERE journal_entry_id = v_new_journal_id
+           );
+    EXCEPTION WHEN unique_violation THEN
+        -- Already moved A's row; leave B's to CASCADE.
+        NULL;
+    END;
+
+    -- Re-point transaction_fingerprints similarly; the partial unique
+    -- index on (fingerprint, account_id) handles dedup.
+    UPDATE transaction_fingerprints
+       SET journal_entry_id = v_new_journal_id
+     WHERE journal_entry_id IN (p_journal_a_id, p_journal_b_id);
+
+    DELETE FROM journal_entries WHERE id IN (p_journal_a_id, p_journal_b_id);
+
+    RETURN v_new_journal_id;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Re-define v_monthly_spending now that journal_entries.is_transfer
+-- exists. Same shape as the placeholder above but with the transfer
+-- filter applied. Dashboards (MonthlySummaryCard / SavingsRateCard /
+-- TopCategoriesCard) read this view, so adding the filter here is what
+-- stops inter-account movements double-counting in monthly totals.
+CREATE OR REPLACE VIEW v_monthly_spending AS
+SELECT
+    to_char(je.date::date, 'YYYY-MM') AS month,
+    c.name AS category_name,
+    a.account_type,
+    SUM(be.amount::numeric) AS total
+FROM book_entries be
+JOIN journal_entries je ON je.id = be.journal_entry_id
+JOIN accounts a ON a.id = be.account_id
+LEFT JOIN categories c ON c.id = je.category_id
+WHERE a.account_type IN ('EXPENSE', 'INCOME')
+  AND COALESCE(je.is_transfer, FALSE) = FALSE
+GROUP BY to_char(je.date::date, 'YYYY-MM'), c.name, a.account_type
+ORDER BY month DESC;
 

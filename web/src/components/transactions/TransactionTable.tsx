@@ -3,13 +3,15 @@
 import {
   Card, Table, TableHead, TableBody, TableRow, TableCell,
   TablePagination, Chip, Box, CircularProgress, Typography,
+  Tooltip, IconButton,
 } from '@mui/material';
 import { alpha } from '@mui/material/styles';
 import SearchOffRoundedIcon from '@mui/icons-material/SearchOffRounded';
+import SwapHorizRoundedIcon from '@mui/icons-material/SwapHorizRounded';
 import { formatCurrency } from '@/lib/utils/formatting';
 import { getCategoryColor } from '@/lib/utils/category-colors';
 
-interface Entry {
+export interface Entry {
   id: number;
   date: string;
   description: string;
@@ -17,6 +19,8 @@ interface Entry {
   category_id: number | null;
   category_name: string | null;
   entries_summary: string | null;
+  is_transfer?: boolean;
+  transfer_kind?: string | null;
 }
 
 function parseAmount(summary: string | null): string {
@@ -41,6 +45,7 @@ export default function TransactionTable({
   onPageChange,
   onPageSizeChange,
   onRowClick,
+  onMarkAsTransfer,
 }: {
   entries: Entry[];
   total: number;
@@ -50,6 +55,7 @@ export default function TransactionTable({
   onPageChange: (page: number) => void;
   onPageSizeChange: (size: number) => void;
   onRowClick: (entry: Entry) => void;
+  onMarkAsTransfer?: (entry: Entry) => void;
 }) {
   if (loading) {
     return (
@@ -79,6 +85,7 @@ export default function TransactionTable({
                 <TableCell>Category</TableCell>
                 <TableCell>Reference</TableCell>
                 <TableCell align="right">Amount</TableCell>
+                <TableCell align="right" sx={{ width: 48 }} />
               </TableRow>
             </TableHead>
             <TableBody>
@@ -87,17 +94,36 @@ export default function TransactionTable({
                 const numAmount = parseFloat(amount);
                 const catName = entry.category_name || 'Uncategorized';
                 const cat = getCategoryColor(catName);
+                const isTransfer = Boolean(entry.is_transfer);
                 return (
                   <TableRow
                     key={entry.id}
                     hover
-                    sx={{ cursor: 'pointer' }}
+                    sx={{
+                      cursor: 'pointer',
+                      bgcolor: isTransfer ? alpha('#9aa8c7', 0.06) : undefined,
+                    }}
                     onClick={() => onRowClick(entry)}
                   >
                     <TableCell sx={{ whiteSpace: 'nowrap', color: 'text.secondary' }}>
                       {entry.date}
                     </TableCell>
-                    <TableCell sx={{ fontWeight: 500 }}>{entry.description}</TableCell>
+                    <TableCell sx={{ fontWeight: 500 }}>
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                        {isTransfer && (
+                          <Tooltip title={`Transfer${entry.transfer_kind ? ` (${entry.transfer_kind.replace('_', ' ')})` : ''}`}>
+                            <Chip
+                              icon={<SwapHorizRoundedIcon />}
+                              label="Transfer"
+                              size="small"
+                              variant="outlined"
+                              sx={{ fontWeight: 500 }}
+                            />
+                          </Tooltip>
+                        )}
+                        <span>{entry.description}</span>
+                      </Box>
+                    </TableCell>
                     <TableCell>
                       <Chip
                         label={catName}
@@ -120,6 +146,21 @@ export default function TransactionTable({
                       }}
                     >
                       {formatCurrency(amount)}
+                    </TableCell>
+                    <TableCell align="right" sx={{ p: 0.5 }}>
+                      {onMarkAsTransfer && !isTransfer && (
+                        <Tooltip title="Mark as transfer">
+                          <IconButton
+                            size="small"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onMarkAsTransfer(entry);
+                            }}
+                          >
+                            <SwapHorizRoundedIcon fontSize="small" />
+                          </IconButton>
+                        </Tooltip>
+                      )}
                     </TableCell>
                   </TableRow>
                 );

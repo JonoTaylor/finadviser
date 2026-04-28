@@ -3,6 +3,20 @@ import { getDb, schema } from '@/lib/db';
 
 const { journalEntries, bookEntries, categories, accounts } = schema;
 
+// Allowed values for journal_entries.transfer_kind. Mirrors the CHECK
+// constraint declared in migration.sql; kept in sync so an invalid kind
+// raises a clear application-side error rather than a Postgres CHECK
+// violation surfacing through HTTP 500.
+export const TRANSFER_KINDS = [
+  'statement_payment',
+  'pot_transfer',
+  'cross_bank',
+  'self_transfer',
+  'refund',
+  'manual',
+] as const;
+export type TransferKind = (typeof TRANSFER_KINDS)[number];
+
 export const journalRepo = {
   async createEntry(
     journal: {
@@ -398,8 +412,17 @@ export const journalRepo = {
    * paid an external person). The contra side may still book to
    * Uncategorized; the dashboards filter on is_transfer so the
    * movement no longer pollutes monthly income/expense totals.
+   *
+   * Validates `kind` here (not just at the API/AI-tool boundary) so a
+   * direct repo caller still gets a clear application-side error instead
+   * of relying on the DB CHECK constraint to reject the write.
    */
   async markAsTransfer(journalId: number, kind: string): Promise<void> {
+    if (!TRANSFER_KINDS.includes(kind as (typeof TRANSFER_KINDS)[number])) {
+      throw new Error(
+        `Invalid transfer kind '${kind}'; expected one of: ${TRANSFER_KINDS.join(', ')}`,
+      );
+    }
     const db = getDb();
     await db.execute(sql`
       UPDATE journal_entries
@@ -436,6 +459,11 @@ export const journalRepo = {
     journalBId: number,
     kind: string,
   ): Promise<number> {
+    if (!TRANSFER_KINDS.includes(kind as TransferKind)) {
+      throw new Error(
+        `Invalid transfer kind '${kind}'; expected one of: ${TRANSFER_KINDS.join(', ')}`,
+      );
+    }
     const db = getDb();
     const rows = await db.execute(sql`
       SELECT merge_transfer_pair(${journalAId}, ${journalBId}, ${kind}) AS journal_id
@@ -472,9 +500,20 @@ export const journalRepo = {
     dateDriftDays: number;
   }>> {
     const db = getDb();
+    // Pre-compute the windowed date range as ISO YYYY-MM-DD text so the
+    // outer query can BETWEEN-filter `je.date` directly (it's TEXT in
+    // schema.ts). Lexicographic comparison on ISO dates is correct AND
+    // SARGable, letting Postgres use any standard btree on `je.date`
+    // instead of casting every row to ::date for the subtraction. The
+    // ::date cast still appears inside ORDER BY + the drift column, but
+    // only on the small filtered result set rather than the whole table.
     const rows = await db.execute(sql`
       WITH source AS (
-        SELECT je.id, je.date::date AS dt,
+        SELECT je.id,
+               je.date AS date_text,
+               je.date::date AS dt,
+               (je.date::date - ${windowDays}::int)::text AS date_from,
+               (je.date::date + ${windowDays}::int)::text AS date_to,
                be.account_id AS real_account_id,
                be.amount::numeric AS real_amount
           FROM journal_entries je
@@ -497,9 +536,9 @@ export const journalRepo = {
        WHERE je.id <> source.id
          AND je.is_transfer = FALSE
          AND je.transfer_review_dismissed_at IS NULL
+         AND je.date BETWEEN source.date_from AND source.date_to
          AND a.name NOT IN ('Uncategorized Income', 'Uncategorized Expense')
          AND a.id <> source.real_account_id
-         AND ABS((je.date::date - source.dt)) <= ${windowDays}
          AND ROUND(be.amount::numeric + source.real_amount, 2) = 0
        ORDER BY ABS((je.date::date - source.dt)) ASC, je.id DESC
        LIMIT ${limit}

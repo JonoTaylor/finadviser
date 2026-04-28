@@ -1102,3 +1102,220 @@ WHERE a.account_type IN ('EXPENSE', 'INCOME')
 GROUP BY to_char(je.date::date, 'YYYY-MM'), c.name, a.account_type
 ORDER BY month DESC;
 
+-- Inter-account transfer reconciliation (Phase B: scoring + auto-pair).
+-- Scans candidate journal pairs (opposite-sign on different real
+-- accounts within p_window_days), scores each by signal strength,
+-- auto-merges score >= 80 via merge_transfer_pair(), and stamps a
+-- shared transfer_group_id on lower-confidence pairs (40-79) so the
+-- review queue can surface them.
+--
+-- Scoring signals (cumulative):
+--   +100   accounts.pays_off_account_id link both ways (Bank -> Amex)
+--          -> kind statement_payment
+--   +80    shared parent_account_id (Pot <-> main Monzo)
+--          -> kind pot_transfer
+--   +60    Monzo raw is_load = true on either side
+--          -> kind pot_transfer
+--   +40    same accounts.owner_id on both sides
+--          -> kind self_transfer
+--   +20    abs(amount) >= 500 (large round-number self-transfers
+--          are far more likely to be transfers than coincident expenses)
+--   -30    per extra day of date drift beyond same-day
+--   if no positive signal at all and accounts span two banks,
+--   +10 cross_bank fallback so very obvious matches still score.
+--
+-- Auto-merge threshold: >= 80. Below: stash transfer_group_id (a UUID)
+-- on both journals so the review queue / UI can show "candidate
+-- transfer; one click to confirm" without committing the merge.
+--
+-- p_sync_run_id NULL means "scan everything"; a numeric value scopes
+-- the scan to journals touched by that run AND any journal within
+-- p_window_days of those (so newly-synced rows can pair against
+-- previously-existing rows). Returns the count of auto-merges.
+--
+-- Returns a single integer: number of pairs auto-merged this call.
+-- Lower-confidence pairs flagged via transfer_group_id are not
+-- counted in the return value (they're the user's to confirm).
+CREATE OR REPLACE FUNCTION find_and_pair_transfers(
+    p_sync_run_id INTEGER DEFAULT NULL,
+    p_window_days INTEGER DEFAULT 3
+) RETURNS INTEGER AS $$
+DECLARE
+    v_pair        RECORD;
+    v_merged      INTEGER := 0;
+    v_group_id    UUID;
+    v_uncat_in    INTEGER;
+    v_uncat_out   INTEGER;
+BEGIN
+    SELECT id INTO v_uncat_in
+      FROM accounts WHERE name = 'Uncategorized Income' LIMIT 1;
+    SELECT id INTO v_uncat_out
+      FROM accounts WHERE name = 'Uncategorized Expense' LIMIT 1;
+
+    -- Build the candidate set: pairs of journals where both legs land
+    -- on real (non-Uncategorized) accounts, on different accounts,
+    -- within +/- p_window_days, and whose real-account amounts net to
+    -- zero. Each candidate carries a score. SELECT DISTINCT ON keeps
+    -- only the best pair per source journal, breaking ties by score
+    -- desc. Then we DISTINCT ON the partner side too so neither
+    -- journal ends up paired twice.
+    FOR v_pair IN
+        WITH journal_real_legs AS (
+            SELECT je.id AS journal_id,
+                   je.date::date AS dt,
+                   be.account_id,
+                   be.amount::numeric AS amount,
+                   je.sync_run_id,
+                   je.category_id
+              FROM journal_entries je
+              JOIN book_entries be ON be.journal_entry_id = je.id
+             WHERE COALESCE(je.is_transfer, FALSE) = FALSE
+               AND je.transfer_review_dismissed_at IS NULL
+               AND je.transfer_group_id IS NULL
+               AND be.account_id NOT IN (
+                   COALESCE(v_uncat_in, -1),
+                   COALESCE(v_uncat_out, -1)
+               )
+        ),
+        in_scope AS (
+            -- p_sync_run_id NULL: every leg is in scope. Otherwise,
+            -- only legs that either belong to that run, or fall
+            -- within the window of one that does.
+            SELECT * FROM journal_real_legs jl
+             WHERE p_sync_run_id IS NULL
+                OR jl.sync_run_id = p_sync_run_id
+                OR EXISTS (
+                    SELECT 1 FROM journal_real_legs other
+                     WHERE other.sync_run_id = p_sync_run_id
+                       AND ABS(jl.dt - other.dt) <= p_window_days
+                )
+        ),
+        candidates AS (
+            SELECT a.journal_id AS a_id,
+                   b.journal_id AS b_id,
+                   a.account_id AS a_account_id,
+                   b.account_id AS b_account_id,
+                   a.amount     AS a_amount,
+                   ABS(a.dt - b.dt) AS drift,
+                   -- Pays-off declared link (either direction) -> max signal.
+                   (CASE WHEN (aa.pays_off_account_id = ba.id
+                            OR ba.pays_off_account_id = aa.id) THEN 100 ELSE 0 END
+                   +CASE WHEN ((aa.parent_account_id IS NOT NULL
+                                AND aa.parent_account_id = ba.parent_account_id)
+                            OR aa.parent_account_id = ba.id
+                            OR ba.parent_account_id = aa.id) THEN 80 ELSE 0 END
+                   +CASE WHEN (COALESCE((tma.raw->>'is_load')::boolean, FALSE)
+                            OR COALESCE((tmb.raw->>'is_load')::boolean, FALSE)) THEN 60 ELSE 0 END
+                   +CASE WHEN (aa.owner_id IS NOT NULL
+                                AND aa.owner_id = ba.owner_id) THEN 40 ELSE 0 END
+                   +CASE WHEN ABS(a.amount) >= 500 THEN 20 ELSE 0 END
+                   -ABS(a.dt - b.dt) * 30
+                   ) AS score,
+                   -- Surface the strongest hint so we can label kind
+                   -- without re-running the whole expression.
+                   CASE
+                       WHEN (aa.pays_off_account_id = ba.id
+                          OR ba.pays_off_account_id = aa.id)
+                           THEN 'statement_payment'
+                       WHEN ((aa.parent_account_id IS NOT NULL
+                              AND aa.parent_account_id = ba.parent_account_id)
+                          OR aa.parent_account_id = ba.id
+                          OR ba.parent_account_id = aa.id)
+                           THEN 'pot_transfer'
+                       WHEN (COALESCE((tma.raw->>'is_load')::boolean, FALSE)
+                          OR COALESCE((tmb.raw->>'is_load')::boolean, FALSE))
+                           THEN 'pot_transfer'
+                       WHEN (aa.owner_id IS NOT NULL
+                          AND aa.owner_id = ba.owner_id)
+                           THEN 'self_transfer'
+                       WHEN ((aa.account_type = 'ASSET'     AND ba.account_type = 'LIABILITY')
+                          OR (aa.account_type = 'LIABILITY' AND ba.account_type = 'ASSET'))
+                           THEN 'statement_payment'
+                       ELSE 'cross_bank'
+                   END AS inferred_kind
+              FROM in_scope a
+              JOIN journal_real_legs b
+                ON b.journal_id <> a.journal_id
+               AND b.account_id <> a.account_id
+               AND ABS(a.dt - b.dt) <= p_window_days
+               AND ROUND(a.amount + b.amount, 2) = 0
+              JOIN accounts aa ON aa.id = a.account_id
+              JOIN accounts ba ON ba.id = b.account_id
+              LEFT JOIN transaction_metadata tma ON tma.journal_entry_id = a.journal_id
+              LEFT JOIN transaction_metadata tmb ON tmb.journal_entry_id = b.journal_id
+             -- Order matters less than uniqueness; keep a < b on
+             -- journal_id to avoid scoring (a,b) and (b,a) as two
+             -- different candidates.
+             WHERE a.journal_id < b.journal_id
+        ),
+        best_per_a AS (
+            SELECT DISTINCT ON (a_id)
+                   a_id, b_id, score, inferred_kind, drift
+              FROM candidates
+             ORDER BY a_id, score DESC, drift ASC, b_id
+        ),
+        best_unique AS (
+            SELECT DISTINCT ON (b_id)
+                   a_id, b_id, score, inferred_kind, drift
+              FROM best_per_a
+             ORDER BY b_id, score DESC, drift ASC, a_id
+        )
+        SELECT * FROM best_unique
+    LOOP
+        IF v_pair.score >= 80 THEN
+            BEGIN
+                PERFORM merge_transfer_pair(v_pair.a_id, v_pair.b_id, v_pair.inferred_kind);
+                v_merged := v_merged + 1;
+            EXCEPTION WHEN OTHERS THEN
+                -- Defensive: if a single pair fails (e.g. a partner
+                -- already merged via a previous loop iteration), skip
+                -- it without aborting the rest.
+                NULL;
+            END;
+        ELSIF v_pair.score >= 40 THEN
+            -- Stash a shared group id on both rows so the review
+            -- queue can surface the candidate; partner_journal_id
+            -- carries the suggested counterpart for one-click
+            -- confirm. Skip if either journal has since been merged.
+            v_group_id := gen_random_uuid();
+            UPDATE journal_entries
+               SET transfer_group_id = v_group_id,
+                   transfer_partner_journal_id = v_pair.b_id,
+                   transfer_kind = v_pair.inferred_kind
+             WHERE id = v_pair.a_id
+               AND COALESCE(is_transfer, FALSE) = FALSE
+               AND transfer_group_id IS NULL;
+            UPDATE journal_entries
+               SET transfer_group_id = v_group_id,
+                   transfer_partner_journal_id = v_pair.a_id,
+                   transfer_kind = v_pair.inferred_kind
+             WHERE id = v_pair.b_id
+               AND COALESCE(is_transfer, FALSE) = FALSE
+               AND transfer_group_id IS NULL;
+        END IF;
+    END LOOP;
+
+    RETURN v_merged;
+END;
+$$ LANGUAGE plpgsql;
+
+-- One-shot backfill against the existing 3,607-row prod dataset.
+-- Idempotent because the function only matches journals where:
+--   - is_transfer is still false
+--   - transfer_group_id is still NULL (so a previous run that already
+--     queued or merged the pair won't re-process it)
+--   - transfer_review_dismissed_at is still NULL (user hasn't rejected)
+-- Subsequent deploys re-run this and just no-op for already-handled
+-- pairs. The wider window (5 days) on backfill compensates for the
+-- date drift between two banks settling the same transfer; the daily
+-- cron uses the tighter default (3 days).
+DO $$
+DECLARE
+    v_merged INTEGER;
+BEGIN
+    SELECT find_and_pair_transfers(NULL, 5) INTO v_merged;
+    RAISE NOTICE 'find_and_pair_transfers backfill auto-merged % pair(s)', v_merged;
+EXCEPTION WHEN OTHERS THEN
+    RAISE NOTICE 'find_and_pair_transfers backfill failed (non-fatal): %', SQLERRM;
+END $$;
+

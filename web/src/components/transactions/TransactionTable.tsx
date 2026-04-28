@@ -21,6 +21,8 @@ export interface Entry {
   entries_summary: string | null;
   is_transfer?: boolean;
   transfer_kind?: string | null;
+  transfer_group_id?: string | null;
+  transfer_partner_journal_id?: number | null;
 }
 
 function parseAmount(summary: string | null): string {
@@ -95,13 +97,18 @@ export default function TransactionTable({
                 const catName = entry.category_name || 'Uncategorized';
                 const cat = getCategoryColor(catName);
                 const isTransfer = Boolean(entry.is_transfer);
+                const isCandidate = !isTransfer && Boolean(entry.transfer_group_id);
                 return (
                   <TableRow
                     key={entry.id}
                     hover
                     sx={{
                       cursor: 'pointer',
-                      bgcolor: isTransfer ? alpha('#9aa8c7', 0.06) : undefined,
+                      bgcolor: isTransfer
+                        ? alpha('#9aa8c7', 0.06)
+                        : isCandidate
+                          ? alpha('#f1c84b', 0.08)
+                          : undefined,
                     }}
                     onClick={() => onRowClick(entry)}
                   >
@@ -116,6 +123,18 @@ export default function TransactionTable({
                               icon={<SwapHorizRoundedIcon />}
                               label="Transfer"
                               size="small"
+                              variant="outlined"
+                              sx={{ fontWeight: 500 }}
+                            />
+                          </Tooltip>
+                        )}
+                        {isCandidate && (
+                          <Tooltip title={`Candidate transfer${entry.transfer_kind ? ` (${entry.transfer_kind.replace('_', ' ')})` : ''}. Review on /transactions/transfers.`}>
+                            <Chip
+                              icon={<SwapHorizRoundedIcon />}
+                              label="Candidate"
+                              size="small"
+                              color="warning"
                               variant="outlined"
                               sx={{ fontWeight: 500 }}
                             />

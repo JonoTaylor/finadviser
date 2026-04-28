@@ -1121,17 +1121,27 @@ ORDER BY month DESC;
 --   +20    abs(amount) >= 500 (large round-number self-transfers
 --          are far more likely to be transfers than coincident expenses)
 --   -30    per extra day of date drift beyond same-day
---   if no positive signal at all and accounts span two banks,
---   +10 cross_bank fallback so very obvious matches still score.
+--
+-- The inferred_kind ELSE branch is 'cross_bank' but it carries no
+-- score bonus. By design: a pair with no positive signal at all
+-- maxes out at +20 (amount >= 500, drift = 0), which is below the
+-- 40 review-queue threshold, so it never surfaces. Cross-bank
+-- transfers only enter the queue when an additional signal kicks
+-- in (e.g. owner match, declared pays_off link). This is the
+-- intentional safety margin that stops two coincident £500
+-- payments on the same day getting suggested as a transfer.
 --
 -- Auto-merge threshold: >= 80. Below: stash transfer_group_id (a UUID)
 -- on both journals so the review queue / UI can show "candidate
 -- transfer; one click to confirm" without committing the merge.
 --
--- p_sync_run_id NULL means "scan everything"; a numeric value scopes
--- the scan to journals touched by that run AND any journal within
--- p_window_days of those (so newly-synced rows can pair against
--- previously-existing rows). Returns the count of auto-merges.
+-- p_sync_run_id NULL means "scan everything" (used by the migration
+-- backfill DO block). A numeric value scopes to pairs where at
+-- least one side was inserted by that run; the other side can be
+-- any historical row, so a newly-synced leg can pair against a
+-- pre-existing partner. Pairs where both sides pre-date the run
+-- would have been seen by an earlier reconciler call, so we don't
+-- re-evaluate them. Returns the count of auto-merges.
 --
 -- Returns a single integer: number of pairs auto-merged this call.
 -- Lower-confidence pairs flagged via transfer_group_id are not
@@ -1177,19 +1187,6 @@ BEGIN
                    COALESCE(v_uncat_out, -1)
                )
         ),
-        in_scope AS (
-            -- p_sync_run_id NULL: every leg is in scope. Otherwise,
-            -- only legs that either belong to that run, or fall
-            -- within the window of one that does.
-            SELECT * FROM journal_real_legs jl
-             WHERE p_sync_run_id IS NULL
-                OR jl.sync_run_id = p_sync_run_id
-                OR EXISTS (
-                    SELECT 1 FROM journal_real_legs other
-                     WHERE other.sync_run_id = p_sync_run_id
-                       AND ABS(jl.dt - other.dt) <= p_window_days
-                )
-        ),
         candidates AS (
             SELECT a.journal_id AS a_id,
                    b.journal_id AS b_id,
@@ -1233,7 +1230,7 @@ BEGIN
                            THEN 'statement_payment'
                        ELSE 'cross_bank'
                    END AS inferred_kind
-              FROM in_scope a
+              FROM journal_real_legs a
               JOIN journal_real_legs b
                 ON b.journal_id <> a.journal_id
                AND b.account_id <> a.account_id
@@ -1245,8 +1242,16 @@ BEGIN
               LEFT JOIN transaction_metadata tmb ON tmb.journal_entry_id = b.journal_id
              -- Order matters less than uniqueness; keep a < b on
              -- journal_id to avoid scoring (a,b) and (b,a) as two
-             -- different candidates.
+             -- different candidates. Scope filter: when scoped to a
+             -- specific run, require at least one side to belong
+             -- to that run; pairs where both pre-date the run were
+             -- already evaluated (and possibly queued / dismissed)
+             -- by an earlier reconciler call. NULL run = backfill
+             -- sweep, every pair considered.
              WHERE a.journal_id < b.journal_id
+               AND (p_sync_run_id IS NULL
+                    OR a.sync_run_id = p_sync_run_id
+                    OR b.sync_run_id = p_sync_run_id)
         ),
         best_per_a AS (
             SELECT DISTINCT ON (a_id)

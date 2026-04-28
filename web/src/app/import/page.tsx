@@ -25,7 +25,7 @@ export default function ImportPage() {
   const [fileType, setFileType] = useState<'csv' | 'pdf'>('csv');
   const [csvContent, setCsvContent] = useState('');
   const [bankConfig, setBankConfig] = useState('generic-csv');
-  const [accountName, setAccountName] = useState('Bank');
+  const [accountName, setAccountName] = useState('');
   const [preview, setPreview] = useState<Array<Record<string, unknown>> | null>(null);
   const [previewing, setPreviewing] = useState(false);
   const [importing, setImporting] = useState(false);
@@ -34,7 +34,7 @@ export default function ImportPage() {
   const [error, setError] = useState('');
 
   const { data: bankConfigs } = useSWR('/api/import/bank-configs', fetcher);
-  const { data: accounts } = useSWR('/api/accounts', fetcher);
+  const { data: accounts, mutate: mutateAccounts } = useSWR('/api/accounts', fetcher);
 
   const steps = fileType === 'pdf' ? PDF_STEPS : CSV_STEPS;
 
@@ -189,6 +189,7 @@ export default function ImportPage() {
               accounts={accounts ?? []}
               onBankConfigChange={setBankConfig}
               onAccountNameChange={setAccountName}
+              onAccountsChanged={() => mutateAccounts()}
               onNext={handleConfigure}
               onBack={() => setActiveStep(0)}
               busy={previewing}

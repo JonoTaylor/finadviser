@@ -730,7 +730,9 @@ async function executeBulkAddMortgagePayments(input: Record<string, unknown>) {
   // can legally differ only in case ("Hinckley" vs "hinckley") and
   // a case-insensitive .find() would silently pick the first.
   const properties = await propertyRepo.listProperties();
-  const needle = propertyName.toLowerCase();
+  // Trim before lowercasing so pasted tool inputs with stray
+  // leading/trailing whitespace don't fail both match paths.
+  const needle = propertyName.trim().toLowerCase();
   const exactMatches = properties.filter(p => p.name.toLowerCase() === needle);
   let property: typeof properties[number];
   if (exactMatches.length === 1) {

@@ -1258,19 +1258,18 @@ BEGIN
                AND ROUND(a.amount + b.amount, 2) = 0
               JOIN accounts aa ON aa.id = a.account_id
               JOIN accounts ba ON ba.id = b.account_id
-              -- Per-pair window: bump to 7 days when the two accounts
-              -- have a declared pays_off link (statement payments
-              -- routinely settle 3-5 days after the bank-side debit
-              -- so the default 3-day window misses them). For all
-              -- other pair shapes we keep the caller's window.
-              AND ABS(a.dt - b.dt) <= CASE
-                  WHEN aa.pays_off_account_id = ba.id
-                    OR ba.pays_off_account_id = aa.id
-                       THEN GREATEST(p_window_days, 7)
-                  ELSE p_window_days
-              END
               LEFT JOIN transaction_metadata tma ON tma.journal_entry_id = a.journal_id
               LEFT JOIN transaction_metadata tmb ON tmb.journal_entry_id = b.journal_id
+             -- Per-pair date window: bump to 7 days when the two
+             -- accounts have a declared pays_off link (statement
+             -- payments routinely settle 3-5 days after the bank-
+             -- side debit so the default 3-day window misses them).
+             -- The predicate references aa/ba which is why it lives
+             -- in WHERE rather than the journal_real_legs join's ON
+             -- clause; bundling it here keeps the join chain easy
+             -- to scan. For all other pair shapes we keep the
+             -- caller's window.
+             --
              -- Order matters less than uniqueness; keep a < b on
              -- journal_id to avoid scoring (a,b) and (b,a) as two
              -- different candidates. Scope filter: when scoped to a
@@ -1283,6 +1282,12 @@ BEGIN
                AND (p_sync_run_id IS NULL
                     OR a.sync_run_id = p_sync_run_id
                     OR b.sync_run_id = p_sync_run_id)
+               AND ABS(a.dt - b.dt) <= CASE
+                   WHEN aa.pays_off_account_id = ba.id
+                     OR ba.pays_off_account_id = aa.id
+                        THEN GREATEST(p_window_days, 7)
+                   ELSE p_window_days
+               END
         )
         SELECT a_id, b_id, score, inferred_kind, drift
           FROM candidates

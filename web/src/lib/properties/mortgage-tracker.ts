@@ -1,7 +1,9 @@
 import Decimal from 'decimal.js';
 import { accountRepo, journalRepo, propertyRepo } from '@/lib/repos';
-import { getDb } from '@/lib/db';
-import { sql } from 'drizzle-orm';
+import { getDb, schema } from '@/lib/db';
+import { sql, inArray } from 'drizzle-orm';
+
+const { journalEntries } = schema;
 
 export async function recordMortgagePayment(params: {
   mortgageId: number;
@@ -181,16 +183,25 @@ export async function recordMortgagePayments(params: {
   // user's full list doesn't fan out into N SELECTs. Use the
   // normalised amount (Decimal.toFixed(2)) so "100" and "100.00"
   // produce the same key.
+  //
+  // We use drizzle's inArray() rather than raw `ANY($1::text[])`
+  // because neon-http's parameter binding doesn't reliably auto-
+  // format a JS array as a Postgres array literal in the template
+  // sql, which produces "could not determine data type" / malformed
+  // array literal errors at runtime. inArray generates IN (?, ?, ...)
+  // bound positionally, which works on every driver.
   const buildRef = (date: string, amountFixed: string) =>
     `mortgage_payment:${mortgageId}:${date}:${amountFixed}`;
   const refs = payments.map(p => buildRef(p.date, new Decimal(p.amount).toFixed(2)));
-  const existing = await db.execute(sql`
-    SELECT id, reference FROM journal_entries
-     WHERE reference = ANY(${refs}::text[])
-  `);
+  const existingRows = refs.length === 0
+    ? []
+    : await db
+        .select({ id: journalEntries.id, reference: journalEntries.reference })
+        .from(journalEntries)
+        .where(inArray(journalEntries.reference, refs));
   const existingByRef = new Map<string, number>();
-  for (const r of existing.rows) {
-    existingByRef.set(r.reference as string, r.id as number);
+  for (const r of existingRows) {
+    if (r.reference) existingByRef.set(r.reference, r.id);
   }
 
   // Build the journal items in memory first; defer the DB writes
@@ -367,13 +378,15 @@ export async function recordMortgagePayments(params: {
       // equity insert. Without this rollback, the reference-based
       // dedup would skip the payments next pass and the equity
       // legs would be permanently missing.
+      //
+      // Same neon-http array-binding rationale as the dedup query
+      // above: drizzle's inArray() generates standard IN (?, ?, ...)
+      // rather than relying on the driver to format a JS array as a
+      // Postgres integer[] literal.
       try {
         const idsToRollback = paymentJournalIds;
         if (idsToRollback.length > 0) {
-          await db.execute(sql`
-            DELETE FROM journal_entries
-             WHERE id = ANY(${idsToRollback}::integer[])
-          `);
+          await db.delete(journalEntries).where(inArray(journalEntries.id, idsToRollback));
         }
         // Roll back the in-memory added[] tracking too so callers
         // see a clean failure rather than a misleading "added: N".

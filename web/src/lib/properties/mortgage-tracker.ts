@@ -131,14 +131,18 @@ export async function recordMortgagePayments(params: {
   }>;
 }): Promise<{
   added: Array<{ journalId: number; date: string; amount: string }>;
-  duplicates: Array<{ date: string; amount: string; existingJournalId: number }>;
+  /** existingJournalId is null when the duplicate is intra-batch
+   *  (the same date+amount appeared twice in the submitted list);
+   *  numeric when the row already exists in journal_entries from a
+   *  prior import. */
+  duplicates: Array<{ date: string; amount: string; existingJournalId: number | null }>;
   errors: Array<{ date: string; amount: string; message: string }>;
 }> {
   const { mortgageId, payerOwnerId, fromAccountId, payments } = params;
   const db = getDb();
 
   const added: Array<{ journalId: number; date: string; amount: string }> = [];
-  const duplicates: Array<{ date: string; amount: string; existingJournalId: number }> = [];
+  const duplicates: Array<{ date: string; amount: string; existingJournalId: number | null }> = [];
   const errors: Array<{ date: string; amount: string; message: string }> = [];
 
   if (payments.length === 0) {
@@ -187,6 +191,11 @@ export async function recordMortgagePayments(params: {
   // rows 0-6 still record successfully and the caller sees row 7 in
   // `errors`. Equity-contribution journals are collected separately
   // because they only fire on repayment mortgages.
+  // seenInBatch supplements existingByRef: the DB pre-load only
+  // catches references that already exist; intra-batch duplicates
+  // (same line pasted twice) need their own guard so both don't
+  // get inserted.
+  const seenInBatch = new Set<string>();
   const paymentItems: Array<{
     payment: { date: string; amount: string };
     reference: string;
@@ -215,6 +224,16 @@ export async function recordMortgagePayments(params: {
       duplicates.push({ date: p.date, amount: amountFixed, existingJournalId: dupId });
       continue;
     }
+    // Intra-batch dedup: a single pasted list can contain the same
+    // date+amount twice (e.g. the user accidentally double-pasted a
+    // line). Without this guard both rows would queue + insert and
+    // the endpoint's idempotency promise breaks. Track refs we've
+    // seen in this loop and skip subsequent occurrences.
+    if (seenInBatch.has(reference)) {
+      duplicates.push({ date: p.date, amount: amountFixed, existingJournalId: null });
+      continue;
+    }
+    seenInBatch.add(reference);
 
     const entries: Array<{ accountId: number; amount: string }> = [
       { accountId: fromAccountId, amount: totalDec.neg().toString() },

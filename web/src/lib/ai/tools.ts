@@ -772,18 +772,27 @@ async function executeBulkAddMortgagePayments(input: Record<string, unknown>) {
     mortgage = matched[0];
   }
 
-  // Resolve payer owner.
+  // Resolve payer owner. Substring match must be UNAMBIGUOUS - if a
+  // fragment hits multiple owners (similar names, e.g. "John Taylor"
+  // and "John Taylor Jr"), refuse to guess. Mortgage principal /
+  // capital postings going to the wrong owner is a data-integrity
+  // problem that's hard to undo cleanly, so fail closed.
   const ownership = await propertyRepo.getOwnership(property.id);
   let payerOwnerId: number | null = null;
   if (typeof payerOwnerName === 'string' && payerOwnerName.trim()) {
     const ownerNeedle = payerOwnerName.toLowerCase();
-    const matched = ownership.find(o => (o.owner_name as string).toLowerCase().includes(ownerNeedle));
-    if (!matched) {
+    const matched = ownership.filter(o => (o.owner_name as string).toLowerCase().includes(ownerNeedle));
+    if (matched.length === 0) {
       return {
         error: `Owner "${payerOwnerName}" not found on property "${property.name}". Available: ${ownership.map(o => o.owner_name).join(', ')}`,
       };
     }
-    payerOwnerId = matched.owner_id as number;
+    if (matched.length > 1) {
+      return {
+        error: `Owner name "${payerOwnerName}" matched ${matched.length} owners on "${property.name}": ${matched.map(o => o.owner_name).join(', ')}. Use a more specific fragment.`,
+      };
+    }
+    payerOwnerId = matched[0].owner_id as number;
   } else if (ownership.length === 1) {
     payerOwnerId = ownership[0].owner_id as number;
   } else {
@@ -793,19 +802,27 @@ async function executeBulkAddMortgagePayments(input: Record<string, unknown>) {
   }
 
   // Resolve "paid from" account. Default to the only ASSET if there's
-  // exactly one, otherwise require the user to disambiguate.
+  // exactly one, otherwise require the user to disambiguate. Same
+  // ambiguity rule as the owner resolver: refuse to guess between
+  // similar account names ("Bank Current", "Bank Savings") because
+  // the wrong choice silently misroutes payments.
   const allAccounts = await accountRepo.listAll();
   const assetAccounts = allAccounts.filter(a => a.accountType === 'ASSET');
   let fromAccountId: number | null = null;
   if (typeof paidFromAccountName === 'string' && paidFromAccountName.trim()) {
     const accNeedle = paidFromAccountName.toLowerCase();
-    const matched = assetAccounts.find(a => a.name.toLowerCase().includes(accNeedle));
-    if (!matched) {
+    const matched = assetAccounts.filter(a => a.name.toLowerCase().includes(accNeedle));
+    if (matched.length === 0) {
       return {
         error: `Account "${paidFromAccountName}" not found among ASSET accounts. Available: ${assetAccounts.map(a => a.name).join(', ')}`,
       };
     }
-    fromAccountId = matched.id;
+    if (matched.length > 1) {
+      return {
+        error: `Account name "${paidFromAccountName}" matched ${matched.length} ASSET accounts: ${matched.map(a => a.name).join(', ')}. Use a more specific fragment.`,
+      };
+    }
+    fromAccountId = matched[0].id;
   } else if (assetAccounts.length === 1) {
     fromAccountId = assetAccounts[0].id;
   } else {

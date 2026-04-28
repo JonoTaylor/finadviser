@@ -71,7 +71,17 @@ export async function GET(request: NextRequest) {
     if (!Number.isFinite(journalId)) {
       return NextResponse.json({ error: 'journalId is required' }, { status: 400 });
     }
-    const windowDays = windowParam ? Math.min(Math.max(Math.trunc(Number(windowParam)), 0), 30) : 3;
+    let windowDays = 3;
+    if (windowParam !== null) {
+      const parsed = Number(windowParam);
+      if (!Number.isFinite(parsed)) {
+        return NextResponse.json(
+          { error: 'windowDays must be an integer between 0 and 30' },
+          { status: 400 },
+        );
+      }
+      windowDays = Math.min(Math.max(Math.trunc(parsed), 0), 30);
+    }
     const candidates = await journalRepo.findTransferCandidates(journalId, windowDays, 10);
     return NextResponse.json({ journalId, windowDays, candidates });
   } catch (error) {

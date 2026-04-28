@@ -1017,6 +1017,20 @@ BEGIN
         RAISE EXCEPTION 'merge_transfer_pair: real-account legs do not net to zero (% + %)', v_amount_a, v_amount_b;
     END IF;
 
+    -- The partial unique index uq_journal_entries_provider_txn_id
+    -- forbids two rows holding the same non-NULL provider_txn_id. The
+    -- source journals still exist at this point, so before we INSERT
+    -- the merged journal carrying journal A's provider_txn_id we have
+    -- to clear it from the source rows. NULLing out provider_txn_id /
+    -- sync_run_id on the soon-to-be-deleted sources sidesteps the
+    -- collision and preserves dedup on future re-syncs (the provider
+    -- IDs land on the merged journal). Idempotent: if no row has
+    -- provider_txn_id set the UPDATEs are no-ops.
+    UPDATE journal_entries
+       SET provider_txn_id = NULL,
+           sync_run_id = NULL
+     WHERE id IN (p_journal_a_id, p_journal_b_id);
+
     INSERT INTO journal_entries (
         date, description, category_id, property_id,
         is_transfer, transfer_kind, provider_txn_id, sync_run_id

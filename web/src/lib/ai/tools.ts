@@ -717,26 +717,47 @@ async function executeBulkAddMortgagePayments(input: Record<string, unknown>) {
     return { error: 'payments_text is required (the pasted payment list).' };
   }
 
-  // Resolve property by case-insensitive substring match on name or
-  // address. The user's example was "249 Francis Road" / "Hinckley";
-  // both should hit the right property.
+  // Resolve property: try exact-name match first (case-insensitive),
+  // then fall back to substring on name + address. Without the exact-
+  // name preference, a fragment that matches one property's full
+  // name AND another's address (e.g. "249 Francis Road" matches both
+  // a property named exactly "249 Francis Road" AND "249 Francis
+  // Road, Flat A" via its address) would be flagged ambiguous even
+  // when the user clearly meant the exact match.
+  //
+  // Both branches must check for multiple matches: the DB's unique
+  // constraint on properties.name is case-sensitive, so two rows
+  // can legally differ only in case ("Hinckley" vs "hinckley") and
+  // a case-insensitive .find() would silently pick the first.
   const properties = await propertyRepo.listProperties();
-  const needle = propertyName.toLowerCase();
-  const candidates = properties.filter(p => {
-    const haystack = `${p.name} ${p.address ?? ''}`.toLowerCase();
-    return haystack.includes(needle);
-  });
-  if (candidates.length === 0) {
+  // Trim before lowercasing so pasted tool inputs with stray
+  // leading/trailing whitespace don't fail both match paths.
+  const needle = propertyName.trim().toLowerCase();
+  const exactMatches = properties.filter(p => p.name.toLowerCase() === needle);
+  let property: typeof properties[number];
+  if (exactMatches.length === 1) {
+    property = exactMatches[0];
+  } else if (exactMatches.length > 1) {
     return {
-      error: `No property matched "${propertyName}". Available: ${properties.map(p => p.name).join(', ') || '(none)'}`,
+      error: `Property name "${propertyName}" matched ${exactMatches.length} rows case-insensitively: ${exactMatches.map(p => p.name).join(', ')}. Use the exact case.`,
     };
+  } else {
+    const candidates = properties.filter(p => {
+      const haystack = `${p.name} ${p.address ?? ''}`.toLowerCase();
+      return haystack.includes(needle);
+    });
+    if (candidates.length === 0) {
+      return {
+        error: `No property matched "${propertyName}". Available: ${properties.map(p => p.name).join(', ') || '(none)'}`,
+      };
+    }
+    if (candidates.length > 1) {
+      return {
+        error: `Property name "${propertyName}" is ambiguous - matched ${candidates.length}: ${candidates.map(p => p.name).join(', ')}. Try a more specific term.`,
+      };
+    }
+    property = candidates[0];
   }
-  if (candidates.length > 1) {
-    return {
-      error: `Property name "${propertyName}" is ambiguous - matched ${candidates.length}: ${candidates.map(p => p.name).join(', ')}. Try a more specific term.`,
-    };
-  }
-  const property = candidates[0];
 
   // Resolve mortgage. Auto-pick is only safe when there's exactly
   // one - a property with first and second charges would otherwise

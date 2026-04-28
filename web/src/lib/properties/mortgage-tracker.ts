@@ -330,26 +330,83 @@ export async function recordMortgagePayments(params: {
   }
 
   // Equity-contribution journals (only for rows with non-zero
-  // principal — interest-only mortgages skip this entire branch).
+  // principal - interest-only mortgages skip this entire branch).
+  // Atomicity caveat: neon-http doesn't expose a multi-statement
+  // transaction primitive, so we can't wrap "payment bulk insert"
+  // and "equity bulk insert" in a single BEGIN/COMMIT. To keep
+  // re-paste idempotency working when the equity side fails, we
+  // compensate: roll back the just-inserted payment journals so
+  // the dedup-by-reference next pass treats the rows as fresh.
+  // The book_entries rows cascade-delete via FK ON DELETE CASCADE
+  // when the journal is removed.
   const equityItems = paymentItems.filter(it => !it.principalDec.isZero());
   if (equityItems.length > 0) {
-    const equityTracking = await accountRepo.getOrCreate(
-      `Equity Contributions - ${lender}`,
-      'EQUITY',
-    );
-    await journalRepo.createEntriesBulk(
-      equityItems.map(it => ({
-        journal: {
-          date: it.journal.date,
-          description: `Capital contribution via mortgage principal - ${lender}`,
-          propertyId,
-        },
-        entries: [
-          { accountId: payerCapitalAccountId, amount: it.principalDec.toString() },
-          { accountId: equityTracking.id, amount: it.principalDec.neg().toString() },
-        ],
-      })),
-    );
+    try {
+      const equityTracking = await accountRepo.getOrCreate(
+        `Equity Contributions - ${lender}`,
+        'EQUITY',
+      );
+      await journalRepo.createEntriesBulk(
+        equityItems.map(it => ({
+          journal: {
+            date: it.journal.date,
+            description: `Capital contribution via mortgage principal - ${lender}`,
+            propertyId,
+          },
+          entries: [
+            { accountId: payerCapitalAccountId, amount: it.principalDec.toString() },
+            { accountId: equityTracking.id, amount: it.principalDec.neg().toString() },
+          ],
+        })),
+      );
+    } catch (e) {
+      const equityMessage = e instanceof Error ? e.message : 'equity contribution insert failed';
+
+      // Compensating delete: remove the payment journals so the
+      // user can re-paste cleanly after fixing whatever broke the
+      // equity insert. Without this rollback, the reference-based
+      // dedup would skip the payments next pass and the equity
+      // legs would be permanently missing.
+      try {
+        const idsToRollback = paymentJournalIds;
+        if (idsToRollback.length > 0) {
+          await db.execute(sql`
+            DELETE FROM journal_entries
+             WHERE id = ANY(${idsToRollback}::integer[])
+          `);
+        }
+        // Roll back the in-memory added[] tracking too so callers
+        // see a clean failure rather than a misleading "added: N".
+        added.length = 0;
+        for (const it of paymentItems) {
+          errors.push({
+            date: it.payment.date,
+            amount: it.payment.amount,
+            message: `rolled back: ${equityMessage}`,
+          });
+        }
+      } catch (deleteErr) {
+        // The DELETE itself failed - now we have orphaned payment
+        // journals AND no equity legs, which is the worst case.
+        // Log loudly and surface BOTH messages per row so the user
+        // / operator can clean up manually. The reference is
+        // visible in the error message so a SQL one-liner can find
+        // the orphans.
+        const deleteMessage = deleteErr instanceof Error ? deleteErr.message : 'rollback delete failed';
+        console.error(
+          '[recordMortgagePayments] equity insert AND rollback delete both failed; '
+          + `${paymentJournalIds.length} orphan journal(s) exist. Find via: `
+          + `SELECT id, reference FROM journal_entries WHERE id = ANY('{${paymentJournalIds.join(',')}}'::integer[])`,
+        );
+        for (const it of paymentItems) {
+          errors.push({
+            date: it.payment.date,
+            amount: it.payment.amount,
+            message: `partial: payment inserted but equity failed (${equityMessage}); rollback also failed (${deleteMessage}); manual cleanup required`,
+          });
+        }
+      }
+    }
   }
 
   return { added, duplicates, errors };

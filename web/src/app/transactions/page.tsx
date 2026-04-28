@@ -7,6 +7,7 @@ import useSWR from 'swr';
 import TransactionFilters from '@/components/transactions/TransactionFilters';
 import TransactionTable from '@/components/transactions/TransactionTable';
 import CategoryEditDialog from '@/components/transactions/CategoryEditDialog';
+import MarkAsTransferDialog from '@/components/transactions/MarkAsTransferDialog';
 
 const fetcher = (url: string) => fetch(url).then(r => r.json());
 
@@ -21,6 +22,7 @@ export default function TransactionsPage() {
   const [page, setPage] = useState(0);
   const [pageSize, setPageSize] = useState(25);
   const [editEntry, setEditEntry] = useState<{ id: number; categoryId: number | null; description: string } | null>(null);
+  const [transferEntry, setTransferEntry] = useState<{ id: number; description: string } | null>(null);
   const [autoCategorizing, setAutoCategorizing] = useState(false);
   const [snackbar, setSnackbar] = useState<{ open: boolean; message: string; severity: 'success' | 'info' | 'warning' | 'error' }>({
     open: false,
@@ -128,6 +130,7 @@ export default function TransactionsPage() {
         onPageChange={setPage}
         onPageSizeChange={setPageSize}
         onRowClick={(entry) => setEditEntry({ id: entry.id, categoryId: entry.category_id, description: entry.description })}
+        onMarkAsTransfer={(entry) => setTransferEntry({ id: entry.id, description: entry.description })}
       />
       <CategoryEditDialog
         open={editEntry !== null}
@@ -138,6 +141,16 @@ export default function TransactionsPage() {
         onSave={(categoryId, createRule) =>
           editEntry && handleCategoryUpdate(editEntry.id, categoryId, createRule, editEntry.description)
         }
+      />
+      <MarkAsTransferDialog
+        open={transferEntry !== null}
+        journalId={transferEntry?.id ?? null}
+        description={transferEntry?.description ?? ''}
+        onClose={() => setTransferEntry(null)}
+        onMarked={() => {
+          setSnackbar({ open: true, message: 'Marked as transfer', severity: 'success' });
+          mutate();
+        }}
       />
       <Snackbar
         open={snackbar.open}

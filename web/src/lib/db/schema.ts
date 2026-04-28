@@ -8,6 +8,7 @@ import {
   numeric,
   timestamp,
   unique,
+  uuid,
   customType,
   jsonb,
   type AnyPgColumn,
@@ -50,14 +51,22 @@ export const accounts = pgTable('accounts', {
   parentId: integer('parent_id').references((): AnyPgColumn => accounts.id),
   description: text('description'),
   isSystem: boolean('is_system').notNull().default(false),
-  // Investment tagging — pension / S&S ISA / LISA / savings / crypto
+  // Investment tagging - pension / S&S ISA / LISA / savings / crypto
   // / other. is_investment splits asset accounts that grow via market
   // value (manual balance updates) from cash/operational ones. owner_id
   // attributes the account to a specific person; null means shared
   // and excluded from per-owner net-worth calcs by default.
   isInvestment: boolean('is_investment').notNull().default(false),
-  investmentKind: text('investment_kind'), // 'pension' | 'isa' | 'lisa' | 'savings' | 'crypto' | 'other' | null
+  investmentKind: text('investment_kind'),
   ownerId: integer('owner_id').references((): AnyPgColumn => owners.id),
+  // Transfer-pair hints. paysOffAccountId declares "this ASSET pays
+  // off this LIABILITY" so the auto-pair scorer can settle credit-card
+  // payments at maximum confidence. parentAccountId/isPot collapse
+  // Monzo Pots under their main current account in the UI and let the
+  // scorer treat pot top-ups as pot_transfer.
+  paysOffAccountId: integer('pays_off_account_id').references((): AnyPgColumn => accounts.id, { onDelete: 'set null' }),
+  parentAccountId: integer('parent_account_id').references((): AnyPgColumn => accounts.id, { onDelete: 'set null' }),
+  isPot: boolean('is_pot').notNull().default(false),
   createdAt: timestamp('created_at').notNull().defaultNow(),
 });
 
@@ -94,8 +103,28 @@ export const journalEntries = pgTable('journal_entries', {
   // re-sync: the same aggregator txn ID lands in the same row idempotently.
   providerTxnId: text('provider_txn_id'),
   syncRunId: integer('sync_run_id').references((): AnyPgColumn => syncRuns.id, { onDelete: 'set null' }),
+  // Inter-account transfer reconciliation. isTransfer is the
+  // load-bearing flag that dashboards filter on so a Bank -> Amex
+  // statement payment doesn't double-count. transferKind classifies
+  // it for reporting; transferGroupId / transferPartnerJournalId link
+  // half-resolved candidate pairs awaiting review or partner sync;
+  // transferReviewDismissedAt marks user-rejected suggestions so the
+  // reconciler doesn't keep re-suggesting them.
+  isTransfer: boolean('is_transfer').notNull().default(false),
+  transferKind: text('transfer_kind').$type<TransferKind | null>(),
+  transferGroupId: uuid('transfer_group_id'),
+  transferPartnerJournalId: integer('transfer_partner_journal_id').references((): AnyPgColumn => journalEntries.id, { onDelete: 'set null' }),
+  transferReviewDismissedAt: timestamp('transfer_review_dismissed_at'),
   createdAt: timestamp('created_at').notNull().defaultNow(),
 });
+
+export type TransferKind =
+  | 'statement_payment'
+  | 'pot_transfer'
+  | 'cross_bank'
+  | 'self_transfer'
+  | 'refund'
+  | 'manual';
 
 export const bookEntries = pgTable('book_entries', {
   id: serial('id').primaryKey(),

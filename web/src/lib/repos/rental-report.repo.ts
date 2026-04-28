@@ -227,6 +227,7 @@ async function fetchPropertyJournalLines(
       AND je.date >= ${startDate}
       AND je.date <= ${endDate}
       AND a.account_type IN ('INCOME', 'EXPENSE')
+      AND COALESCE(je.is_transfer, FALSE) = FALSE
     ORDER BY je.date ASC, je.id ASC, be.id ASC
   `);
 

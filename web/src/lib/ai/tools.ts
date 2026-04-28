@@ -494,11 +494,57 @@ export const TOOL_DEFINITIONS: Tool[] = [
   {
     name: 'untag_property_expense',
     description:
-      'Clear a journal entry\'s property_id (the inverse of tag_property_expense). Use when an expense was wrongly attributed to a property — e.g. a personal repair that the AI mistakenly tagged to a BTL. Doesn\'t change the category; if you want to re-categorise too, follow up with categorize_transaction.',
+      'Clear a journal entry\'s property_id (the inverse of tag_property_expense). Use when an expense was wrongly attributed to a property - e.g. a personal repair that the AI mistakenly tagged to a BTL. Doesn\'t change the category; if you want to re-categorise too, follow up with categorize_transaction.',
     input_schema: {
       type: 'object' as const,
       properties: {
         journal_id: { type: 'number' },
+      },
+      required: ['journal_id'],
+    },
+  },
+  {
+    name: 'mark_as_transfer',
+    description:
+      'Flag a journal entry as an inter-account transfer so it stops double-counting in monthly income/expense totals. If a paired_journal_id is supplied, both journals are merged into ONE balanced journal with two real-account legs (Bank -> Amex shape) - this is the right call for a credit-card statement payment, a Monzo Pot top-up, or a self-transfer between two of the user\'s own accounts. If no paired_journal_id is supplied, only the single journal is flagged (use this when the partner side isn\'t connected, e.g. paying an external person from one account). Always pick a kind: statement_payment for paying off a credit card, pot_transfer for Monzo Pot top-ups, self_transfer for moving money between your own current/savings accounts, cross_bank for transfers between two different banks (Monzo to Barclays etc), refund for a vendor refund, manual when none of the above fits. Use find_transfer_pair_candidates first if you don\'t already know the partner journal.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        journal_id: { type: 'number', description: 'The journal entry to flag.' },
+        paired_journal_id: {
+          type: 'number',
+          description: 'Optional: the partner journal on the other side. When supplied, the two journals are merged.',
+        },
+        kind: {
+          type: 'string',
+          enum: ['statement_payment', 'pot_transfer', 'cross_bank', 'self_transfer', 'refund', 'manual'],
+          description: 'Transfer classification. Defaults to "manual" when omitted.',
+        },
+      },
+      required: ['journal_id'],
+    },
+  },
+  {
+    name: 'unmark_transfer',
+    description:
+      'Clear the transfer flag on a journal entry (the inverse of mark_as_transfer). Use to recover from a false-positive transfer flag. Note: if mark_as_transfer was called with paired_journal_id (which merges the two journals into one), unmarking only flips the flag - the merge cannot be unmerged from this tool.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        journal_id: { type: 'number' },
+      },
+      required: ['journal_id'],
+    },
+  },
+  {
+    name: 'find_transfer_pair_candidates',
+    description:
+      'For a given journal entry, find candidate partner journals that look like the other side of an inter-account transfer (opposite-sign amount on a different real account, within a small date window). Returns up to a handful of matches sorted by date proximity. Use this before mark_as_transfer when you need to identify the partner, or when the user asks you to find unmatched transfers.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        journal_id: { type: 'number', description: 'The source journal whose partner you\'re looking for.' },
+        window_days: { type: 'number', description: 'Date window in days (default 3).' },
       },
       required: ['journal_id'],
     },
@@ -516,6 +562,9 @@ export const TOOL_LABELS: Record<string, string> = {
   tag_property_expense: 'Tagging property expense',
   tag_property_expenses_bulk: 'Tagging property expenses',
   untag_property_expense: 'Untagging property expense',
+  mark_as_transfer: 'Marking as transfer',
+  unmark_transfer: 'Clearing transfer flag',
+  find_transfer_pair_candidates: 'Finding transfer candidates',
   get_account_balances: 'Looking up account balances',
   search_transactions: 'Searching transactions',
   get_monthly_spending: 'Fetching spending data',
@@ -623,6 +672,12 @@ export async function executeTool(
       return executeTagPropertyExpensesBulk(input);
     case 'untag_property_expense':
       return executeUntagPropertyExpense(input);
+    case 'mark_as_transfer':
+      return executeMarkAsTransfer(input);
+    case 'unmark_transfer':
+      return executeUnmarkTransfer(input);
+    case 'find_transfer_pair_candidates':
+      return executeFindTransferPairCandidates(input);
     default:
       return { error: `Unknown tool: ${name}` };
   }
@@ -1506,5 +1561,70 @@ async function executeUntagPropertyExpense(input: Record<string, unknown>) {
     return { success: true, ...result };
   } catch (e) {
     return { error: e instanceof Error ? e.message : 'Failed to untag property expense' };
+  }
+}
+
+const TRANSFER_KINDS = [
+  'statement_payment',
+  'pot_transfer',
+  'cross_bank',
+  'self_transfer',
+  'refund',
+  'manual',
+] as const;
+
+async function executeMarkAsTransfer(input: Record<string, unknown>) {
+  const journalId = input.journal_id;
+  const pairedJournalId = input.paired_journal_id;
+  const rawKind = input.kind;
+  if (typeof journalId !== 'number') return { error: 'journal_id is required' };
+  if (pairedJournalId !== undefined && typeof pairedJournalId !== 'number') {
+    return { error: 'paired_journal_id, when supplied, must be a number' };
+  }
+  if (rawKind !== undefined && (typeof rawKind !== 'string' || !(TRANSFER_KINDS as readonly string[]).includes(rawKind))) {
+    return { error: `kind must be one of: ${TRANSFER_KINDS.join(', ')}` };
+  }
+  const kind = (typeof rawKind === 'string' ? rawKind : 'manual') as typeof TRANSFER_KINDS[number];
+  try {
+    if (typeof pairedJournalId === 'number') {
+      const mergedId = await journalRepo.mergeTransferPair(journalId, pairedJournalId, kind);
+      return {
+        success: true,
+        merged: true,
+        journalId: mergedId,
+        sourceJournalIds: [journalId, pairedJournalId],
+        kind,
+      };
+    }
+    await journalRepo.markAsTransfer(journalId, kind);
+    return { success: true, merged: false, journalId, kind };
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : 'Failed to mark as transfer' };
+  }
+}
+
+async function executeUnmarkTransfer(input: Record<string, unknown>) {
+  const journalId = input.journal_id;
+  if (typeof journalId !== 'number') return { error: 'journal_id is required' };
+  try {
+    await journalRepo.unmarkTransfer(journalId);
+    return { success: true, journalId };
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : 'Failed to unmark transfer' };
+  }
+}
+
+async function executeFindTransferPairCandidates(input: Record<string, unknown>) {
+  const journalId = input.journal_id;
+  const rawWindow = input.window_days;
+  if (typeof journalId !== 'number') return { error: 'journal_id is required' };
+  const windowDays = typeof rawWindow === 'number' && Number.isFinite(rawWindow)
+    ? Math.min(Math.max(Math.trunc(rawWindow), 0), 30)
+    : 3;
+  try {
+    const candidates = await journalRepo.findTransferCandidates(journalId, windowDays, 5);
+    return { journalId, windowDays, candidates };
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : 'Failed to find candidates' };
   }
 }

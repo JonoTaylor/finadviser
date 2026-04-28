@@ -25,6 +25,12 @@ export default function ImportPage() {
   const [fileType, setFileType] = useState<'csv' | 'pdf'>('csv');
   const [csvContent, setCsvContent] = useState('');
   const [bankConfig, setBankConfig] = useState('generic-csv');
+  // Default kept as 'Bank' so the PDF flow (which skips ConfigStep
+  // entirely - handleFileSelect routes straight to /api/import/preview)
+  // doesn't 400 on empty accountName. Users on the CSV path see the
+  // dropdown with "Bank" pre-selected if such an account exists, or
+  // the placeholder otherwise; either way an explicit pick still
+  // lands a real account on Preview.
   const [accountName, setAccountName] = useState('Bank');
   const [preview, setPreview] = useState<Array<Record<string, unknown>> | null>(null);
   const [previewing, setPreviewing] = useState(false);
@@ -34,7 +40,7 @@ export default function ImportPage() {
   const [error, setError] = useState('');
 
   const { data: bankConfigs } = useSWR('/api/import/bank-configs', fetcher);
-  const { data: accounts } = useSWR('/api/accounts', fetcher);
+  const { data: accounts, mutate: mutateAccounts } = useSWR('/api/accounts', fetcher);
 
   const steps = fileType === 'pdf' ? PDF_STEPS : CSV_STEPS;
 
@@ -189,6 +195,7 @@ export default function ImportPage() {
               accounts={accounts ?? []}
               onBankConfigChange={setBankConfig}
               onAccountNameChange={setAccountName}
+              onAccountsChanged={() => mutateAccounts()}
               onNext={handleConfigure}
               onBack={() => setActiveStep(0)}
               busy={previewing}

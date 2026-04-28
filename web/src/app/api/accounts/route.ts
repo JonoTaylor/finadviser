@@ -26,8 +26,21 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const account = await accountRepo.create(body);
-    return NextResponse.json(account, { status: 201 });
+    // Pull paysOffAccountId out before the create so it doesn't get
+    // forwarded to accountRepo.create (which doesn't accept it as a
+    // creation field). The create-then-update sequence is non-atomic
+    // (no neon-http transaction support), but the failure mode is
+    // benign: the account exists without the link, and the user can
+    // set it later via the connections-mapping wizard or the Chart
+    // of Accounts UI.
+    const { paysOffAccountId, ...createBody } = body ?? {};
+    const account = await accountRepo.create(createBody);
+    let responseAccount: typeof account & { paysOffAccountId?: number | null } = account;
+    if (typeof paysOffAccountId === 'number' && paysOffAccountId !== account.id) {
+      const updated = await accountRepo.update(account.id, { paysOffAccountId });
+      responseAccount = updated ?? { ...account, paysOffAccountId };
+    }
+    return NextResponse.json(responseAccount, { status: 201 });
   } catch (error) {
     return NextResponse.json({ error: 'Failed to create account' }, { status: 500 });
   }

@@ -348,9 +348,16 @@ export async function listMonzoPots(
   if (res.status === 403) throw new MonzoSCAPendingError(await readBody(res));
   if (res.status === 401) throw new MonzoAuthError(await readBody(res));
   if (!res.ok) throw new MonzoApiError(res.status, await readBody(res));
-  const body = (await res.json()) as { pots: MonzoPotWire[] };
+  // readBody is content-type-aware: returns the parsed JSON when
+  // application/json, the raw text otherwise (or null on parse error).
+  // Safer than res.json() on a code path that can be exercised by
+  // upstream errors that occasionally return HTML / text/plain.
+  const parsed = await readBody(res);
+  const pots = (parsed && typeof parsed === 'object' && 'pots' in parsed
+    ? (parsed as { pots?: MonzoPotWire[] }).pots
+    : null) ?? [];
   const map = new Map<string, string>();
-  for (const p of body.pots ?? []) {
+  for (const p of pots) {
     if (p.deleted) continue;
     if (p.id && p.name) map.set(p.id, p.name);
   }
@@ -390,12 +397,16 @@ export async function listMonzoTransactions(
 
   // One-shot pot lookup: replace `pot_xxx` IDs in transaction
   // descriptions with the human pot name (e.g. "Holiday Fund").
-  // Failures are non-fatal - the sync proceeds with raw IDs.
+  // Failures are non-fatal (the sync proceeds with raw IDs) but
+  // logged so production can see when Monzo's /pots endpoint changes
+  // shape or returns an outage page; otherwise pot IDs leaking
+  // through to /transactions would be silent and confusing.
   let potNames: Map<string, string> = new Map();
   try {
     potNames = await listMonzoPots(accessToken, input.aggregatorAccountRef);
-  } catch {
-    /* swallow - non-fatal cosmetic */
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    console.warn(`[monzo] listMonzoPots failed for account ${input.aggregatorAccountRef}: ${msg}`);
   }
 
   for (let page = 0; page < PAGE_LIMIT; page++) {
@@ -429,11 +440,12 @@ export async function listMonzoTransactions(
 }
 
 /**
- * Replace any `pot_xxx` substring in the description with the human
- * pot name. Pot top-ups land as `description: "pot_0000xxx..."` plus
- * `metadata.pot_id`; withdrawals are similar. Direction prefix
- * ("Transfer to" / "Transfer from") is added when we can infer it
- * from the amount sign.
+ * Substitute the human pot name when the entire description is a
+ * standalone `pot_xxx` ID, the shape Monzo writes for pot top-ups
+ * and withdrawals. The match is anchored, not substring: we only
+ * rewrite the description when it's the bare ID, not when the ID
+ * happens to appear inside a longer string. The direction prefix
+ * ("Transfer to" / "Transfer from") is inferred from amount sign.
  */
 function describePotMovement(
   raw: string,

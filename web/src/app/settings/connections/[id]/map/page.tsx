@@ -158,11 +158,15 @@ export default function MappingWizardPage({ params }: { params: Promise<{ id: st
       const body = await res.json();
       if (!res.ok) throw new Error(body?.error ?? `Request failed: ${res.status}`);
       // Bind the new account to the row that triggered the dialog.
+      // Reset paysOffAccountId for the same reason as the inline
+      // dropdown handler: a new bind shouldn't inherit the previous
+      // account's pays-off pointer.
       setDrafts(d => ({
         ...d,
         [createDialog.aggregatorAccountRef]: {
           ...d[createDialog.aggregatorAccountRef],
           accountId: body.id,
+          paysOffAccountId: null,
         },
       }));
       // Refresh the accounts list so the new option appears in the
@@ -327,9 +331,20 @@ export default function MappingWizardPage({ params }: { params: Promise<{ id: st
                           setCreateDialog({ aggregatorAccountRef: agg.aggregatorAccountRef, defaultName });
                           return;
                         }
+                        // Reset paysOffAccountId on every accountId
+                        // change. Without this, switching the bind
+                        // target (or unbinding) would carry over the
+                        // previous account's pays-off relationship
+                        // and persist it onto the new account on
+                        // submit, mis-routing the +100 statement-
+                        // payment signal in the reconciler.
                         setDrafts(d => ({
                           ...d,
-                          [agg.aggregatorAccountRef]: { ...d[agg.aggregatorAccountRef], accountId: v === '' ? '' : Number(v) },
+                          [agg.aggregatorAccountRef]: {
+                            ...d[agg.aggregatorAccountRef],
+                            accountId: v === '' ? '' : Number(v),
+                            paysOffAccountId: null,
+                          },
                         }));
                       }}
                       helperText={isEverydayAccountType(agg.type)

@@ -193,15 +193,20 @@ export async function recordMortgagePayments(params: {
   const buildRef = (date: string, amountFixed: string) =>
     `mortgage_payment:${mortgageId}:${date}:${amountFixed}`;
   const refs = payments.map(p => buildRef(p.date, new Decimal(p.amount).toFixed(2)));
-  const existingRows = refs.length === 0
-    ? []
-    : await db
-        .select({ id: journalEntries.id, reference: journalEntries.reference })
-        .from(journalEntries)
-        .where(inArray(journalEntries.reference, refs));
+  let existingRows: Array<{ id: number; reference: string | null }> = [];
+  if (refs.length > 0) {
+    existingRows = await db
+      .select({ id: journalEntries.id, reference: journalEntries.reference })
+      .from(journalEntries)
+      .where(inArray(journalEntries.reference, refs));
+  }
   const existingByRef = new Map<string, number>();
   for (const r of existingRows) {
-    if (r.reference) existingByRef.set(r.reference, r.id);
+    // Nullish-only check: an empty-string reference is technically
+    // valid (the column allows it) and should still index, but our
+    // build_ref always produces a non-empty key so in practice we
+    // only ever skip explicit nulls. Using != null is precise.
+    if (r.reference != null) existingByRef.set(r.reference, r.id);
   }
 
   // Build the journal items in memory first; defer the DB writes

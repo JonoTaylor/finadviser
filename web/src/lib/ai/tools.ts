@@ -724,12 +724,21 @@ async function executeBulkAddMortgagePayments(input: Record<string, unknown>) {
   // a property named exactly "249 Francis Road" AND "249 Francis
   // Road, Flat A" via its address) would be flagged ambiguous even
   // when the user clearly meant the exact match.
+  //
+  // Both branches must check for multiple matches: the DB's unique
+  // constraint on properties.name is case-sensitive, so two rows
+  // can legally differ only in case ("Hinckley" vs "hinckley") and
+  // a case-insensitive .find() would silently pick the first.
   const properties = await propertyRepo.listProperties();
   const needle = propertyName.toLowerCase();
-  const exactMatch = properties.find(p => p.name.toLowerCase() === needle);
+  const exactMatches = properties.filter(p => p.name.toLowerCase() === needle);
   let property: typeof properties[number];
-  if (exactMatch) {
-    property = exactMatch;
+  if (exactMatches.length === 1) {
+    property = exactMatches[0];
+  } else if (exactMatches.length > 1) {
+    return {
+      error: `Property name "${propertyName}" matched ${exactMatches.length} rows case-insensitively: ${exactMatches.map(p => p.name).join(', ')}. Use the exact case.`,
+    };
   } else {
     const candidates = properties.filter(p => {
       const haystack = `${p.name} ${p.address ?? ''}`.toLowerCase();

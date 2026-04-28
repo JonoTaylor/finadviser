@@ -101,6 +101,32 @@ async function importTransactions(
   for (let i = 0; i < nonDup.length; i += CHUNK_SIZE) {
     const chunk = nonDup.slice(i, i + CHUNK_SIZE);
 
+    // Booking convention: target account gets the bank-signed
+    // amount unchanged; the contra is the opposite sign on
+    // Uncategorized Income (positive bank rows) or Uncategorized
+    // Expense (negative). The journal balances arithmetically
+    // (createEntry trigger requires sum=0).
+    //
+    // This shape works for BOTH ASSET and LIABILITY targets in
+    // this codebase's debit-positive / credit-negative convention:
+    //   - ASSET target with -£50 (spend): target -50 (asset balance
+    //     down, debit reduction), contra Uncat Expense +50 (expense
+    //     up, debit increase). Correct.
+    //   - LIABILITY target with -£50 (Yonder spend): target -50
+    //     which is a credit on the liability (negative-on-liability
+    //     = credit-normal balance growing), so the displayed debt
+    //     via .abs() at calc-time goes UP by 50. Contra Uncat
+    //     Expense +50 (expense up). Correct.
+    //   - LIABILITY target with +£50 (statement payment received
+    //     on the card): target +50 = debit reducing the liability
+    //     (debt shrinks). Contra Uncat Income -50 - semantically
+    //     wrong (this isn't income, it's a transfer-in from the
+    //     payer's bank account) but the transfer reconciler
+    //     auto-merges this with the bank-side -£50 debit when both
+    //     have synced, replacing both with one balanced
+    //     statement_payment journal.
+    //
+    // No per-account-type sign-flip needed at the importer.
     const items = chunk.map(txn => {
       const amount = new Decimal(txn.amount);
       const otherAccountId = amount.gte(0) ? incomeAccount.id : expenseAccount.id;

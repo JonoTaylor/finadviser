@@ -1196,6 +1196,13 @@ BEGIN
              WHERE COALESCE(je.is_transfer, FALSE) = FALSE
                AND je.transfer_review_dismissed_at IS NULL
                AND je.transfer_group_id IS NULL
+               -- Exclude mortgage-payment journals: they're 3-leg
+               -- (Bank, Mortgage Interest, Liability) so each
+               -- generates 3 candidate real-account legs that could
+               -- spuriously pair against same-amount opposite-sign
+               -- journals on other accounts. The reference key shape
+               -- comes from recordMortgagePayments and is stable.
+               AND (je.reference IS NULL OR je.reference NOT LIKE 'mortgage_payment:%')
                AND be.account_id NOT IN (
                    COALESCE(v_uncat_in, -1),
                    COALESCE(v_uncat_out, -1)
@@ -1248,10 +1255,20 @@ BEGIN
               JOIN journal_real_legs b
                 ON b.journal_id <> a.journal_id
                AND b.account_id <> a.account_id
-               AND ABS(a.dt - b.dt) <= p_window_days
                AND ROUND(a.amount + b.amount, 2) = 0
               JOIN accounts aa ON aa.id = a.account_id
               JOIN accounts ba ON ba.id = b.account_id
+              -- Per-pair window: bump to 7 days when the two accounts
+              -- have a declared pays_off link (statement payments
+              -- routinely settle 3-5 days after the bank-side debit
+              -- so the default 3-day window misses them). For all
+              -- other pair shapes we keep the caller's window.
+              AND ABS(a.dt - b.dt) <= CASE
+                  WHEN aa.pays_off_account_id = ba.id
+                    OR ba.pays_off_account_id = aa.id
+                       THEN GREATEST(p_window_days, 7)
+                  ELSE p_window_days
+              END
               LEFT JOIN transaction_metadata tma ON tma.journal_entry_id = a.journal_id
               LEFT JOIN transaction_metadata tmb ON tmb.journal_entry_id = b.journal_id
              -- Order matters less than uniqueness; keep a < b on

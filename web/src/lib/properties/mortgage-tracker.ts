@@ -333,23 +333,39 @@ export async function recordMortgagePayments(params: {
   // principal — interest-only mortgages skip this entire branch).
   const equityItems = paymentItems.filter(it => !it.principalDec.isZero());
   if (equityItems.length > 0) {
-    const equityTracking = await accountRepo.getOrCreate(
-      `Equity Contributions - ${lender}`,
-      'EQUITY',
-    );
-    await journalRepo.createEntriesBulk(
-      equityItems.map(it => ({
-        journal: {
-          date: it.journal.date,
-          description: `Capital contribution via mortgage principal - ${lender}`,
-          propertyId,
-        },
-        entries: [
-          { accountId: payerCapitalAccountId, amount: it.principalDec.toString() },
-          { accountId: equityTracking.id, amount: it.principalDec.neg().toString() },
-        ],
-      })),
-    );
+    try {
+      const equityTracking = await accountRepo.getOrCreate(
+        `Equity Contributions - ${lender}`,
+        'EQUITY',
+      );
+      await journalRepo.createEntriesBulk(
+        equityItems.map(it => ({
+          journal: {
+            date: it.journal.date,
+            description: `Capital contribution via mortgage principal - ${lender}`,
+            propertyId,
+          },
+          entries: [
+            { accountId: payerCapitalAccountId, amount: it.principalDec.toString() },
+            { accountId: equityTracking.id, amount: it.principalDec.neg().toString() },
+          ],
+        })),
+      );
+    } catch (e) {
+      // The payment journals already inserted via createEntriesBulk
+      // above; if the equity-contribution side fails (FK miss,
+      // constraint violation, transient), we DON'T re-throw - that
+      // would 500 the response while leaving the payment journals
+      // in the DB, and the dedup index would skip them on re-paste.
+      // Surface the failure as per-row entries in `errors` so the
+      // caller sees a partial-success summary; the missing equity
+      // legs can be reapplied later (the principal portion is
+      // recoverable from journal_entries.reference).
+      const message = e instanceof Error ? e.message : 'equity contribution insert failed';
+      for (const it of equityItems) {
+        errors.push({ date: it.payment.date, amount: it.payment.amount, message });
+      }
+    }
   }
 
   return { added, duplicates, errors };

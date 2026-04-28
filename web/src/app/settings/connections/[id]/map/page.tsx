@@ -412,17 +412,18 @@ export default function MappingWizardPage({ params }: { params: Promise<{ id: st
                       >
                         <MenuItem value=""><em>None</em></MenuItem>
                         <Divider />
+                        {/* Only ASSET accounts are valid payers - the
+                            scorer's +100 statement_payment signal expects
+                            an ASSET <-> LIABILITY shape. INCOME / EXPENSE /
+                            EQUITY entries here would be meaningless and
+                            confusingly hide the actual bank account in a
+                            sea of expense categories. */}
                         {(accountsData ?? [])
-                          .filter(a => a.account_id !== draft.accountId)
+                          .filter(a => a.account_id !== draft.accountId && a.account_type === 'ASSET')
                           .map(a => (
                             <MenuItem key={a.account_id} value={a.account_id}>
                               <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%', gap: 2 }}>
-                                <Box component="span">
-                                  {a.account_name}
-                                  <Box component="span" sx={{ color: 'text.secondary', ml: 1, fontSize: '0.78rem' }}>
-                                    ({a.account_type})
-                                  </Box>
-                                </Box>
+                                <span>{a.account_name}</span>
                                 <Box component="span" sx={{ color: 'text.secondary', fontSize: '0.78rem', fontFeatureSettings: '"tnum"' }}>
                                   {formatCurrency(a.balance)}
                                 </Box>

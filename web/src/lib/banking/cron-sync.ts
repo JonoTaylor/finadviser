@@ -16,7 +16,7 @@
  * Returns a summary the route handler echoes back to Vercel logs.
  */
 
-import { syncConnection } from './sync';
+import { syncConnection, reconcileTransfersForRun } from './sync';
 import { bankingRepo, type ConnectionRow, type ConnectionStatus } from './repo';
 import { tipRepo } from '@/lib/repos';
 
@@ -29,6 +29,8 @@ export interface CronSummary {
   skipped: number;
   becameExpiring: number;
   becameExpired: number;
+  /** Number of transfer pairs auto-merged at the end of this cron run. */
+  transfersMerged: number;
   errors: Array<{ connectionId: number; provider: string; message: string }>;
 }
 
@@ -40,6 +42,7 @@ export async function runDailySync(): Promise<CronSummary> {
     skipped: 0,
     becameExpiring: 0,
     becameExpired: 0,
+    transfersMerged: 0,
     errors: [],
   };
 
@@ -120,6 +123,19 @@ export async function runDailySync(): Promise<CronSummary> {
       }).catch(() => { /* ditto */ });
       summary.errors.push({ connectionId: conn.id, provider: conn.providerDisplayName, message: msg });
     }
+  }
+
+  // End-of-run cross-connection reconciliation pass. A statement
+  // payment shows up on a bank connection and on a credit-card
+  // connection; running this once at the end (rather than per
+  // connection) lets the scorer pair them even if they synced in
+  // different cron iterations. Passes NULL so the function scans
+  // all unmerged journals; the function itself filters out
+  // already-flagged / already-grouped rows so it's idempotent.
+  try {
+    summary.transfersMerged = await reconcileTransfersForRun(null, 3);
+  } catch (e) {
+    console.error('[cron] reconcileTransfersForRun failed:', e);
   }
 
   return summary;

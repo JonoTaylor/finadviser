@@ -10,6 +10,7 @@ export async function GET(request: NextRequest) {
       categoryId: params.get('categoryId') ? parseInt(params.get('categoryId')!) : undefined,
       accountId: params.get('accountId') ? parseInt(params.get('accountId')!) : undefined,
       query: params.get('q') ?? undefined,
+      hideTransfers: params.get('hideTransfers') === 'true',
       limit: params.get('limit') ? parseInt(params.get('limit')!) : 100,
       offset: params.get('offset') ? parseInt(params.get('offset')!) : 0,
     };

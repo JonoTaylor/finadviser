@@ -152,11 +152,12 @@ export const journalRepo = {
     categoryId?: number;
     accountId?: number;
     query?: string;
+    hideTransfers?: boolean;
     limit?: number;
     offset?: number;
   } = {}) {
     const db = getDb();
-    const { startDate, endDate, categoryId, accountId, query, limit = 100, offset = 0 } = filters;
+    const { startDate, endDate, categoryId, accountId, query, hideTransfers, limit = 100, offset = 0 } = filters;
 
     let whereClause = sql`1=1`;
     if (startDate) whereClause = sql`${whereClause} AND je.date >= ${startDate}`;
@@ -166,11 +167,14 @@ export const journalRepo = {
       whereClause = sql`${whereClause} AND je.id IN (SELECT journal_entry_id FROM book_entries WHERE account_id = ${accountId})`;
     }
     if (query) whereClause = sql`${whereClause} AND je.description ILIKE ${'%' + query + '%'}`;
+    if (hideTransfers) whereClause = sql`${whereClause} AND COALESCE(je.is_transfer, FALSE) = FALSE`;
 
     const rows = await db.execute(sql`
       SELECT je.id, je.date, je.description, je.reference, je.category_id,
              c.name AS category_name,
              je.is_transfer, je.transfer_kind,
+             je.transfer_group_id::text AS transfer_group_id,
+             je.transfer_partner_journal_id,
              STRING_AGG(a.name || ':' || be.amount, '|' ORDER BY CASE a.account_type WHEN 'ASSET' THEN 0 ELSE 1 END) AS entries_summary,
              tm.merchant_name, tm.merchant_emoji, tm.transaction_type,
              tm.bank_category, tm.notes, tm.address
@@ -181,7 +185,7 @@ export const journalRepo = {
       LEFT JOIN transaction_metadata tm ON tm.journal_entry_id = je.id
       WHERE ${whereClause}
       GROUP BY je.id, je.date, je.description, je.reference, je.category_id, c.name,
-               je.is_transfer, je.transfer_kind,
+               je.is_transfer, je.transfer_kind, je.transfer_group_id, je.transfer_partner_journal_id,
                tm.merchant_name, tm.merchant_emoji, tm.transaction_type,
                tm.bank_category, tm.notes, tm.address
       ORDER BY je.date DESC, je.id DESC
@@ -196,9 +200,10 @@ export const journalRepo = {
     categoryId?: number;
     accountId?: number;
     query?: string;
+    hideTransfers?: boolean;
   } = {}) {
     const db = getDb();
-    const { startDate, endDate, categoryId, accountId, query } = filters;
+    const { startDate, endDate, categoryId, accountId, query, hideTransfers } = filters;
 
     let whereClause = sql`1=1`;
     if (startDate) whereClause = sql`${whereClause} AND je.date >= ${startDate}`;
@@ -208,6 +213,7 @@ export const journalRepo = {
       whereClause = sql`${whereClause} AND je.id IN (SELECT journal_entry_id FROM book_entries WHERE account_id = ${accountId})`;
     }
     if (query) whereClause = sql`${whereClause} AND je.description ILIKE ${'%' + query + '%'}`;
+    if (hideTransfers) whereClause = sql`${whereClause} AND COALESCE(je.is_transfer, FALSE) = FALSE`;
 
     const rows = await db.execute(sql`
       SELECT COUNT(DISTINCT je.id) AS count
@@ -551,6 +557,134 @@ export const journalRepo = {
       amount: r.amount as string,
       dateDriftDays: Number(r.date_drift_days),
     }));
+  },
+
+  /**
+   * Review-queue feed: candidate transfer pairs that the auto-pair
+   * scorer was 40-79 confident about. The reconciler stamps both
+   * sides with a shared transfer_group_id; this query reassembles
+   * them into one row per pair, with the two journals' descriptions,
+   * accounts, dates, and amounts so the user can confirm or reject.
+   */
+  async listTransferReviewQueue(limit = 50): Promise<Array<{
+    groupId: string;
+    kind: string | null;
+    journalA: { id: number; date: string; description: string; account: string; amount: string };
+    journalB: { id: number; date: string; description: string; account: string; amount: string };
+  }>> {
+    const db = getDb();
+    const rows = await db.execute(sql`
+      WITH grouped AS (
+        SELECT je.transfer_group_id::text AS group_id,
+               je.id AS journal_id,
+               je.date,
+               je.description,
+               je.transfer_kind,
+               be.account_id,
+               be.amount::text AS amount,
+               a.name AS account_name
+          FROM journal_entries je
+          JOIN book_entries be ON be.journal_entry_id = je.id
+          JOIN accounts a ON a.id = be.account_id
+         WHERE je.transfer_group_id IS NOT NULL
+           AND COALESCE(je.is_transfer, FALSE) = FALSE
+           AND je.transfer_review_dismissed_at IS NULL
+           AND a.name NOT IN ('Uncategorized Income', 'Uncategorized Expense')
+      ),
+      ordered AS (
+        SELECT *,
+               ROW_NUMBER() OVER (PARTITION BY group_id ORDER BY journal_id) AS leg
+          FROM grouped
+      )
+      SELECT a.group_id,
+             a.transfer_kind AS kind,
+             a.journal_id   AS a_id,
+             a.date         AS a_date,
+             a.description  AS a_description,
+             a.account_name AS a_account,
+             a.amount       AS a_amount,
+             b.journal_id   AS b_id,
+             b.date         AS b_date,
+             b.description  AS b_description,
+             b.account_name AS b_account,
+             b.amount       AS b_amount
+        FROM ordered a
+        JOIN ordered b ON b.group_id = a.group_id AND b.leg = 2
+       WHERE a.leg = 1
+       ORDER BY a.date DESC
+       LIMIT ${limit}
+    `);
+    return rows.rows.map(r => ({
+      groupId: r.group_id as string,
+      kind: (r.kind as string | null) ?? null,
+      journalA: {
+        id: r.a_id as number,
+        date: r.a_date as string,
+        description: r.a_description as string,
+        account: r.a_account as string,
+        amount: r.a_amount as string,
+      },
+      journalB: {
+        id: r.b_id as number,
+        date: r.b_date as string,
+        description: r.b_description as string,
+        account: r.b_account as string,
+        amount: r.b_amount as string,
+      },
+    }));
+  },
+
+  /**
+   * Reject a candidate pair. Stamps transfer_review_dismissed_at on
+   * both legs and clears the group_id so the reconciler doesn't
+   * re-suggest. The user can still hit "Mark as transfer" manually
+   * later if they change their mind.
+   */
+  async dismissTransferGroup(groupId: string): Promise<void> {
+    const db = getDb();
+    await db.execute(sql`
+      UPDATE journal_entries
+         SET transfer_review_dismissed_at = now(),
+             transfer_group_id = NULL,
+             transfer_partner_journal_id = NULL,
+             transfer_kind = NULL
+       WHERE transfer_group_id = ${groupId}::uuid
+    `);
+  },
+
+  /**
+   * Confirm a candidate pair: merge the two journals exactly as
+   * mark_as_transfer would, using the suggested kind. The reconciler
+   * already populated transfer_kind on both legs; we read it from
+   * either side and call merge_transfer_pair.
+   */
+  async confirmTransferGroup(groupId: string): Promise<number> {
+    const db = getDb();
+    const lookup = await db.execute(sql`
+      SELECT id, transfer_kind
+        FROM journal_entries
+       WHERE transfer_group_id = ${groupId}::uuid
+       ORDER BY id ASC
+       LIMIT 2
+    `);
+    const rows = lookup.rows as Array<{ id: number; transfer_kind: string | null }>;
+    if (rows.length !== 2) {
+      throw new Error(`Transfer group ${groupId} does not have exactly two members`);
+    }
+    const kind = rows[0].transfer_kind ?? rows[1].transfer_kind ?? 'manual';
+    if (!TRANSFER_KINDS.includes(kind as TransferKind)) {
+      throw new Error(
+        `Invalid transfer kind '${kind}' on group ${groupId}; expected one of: ${TRANSFER_KINDS.join(', ')}`,
+      );
+    }
+    const merge = await db.execute(sql`
+      SELECT merge_transfer_pair(${rows[0].id}::integer, ${rows[1].id}::integer, ${kind}::text) AS journal_id
+    `);
+    const r = merge.rows[0] as { journal_id: number } | undefined;
+    if (!r || r.journal_id == null) {
+      throw new Error('merge_transfer_pair returned no row');
+    }
+    return r.journal_id;
   },
 
   async search(query: string, limit = 50) {

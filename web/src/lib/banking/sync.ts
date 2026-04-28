@@ -95,6 +95,33 @@ export async function syncConnection(connectionId: number, syncRunId: number): P
 }
 
 /**
+ * After every sync (manual or cron), scan for newly-paired transfers
+ * across the entire account graph (not just this connection: a Bank ->
+ * Amex statement payment crosses two connections, and the partner side
+ * may have been synced minutes ago in a different run).
+ *
+ * Auto-merges high-confidence pairs (score >= 80) and stamps a
+ * transfer_group_id on lower-confidence ones (40-79) so the review
+ * queue at /transactions/transfers can surface them. The Postgres
+ * function logic (`find_and_pair_transfers`) is the source of truth
+ * for the scoring; this wrapper just calls it and surfaces the
+ * auto-merge count for sync_runs / cron logging.
+ *
+ * Passing `syncRunId` scopes the candidate set to journals touched by
+ * that run plus their date neighbours, so a daily sync doesn't
+ * re-scan the entire history every morning. Passing `null` does a
+ * full sweep (used by the migration backfill DO block).
+ */
+export async function reconcileTransfersForRun(syncRunId: number | null, windowDays = 3): Promise<number> {
+  const db = getDb();
+  const result = await db.execute(sql`
+    SELECT find_and_pair_transfers(${syncRunId}::integer, ${windowDays}::integer) AS merged
+  `);
+  const row = result.rows[0] as { merged: number | null } | undefined;
+  return row?.merged ?? 0;
+}
+
+/**
  * Idempotent insert of a single aggregator transaction via the
  * `ingest_bank_transaction` Postgres function. Returns true if a
  * new journal_entry was created, false if `provider_txn_id` was

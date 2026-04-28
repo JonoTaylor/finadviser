@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { GoCardlessApiError, GoCardlessAuthError, GoCardlessRateLimitError } from '@/lib/banking/gocardless';
 import { bankingRepo } from '@/lib/banking/repo';
-import { syncConnection } from '@/lib/banking/sync';
+import { syncConnection, reconcileTransfersForRun } from '@/lib/banking/sync';
 
 /**
  * POST /api/banking/connections/[id]/sync
@@ -47,7 +47,19 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
     });
     await bankingRepo.markSynced(connectionId);
 
-    return NextResponse.json({ syncRunId: runId, ...outcome });
+    // Reconcile transfers right after the sync. Scope to journals
+    // touched by this run plus their date neighbours so we don't
+    // re-scan the whole history on every "Sync now" click. A
+    // reconciler error is non-fatal (the sync itself succeeded;
+    // surface the count anyway).
+    let transfersMerged = 0;
+    try {
+      transfersMerged = await reconcileTransfersForRun(runId, 3);
+    } catch (e) {
+      console.error('reconcileTransfersForRun failed after manual sync:', e);
+    }
+
+    return NextResponse.json({ syncRunId: runId, transfersMerged, ...outcome });
   } catch (err) {
     if (runId !== null) {
       const msg = err instanceof Error ? err.message : 'unknown error';

@@ -1,8 +1,12 @@
 'use client';
 
 import { useState, useCallback } from 'react';
-import { Box, Typography, Button, Snackbar, Alert } from '@mui/material';
+import {
+  Box, Typography, Button, Snackbar, Alert, FormControlLabel, Switch, Stack, Badge,
+} from '@mui/material';
 import AutoFixHighRoundedIcon from '@mui/icons-material/AutoFixHighRounded';
+import SwapHorizRoundedIcon from '@mui/icons-material/SwapHorizRounded';
+import Link from 'next/link';
 import useSWR from 'swr';
 import TransactionFilters from '@/components/transactions/TransactionFilters';
 import TransactionTable from '@/components/transactions/TransactionTable';
@@ -21,6 +25,7 @@ export default function TransactionsPage() {
   });
   const [page, setPage] = useState(0);
   const [pageSize, setPageSize] = useState(25);
+  const [hideTransfers, setHideTransfers] = useState(true);
   const [editEntry, setEditEntry] = useState<{ id: number; categoryId: number | null; description: string } | null>(null);
   const [transferEntry, setTransferEntry] = useState<{ id: number; description: string } | null>(null);
   const [autoCategorizing, setAutoCategorizing] = useState(false);
@@ -36,12 +41,15 @@ export default function TransactionsPage() {
   if (filters.accountId) queryParams.set('accountId', String(filters.accountId));
   if (filters.startDate) queryParams.set('startDate', filters.startDate);
   if (filters.endDate) queryParams.set('endDate', filters.endDate);
+  if (hideTransfers) queryParams.set('hideTransfers', 'true');
   queryParams.set('limit', String(pageSize));
   queryParams.set('offset', String(page * pageSize));
 
   const { data, isLoading, mutate } = useSWR(`/api/journal?${queryParams}`, fetcher);
   const { data: categories } = useSWR('/api/categories', fetcher);
   const { data: accounts } = useSWR('/api/accounts', fetcher);
+  const { data: review } = useSWR<{ candidates: unknown[] }>('/api/journal/transfers/review', fetcher);
+  const reviewCount = review?.candidates?.length ?? 0;
 
   const handleFilterChange = useCallback((newFilters: typeof filters) => {
     setFilters(newFilters);
@@ -99,21 +107,49 @@ export default function TransactionsPage() {
 
   return (
     <Box>
-      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 4 }}>
+      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 3 }}>
         <Box>
           <Typography variant="h4">Transactions</Typography>
           <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
             {data?.total ? `${data.total} total` : 'Loading...'}
+            {hideTransfers ? ' (transfers hidden)' : ''}
           </Typography>
         </Box>
-        <Button
-          variant="outlined"
-          startIcon={<AutoFixHighRoundedIcon />}
-          onClick={handleAutoCategorize}
-          disabled={autoCategorizing}
-        >
-          {autoCategorizing ? 'Categorizing...' : 'Auto-Categorize'}
-        </Button>
+        <Stack direction="row" spacing={1} alignItems="center">
+          <Badge badgeContent={reviewCount} color="warning" max={99}>
+            <Button
+              component={Link}
+              href="/transactions/transfers"
+              variant="outlined"
+              startIcon={<SwapHorizRoundedIcon />}
+            >
+              Review transfers
+            </Button>
+          </Badge>
+          <Button
+            variant="outlined"
+            startIcon={<AutoFixHighRoundedIcon />}
+            onClick={handleAutoCategorize}
+            disabled={autoCategorizing}
+          >
+            {autoCategorizing ? 'Categorizing...' : 'Auto-Categorize'}
+          </Button>
+        </Stack>
+      </Box>
+      <Box sx={{ display: 'flex', justifyContent: 'flex-end', mb: 1 }}>
+        <FormControlLabel
+          control={
+            <Switch
+              size="small"
+              checked={hideTransfers}
+              onChange={(e) => {
+                setHideTransfers(e.target.checked);
+                setPage(0);
+              }}
+            />
+          }
+          label="Hide transfers"
+        />
       </Box>
       <TransactionFilters
         filters={filters}

@@ -58,15 +58,20 @@ export async function POST(
           { status: 400 },
         );
       }
-      if (typeof p.amount !== 'string' || !/^-?\d+(?:\.\d{1,2})?$/.test(p.amount)) {
+      // Positive decimal only - mortgage payments are amounts paid,
+      // not refunds. The parser already filters Debit-direction lines
+      // and the underlying recordMortgagePayments treats negatives as
+      // errors; reject at the API boundary so a malformed body fails
+      // fast with a clear message rather than silently dropping rows.
+      if (typeof p.amount !== 'string' || !/^\d+(?:\.\d{1,2})?$/.test(p.amount)) {
         return NextResponse.json(
-          { error: `Each payment.amount must be a decimal string; got ${p.amount}` },
+          { error: `Each payment.amount must be a positive decimal string; got ${p.amount}` },
           { status: 400 },
         );
       }
-      if (p.principal !== undefined && (typeof p.principal !== 'string' || !/^-?\d+(?:\.\d{1,2})?$/.test(p.principal))) {
+      if (p.principal !== undefined && (typeof p.principal !== 'string' || !/^\d+(?:\.\d{1,2})?$/.test(p.principal))) {
         return NextResponse.json(
-          { error: `payment.principal, when supplied, must be a decimal string; got ${p.principal}` },
+          { error: `payment.principal, when supplied, must be a positive decimal string; got ${p.principal}` },
           { status: 400 },
         );
       }

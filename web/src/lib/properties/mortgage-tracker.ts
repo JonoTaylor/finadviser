@@ -101,15 +101,23 @@ export async function recordMortgagePayment(params: {
 /**
  * Bulk-record a list of mortgage payments. Idempotent across re-runs:
  * each payment carries a stable reference of the form
- * `mortgage_payment:<mortgageId>:<isoDate>:<amount>`; we look those
- * up first and skip any that already exist. The shared interest-only
- * flag and per-mortgage rate history mean each row needs an
- * interest/principal split here rather than at the call site.
+ * `mortgage_payment:<mortgageId>:<isoDate>:<amount-with-2dp>`; we
+ * look those up first and skip any that already exist. The amount
+ * portion of the reference is normalised to 2 decimals so "100" and
+ * "100.00" produce the same key and dedup correctly.
  *
- * For interest-only mortgages every payment is fully interest. For
- * repayment mortgages the caller can pass a per-payment principal
- * split; if none is provided we default to fully-interest and
- * surface a hint so the AI / UI can warn the user.
+ * Performance: shared resources (mortgage row, payer's capital
+ * account, "Mortgage Interest" expense account, and the per-lender
+ * "Equity Contributions" equity account) are fetched ONCE outside
+ * the loop, then the per-payment journals are inserted in two
+ * multi-row INSERTs via journalRepo.createEntriesBulk. Without this
+ * hoisting, recording 30+ payments would fire ~5 SELECTs and 3
+ * INSERTs each — 240+ round-trips. With it, we hit the DB ~6 times
+ * total regardless of payment count.
+ *
+ * For interest-only mortgages every payment is fully interest (no
+ * principal/equity legs). For repayment mortgages the caller can
+ * pass a per-payment principal split.
  */
 export async function recordMortgagePayments(params: {
   mortgageId: number;
@@ -133,9 +141,37 @@ export async function recordMortgagePayments(params: {
   const duplicates: Array<{ date: string; amount: string; existingJournalId: number }> = [];
   const errors: Array<{ date: string; amount: string; message: string }> = [];
 
-  // Pre-load existing references in one query so re-pasting the
-  // user's full list doesn't fan out into N SELECTs.
-  const refs = payments.map(p => `mortgage_payment:${mortgageId}:${p.date}:${p.amount}`);
+  if (payments.length === 0) {
+    return { added, duplicates, errors };
+  }
+
+  // Hoist all shared resources ONCE rather than per-payment - the
+  // mortgage row, ownership table, "Mortgage Interest" expense, and
+  // the equity-contribution account don't change between rows in a
+  // single bulk call.
+  const mortgageRows = await db.execute(sql`SELECT * FROM mortgages WHERE id = ${mortgageId}`);
+  const mortgage = mortgageRows.rows[0];
+  if (!mortgage) throw new Error(`Mortgage ${mortgageId} not found`);
+  const liabilityAccountId = mortgage.liability_account_id as number;
+  const propertyId = mortgage.property_id as number;
+  const lender = mortgage.lender as string;
+
+  const ownership = await propertyRepo.getOwnership(propertyId);
+  const payerOwn = ownership.find(o => o.owner_id === payerOwnerId);
+  if (!payerOwn) {
+    throw new Error(`Owner ${payerOwnerId} does not own property ${propertyId}`);
+  }
+  const payerCapitalAccountId = payerOwn.capital_account_id as number;
+
+  const interestAccount = await accountRepo.getOrCreate('Mortgage Interest', 'EXPENSE');
+
+  // Pre-load existing references in ONE query so re-pasting the
+  // user's full list doesn't fan out into N SELECTs. Use the
+  // normalised amount (Decimal.toFixed(2)) so "100" and "100.00"
+  // produce the same key.
+  const buildRef = (date: string, amountFixed: string) =>
+    `mortgage_payment:${mortgageId}:${date}:${amountFixed}`;
+  const refs = payments.map(p => buildRef(p.date, new Decimal(p.amount).toFixed(2)));
   const existing = await db.execute(sql`
     SELECT id, reference FROM journal_entries
      WHERE reference = ANY(${refs}::text[])
@@ -145,14 +181,21 @@ export async function recordMortgagePayments(params: {
     existingByRef.set(r.reference as string, r.id as number);
   }
 
-  for (const p of payments) {
-    const reference = `mortgage_payment:${mortgageId}:${p.date}:${p.amount}`;
-    const dupId = existingByRef.get(reference);
-    if (dupId !== undefined) {
-      duplicates.push({ date: p.date, amount: p.amount, existingJournalId: dupId });
-      continue;
-    }
+  // Build the journal items in memory first; defer the DB writes
+  // until after every payment has been validated. This keeps the
+  // partial-failure shape clean: if row 7 has a bad principal split,
+  // rows 0-6 still record successfully and the caller sees row 7 in
+  // `errors`. Equity-contribution journals are collected separately
+  // because they only fire on repayment mortgages.
+  const paymentItems: Array<{
+    payment: { date: string; amount: string };
+    reference: string;
+    journal: { date: string; description: string; reference: string; propertyId: number };
+    entries: Array<{ accountId: number; amount: string }>;
+    principalDec: Decimal;
+  }> = [];
 
+  for (const p of payments) {
     const totalDec = new Decimal(p.amount);
     const principalDec = new Decimal(p.principal ?? '0');
     const interestDec = totalDec.minus(principalDec);
@@ -165,25 +208,89 @@ export async function recordMortgagePayments(params: {
       continue;
     }
 
-    try {
-      const journalId = await recordMortgagePayment({
-        mortgageId,
-        paymentDate: p.date,
-        totalAmount: totalDec.toFixed(2),
-        principalAmount: principalDec.toFixed(2),
-        interestAmount: interestDec.toFixed(2),
-        payerOwnerId,
-        fromAccountId,
-        reference,
-      });
-      added.push({ journalId, date: p.date, amount: totalDec.toFixed(2) });
-    } catch (e) {
-      errors.push({
-        date: p.date,
-        amount: p.amount,
-        message: e instanceof Error ? e.message : 'unknown',
-      });
+    const amountFixed = totalDec.toFixed(2);
+    const reference = buildRef(p.date, amountFixed);
+    const dupId = existingByRef.get(reference);
+    if (dupId !== undefined) {
+      duplicates.push({ date: p.date, amount: amountFixed, existingJournalId: dupId });
+      continue;
     }
+
+    const entries: Array<{ accountId: number; amount: string }> = [
+      { accountId: fromAccountId, amount: totalDec.neg().toString() },
+      { accountId: interestAccount.id, amount: interestDec.toString() },
+    ];
+    if (!principalDec.isZero()) {
+      entries.push({ accountId: liabilityAccountId, amount: principalDec.toString() });
+    }
+
+    paymentItems.push({
+      payment: { date: p.date, amount: amountFixed },
+      reference,
+      journal: {
+        date: p.date,
+        description: `Mortgage payment - ${lender}`,
+        reference,
+        propertyId,
+      },
+      entries,
+      principalDec,
+    });
+  }
+
+  if (paymentItems.length === 0) {
+    return { added, duplicates, errors };
+  }
+
+  // Two multi-row INSERTs for all payment journals.
+  let paymentJournalIds: number[];
+  try {
+    paymentJournalIds = await journalRepo.createEntriesBulk(
+      paymentItems.map(it => ({ journal: it.journal, entries: it.entries })),
+    );
+  } catch (e) {
+    // The bulk insert is all-or-nothing; if it fails we surface the
+    // error against every queued row so the caller can log it. We
+    // don't try to recover by falling back to per-row inserts because
+    // the most likely cause (a balance-violation or FK miss) would
+    // hit the per-row path the same way.
+    const message = e instanceof Error ? e.message : 'createEntriesBulk failed';
+    for (const it of paymentItems) {
+      errors.push({ date: it.payment.date, amount: it.payment.amount, message });
+    }
+    return { added, duplicates, errors };
+  }
+
+  for (let i = 0; i < paymentItems.length; i++) {
+    const it = paymentItems[i];
+    added.push({
+      journalId: paymentJournalIds[i],
+      date: it.payment.date,
+      amount: it.payment.amount,
+    });
+  }
+
+  // Equity-contribution journals (only for rows with non-zero
+  // principal — interest-only mortgages skip this entire branch).
+  const equityItems = paymentItems.filter(it => !it.principalDec.isZero());
+  if (equityItems.length > 0) {
+    const equityTracking = await accountRepo.getOrCreate(
+      `Equity Contributions - ${lender}`,
+      'EQUITY',
+    );
+    await journalRepo.createEntriesBulk(
+      equityItems.map(it => ({
+        journal: {
+          date: it.journal.date,
+          description: `Capital contribution via mortgage principal - ${lender}`,
+          propertyId,
+        },
+        entries: [
+          { accountId: payerCapitalAccountId, amount: it.principalDec.toString() },
+          { accountId: equityTracking.id, amount: it.principalDec.neg().toString() },
+        ],
+      })),
+    );
   }
 
   return { added, duplicates, errors };

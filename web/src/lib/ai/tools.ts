@@ -554,12 +554,13 @@ export const TOOL_DEFINITIONS: Tool[] = [
   {
     name: 'bulk_add_mortgage_payments',
     description:
-      'Record a list of mortgage payments against a property\'s mortgage in one shot. Use when the user pastes a payment history (date + amount per row) and wants every line booked as a journal entry. The user\'s lender exports look like "31/12/2025 Receipt £1,382.36 Credit" - pass the raw paste in the `payments_text` field and the tool will parse it (Rejected Payments are skipped automatically). Idempotent across re-runs: re-pasting the same list returns duplicates rather than re-inserting. For interest-only mortgages every payment books fully as Mortgage Interest (S.24-deductible). Identify the property by name (case-insensitive substring match like "Francis" or "Hinckley") and the tool resolves to the matching mortgage.',
+      'Record a list of mortgage payments against a property\'s mortgage in one shot. Use when the user pastes a payment history (date + amount per row) and wants every line booked as a journal entry. The user\'s lender exports look like "31/12/2025 Receipt £1,382.36 Credit" - pass the raw paste in the `payments_text` field and the tool will parse it (Rejected Payments are skipped automatically). Idempotent across re-runs: re-pasting the same list returns duplicates rather than re-inserting. For interest-only mortgages every payment books fully as Mortgage Interest (S.24-deductible). Identify the property by name (case-insensitive substring match like "Francis" or "Hinckley"). When the property has more than one mortgage (e.g. first and second charge), the user must also pass a `lender` substring to disambiguate; the tool returns an error listing the available lenders if multiple match.',
     input_schema: {
       type: 'object' as const,
       properties: {
         property_name: { type: 'string', description: 'Property name or address fragment (e.g. "249 Francis", "Hinckley"). Case-insensitive substring match.' },
         payments_text: { type: 'string', description: 'Raw pasted payment history. The parser tokenises on date boundaries (DD/MM/YYYY) and skips "Rejected Payment" / debit lines.' },
+        lender: { type: 'string', description: 'Optional lender-name substring to pick a specific mortgage when the property has multiple (e.g. "Hinckley", "Nationwide"). Required when the property has 2+ mortgages.' },
         paid_from_account_name: { type: 'string', description: 'Optional ASSET account name that paid the mortgage (e.g. "Bank", "Monzo"). Defaults to the user\'s only ASSET account if there\'s exactly one; otherwise the tool returns an error and lists candidates.' },
         payer_owner_name: { type: 'string', description: 'Optional owner name. Defaults to the property\'s only owner when there\'s exactly one.' },
       },
@@ -737,16 +738,39 @@ async function executeBulkAddMortgagePayments(input: Record<string, unknown>) {
   }
   const property = candidates[0];
 
-  // Resolve mortgage. If the property has multiple, pick the most
-  // recent (highest startDate); if zero, error out.
+  // Resolve mortgage. Auto-pick is only safe when there's exactly
+  // one - a property with first and second charges would otherwise
+  // get payments mis-routed silently. With multiple, require the
+  // user to pass a `lender` substring; if the substring is also
+  // ambiguous, list every match so they can refine.
+  const lender = input.lender;
   const mortgages = await propertyRepo.getMortgages(property.id);
   if (mortgages.length === 0) {
     return { error: `Property "${property.name}" has no mortgages set up.` };
   }
-  const mortgage = mortgages.reduce((latest, m) =>
-    !latest || m.startDate > latest.startDate ? m : latest,
-    mortgages[0],
-  );
+  let mortgage: typeof mortgages[number];
+  if (mortgages.length === 1) {
+    mortgage = mortgages[0];
+  } else {
+    if (typeof lender !== 'string' || !lender.trim()) {
+      return {
+        error: `Property "${property.name}" has ${mortgages.length} mortgages; pass \`lender\` to pick one. Available: ${mortgages.map(m => m.lender).join(', ')}`,
+      };
+    }
+    const lenderNeedle = lender.toLowerCase();
+    const matched = mortgages.filter(m => m.lender.toLowerCase().includes(lenderNeedle));
+    if (matched.length === 0) {
+      return {
+        error: `No mortgage on "${property.name}" matched lender "${lender}". Available: ${mortgages.map(m => m.lender).join(', ')}`,
+      };
+    }
+    if (matched.length > 1) {
+      return {
+        error: `Lender "${lender}" matched ${matched.length} mortgages on "${property.name}": ${matched.map(m => m.lender).join(', ')}. Refine the substring.`,
+      };
+    }
+    mortgage = matched[0];
+  }
 
   // Resolve payer owner.
   const ownership = await propertyRepo.getOwnership(property.id);

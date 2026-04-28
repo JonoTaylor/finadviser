@@ -192,14 +192,13 @@ export async function recordMortgagePayments(params: {
   // bound positionally, which works on every driver.
   const buildRef = (date: string, amountFixed: string) =>
     `mortgage_payment:${mortgageId}:${date}:${amountFixed}`;
+  // refs is guaranteed non-empty here: the function early-returns
+  // when payments.length === 0 (above), and refs is 1:1 with payments.
   const refs = payments.map(p => buildRef(p.date, new Decimal(p.amount).toFixed(2)));
-  let existingRows: Array<{ id: number; reference: string | null }> = [];
-  if (refs.length > 0) {
-    existingRows = await db
-      .select({ id: journalEntries.id, reference: journalEntries.reference })
-      .from(journalEntries)
-      .where(inArray(journalEntries.reference, refs));
-  }
+  const existingRows = await db
+    .select({ id: journalEntries.id, reference: journalEntries.reference })
+    .from(journalEntries)
+    .where(inArray(journalEntries.reference, refs));
   const existingByRef = new Map<string, number>();
   for (const r of existingRows) {
     // Nullish-only check: an empty-string reference is technically

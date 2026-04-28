@@ -46,6 +46,10 @@ export interface ProviderAccountRow {
   currency: string;
   product: string | null;
   cutoverDate: string | null;
+  /** Mirrored from accounts.pays_off_account_id so the mapping wizard
+   *  can prefill the "Account that pays this off" picker without a
+   *  separate fetch. */
+  paysOffAccountId: number | null;
 }
 
 export const bankingRepo = {
@@ -216,7 +220,8 @@ export const bankingRepo = {
         pa.account_id AS "accountId", a.name AS "accountName",
         pa.aggregator_account_ref AS "aggregatorAccountRef",
         pa.iban, pa.currency, pa.product,
-        pa.cutover_date AS "cutoverDate"
+        pa.cutover_date AS "cutoverDate",
+        a.pays_off_account_id AS "paysOffAccountId"
       FROM provider_accounts pa
       JOIN accounts a ON a.id = pa.account_id
       WHERE pa.connection_id = ${connectionId}
@@ -352,6 +357,7 @@ function rowToProviderAccount(r: Record<string, unknown>): ProviderAccountRow {
     currency: r.currency as string,
     product: (r.product as string | null) ?? null,
     cutoverDate: (r.cutoverDate as string | null) ?? null,
+    paysOffAccountId: (r.paysOffAccountId as number | null) ?? null,
   };
 }
 

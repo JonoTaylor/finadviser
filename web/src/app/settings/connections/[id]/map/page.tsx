@@ -69,6 +69,7 @@ interface LinkedAccount {
   accountName: string;
   aggregatorAccountRef: string;
   cutoverDate: string | null;
+  paysOffAccountId: number | null;
 }
 
 interface ConnectionDetail {
@@ -93,6 +94,7 @@ const fetcher = async (url: string) => {
 interface MappingDraft {
   accountId: number | '';
   cutoverDate: string;
+  paysOffAccountId: number | null;
 }
 
 export default function MappingWizardPage({ params }: { params: Promise<{ id: string }> }) {
@@ -134,6 +136,7 @@ export default function MappingWizardPage({ params }: { params: Promise<{ id: st
       next[agg.aggregatorAccountRef] = {
         accountId: linked?.accountId ?? '',
         cutoverDate: linked?.cutoverDate ?? today,
+        paysOffAccountId: linked?.paysOffAccountId ?? null,
       };
     }
     setDrafts(next);
@@ -198,6 +201,7 @@ export default function MappingWizardPage({ params }: { params: Promise<{ id: st
             currency: agg.currency,
             product: agg.product,
             cutoverDate: d.cutoverDate,
+            paysOffAccountId: d.paysOffAccountId,
           };
         });
       if (mappings.length === 0) {
@@ -368,6 +372,51 @@ export default function MappingWizardPage({ params }: { params: Promise<{ id: st
                       helperText="Sync starts from this date"
                     />
                   </Stack>
+
+                  {/* Pays-off picker. Only meaningful once an internal
+                      account is selected; keeps the wizard clean otherwise. */}
+                  {draft && draft.accountId !== '' && (
+                    <Box sx={{ mt: 1.5 }}>
+                      <TextField
+                        select
+                        label="Account that pays this off (optional)"
+                        size="small"
+                        fullWidth
+                        value={draft.paysOffAccountId ?? ''}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          setDrafts(d => ({
+                            ...d,
+                            [agg.aggregatorAccountRef]: {
+                              ...d[agg.aggregatorAccountRef],
+                              paysOffAccountId: v === '' ? null : Number(v),
+                            },
+                          }));
+                        }}
+                        helperText="If this is a credit-card-style account that another account pays off (Bank -> Amex), pick the payer here so the transfer reconciler auto-merges statement payments."
+                      >
+                        <MenuItem value=""><em>None</em></MenuItem>
+                        <Divider />
+                        {(accountsData ?? [])
+                          .filter(a => a.account_id !== draft.accountId)
+                          .map(a => (
+                            <MenuItem key={a.account_id} value={a.account_id}>
+                              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%', gap: 2 }}>
+                                <Box component="span">
+                                  {a.account_name}
+                                  <Box component="span" sx={{ color: 'text.secondary', ml: 1, fontSize: '0.78rem' }}>
+                                    ({a.account_type})
+                                  </Box>
+                                </Box>
+                                <Box component="span" sx={{ color: 'text.secondary', fontSize: '0.78rem', fontFeatureSettings: '"tnum"' }}>
+                                  {formatCurrency(a.balance)}
+                                </Box>
+                              </Box>
+                            </MenuItem>
+                          ))}
+                      </TextField>
+                    </Box>
+                  )}
                 </CardContent>
               </Card>
             );

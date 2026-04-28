@@ -46,6 +46,7 @@ export const accountRepo = {
     isInvestment: boolean;
     investmentKind: string | null;
     ownerId: number | null;
+    paysOffAccountId: number | null;
   }>) {
     const db = getDb();
     const updates: Record<string, unknown> = {};
@@ -54,6 +55,7 @@ export const accountRepo = {
     if (patch.isInvestment !== undefined) updates.isInvestment = patch.isInvestment;
     if (patch.investmentKind !== undefined) updates.investmentKind = patch.investmentKind;
     if (patch.ownerId !== undefined) updates.ownerId = patch.ownerId;
+    if (patch.paysOffAccountId !== undefined) updates.paysOffAccountId = patch.paysOffAccountId;
     if (Object.keys(updates).length === 0) return this.getById(id);
     const [row] = await db
       .update(accounts)

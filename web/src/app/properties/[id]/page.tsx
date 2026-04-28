@@ -133,6 +133,16 @@ export default function PropertyDetailPage({ params }: { params: Promise<{ id: s
                 Record Payment
               </Button>
             )}
+            {property.mortgages?.length > 0 && (
+              <Button
+                variant="outlined"
+                size="small"
+                component={Link}
+                href={`/properties/${id}/mortgages/${property.mortgages[0].id}/payments`}
+              >
+                Bulk add payments
+              </Button>
+            )}
             <Button
               component={Link}
               href={`/properties/${id}/reports/${currentTaxYear().label}`}

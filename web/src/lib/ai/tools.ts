@@ -3,6 +3,8 @@ import { format, subMonths } from 'date-fns';
 import { accountRepo, journalRepo, categoryRepo, propertyRepo, tipRepo, budgetRepo, savingsGoalRepo, aiMemoryRepo } from '@/lib/repos';
 import { calculateEquity } from '@/lib/properties/equity-calculator';
 import { setInvestmentBalance } from '@/lib/properties/personal-net-worth';
+import { recordMortgagePayments } from '@/lib/properties/mortgage-tracker';
+import { parseMortgagePayments } from '@/lib/properties/mortgage-payment-parser';
 import { formatCurrency } from '@/lib/utils/formatting';
 import { matchRule } from '@/lib/import/categorizer';
 import { londonTodayIso } from '@/lib/dates/today';
@@ -549,6 +551,21 @@ export const TOOL_DEFINITIONS: Tool[] = [
       required: ['journal_id'],
     },
   },
+  {
+    name: 'bulk_add_mortgage_payments',
+    description:
+      'Record a list of mortgage payments against a property\'s mortgage in one shot. Use when the user pastes a payment history (date + amount per row) and wants every line booked as a journal entry. The user\'s lender exports look like "31/12/2025 Receipt £1,382.36 Credit" - pass the raw paste in the `payments_text` field and the tool will parse it (Rejected Payments are skipped automatically). Idempotent across re-runs: re-pasting the same list returns duplicates rather than re-inserting. For interest-only mortgages every payment books fully as Mortgage Interest (S.24-deductible). Identify the property by name (case-insensitive substring match like "Francis" or "Hinckley") and the tool resolves to the matching mortgage.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        property_name: { type: 'string', description: 'Property name or address fragment (e.g. "249 Francis", "Hinckley"). Case-insensitive substring match.' },
+        payments_text: { type: 'string', description: 'Raw pasted payment history. The parser tokenises on date boundaries (DD/MM/YYYY) and skips "Rejected Payment" / debit lines.' },
+        paid_from_account_name: { type: 'string', description: 'Optional ASSET account name that paid the mortgage (e.g. "Bank", "Monzo"). Defaults to the user\'s only ASSET account if there\'s exactly one; otherwise the tool returns an error and lists candidates.' },
+        payer_owner_name: { type: 'string', description: 'Optional owner name. Defaults to the property\'s only owner when there\'s exactly one.' },
+      },
+      required: ['property_name', 'payments_text'],
+    },
+  },
 ];
 
 // Human-readable labels for tool status display
@@ -565,6 +582,7 @@ export const TOOL_LABELS: Record<string, string> = {
   mark_as_transfer: 'Marking as transfer',
   unmark_transfer: 'Clearing transfer flag',
   find_transfer_pair_candidates: 'Finding transfer candidates',
+  bulk_add_mortgage_payments: 'Recording mortgage payments',
   get_account_balances: 'Looking up account balances',
   search_transactions: 'Searching transactions',
   get_monthly_spending: 'Fetching spending data',
@@ -678,9 +696,136 @@ export async function executeTool(
       return executeUnmarkTransfer(input);
     case 'find_transfer_pair_candidates':
       return executeFindTransferPairCandidates(input);
+    case 'bulk_add_mortgage_payments':
+      return executeBulkAddMortgagePayments(input);
     default:
       return { error: `Unknown tool: ${name}` };
   }
+}
+
+async function executeBulkAddMortgagePayments(input: Record<string, unknown>) {
+  const propertyName = input.property_name;
+  const paymentsText = input.payments_text;
+  const paidFromAccountName = input.paid_from_account_name;
+  const payerOwnerName = input.payer_owner_name;
+
+  if (typeof propertyName !== 'string' || !propertyName.trim()) {
+    return { error: 'property_name is required (string).' };
+  }
+  if (typeof paymentsText !== 'string' || !paymentsText.trim()) {
+    return { error: 'payments_text is required (the pasted payment list).' };
+  }
+
+  // Resolve property by case-insensitive substring match on name or
+  // address. The user's example was "249 Francis Road" / "Hinckley";
+  // both should hit the right property.
+  const properties = await propertyRepo.listProperties();
+  const needle = propertyName.toLowerCase();
+  const candidates = properties.filter(p => {
+    const haystack = `${p.name} ${p.address ?? ''}`.toLowerCase();
+    return haystack.includes(needle);
+  });
+  if (candidates.length === 0) {
+    return {
+      error: `No property matched "${propertyName}". Available: ${properties.map(p => p.name).join(', ') || '(none)'}`,
+    };
+  }
+  if (candidates.length > 1) {
+    return {
+      error: `Property name "${propertyName}" is ambiguous - matched ${candidates.length}: ${candidates.map(p => p.name).join(', ')}. Try a more specific term.`,
+    };
+  }
+  const property = candidates[0];
+
+  // Resolve mortgage. If the property has multiple, pick the most
+  // recent (highest startDate); if zero, error out.
+  const mortgages = await propertyRepo.getMortgages(property.id);
+  if (mortgages.length === 0) {
+    return { error: `Property "${property.name}" has no mortgages set up.` };
+  }
+  const mortgage = mortgages.reduce((latest, m) =>
+    !latest || m.startDate > latest.startDate ? m : latest,
+    mortgages[0],
+  );
+
+  // Resolve payer owner.
+  const ownership = await propertyRepo.getOwnership(property.id);
+  let payerOwnerId: number | null = null;
+  if (typeof payerOwnerName === 'string' && payerOwnerName.trim()) {
+    const ownerNeedle = payerOwnerName.toLowerCase();
+    const matched = ownership.find(o => (o.owner_name as string).toLowerCase().includes(ownerNeedle));
+    if (!matched) {
+      return {
+        error: `Owner "${payerOwnerName}" not found on property "${property.name}". Available: ${ownership.map(o => o.owner_name).join(', ')}`,
+      };
+    }
+    payerOwnerId = matched.owner_id as number;
+  } else if (ownership.length === 1) {
+    payerOwnerId = ownership[0].owner_id as number;
+  } else {
+    return {
+      error: `Property "${property.name}" has multiple owners; pass payer_owner_name. Available: ${ownership.map(o => o.owner_name).join(', ')}`,
+    };
+  }
+
+  // Resolve "paid from" account. Default to the only ASSET if there's
+  // exactly one, otherwise require the user to disambiguate.
+  const allAccounts = await accountRepo.listAll();
+  const assetAccounts = allAccounts.filter(a => a.accountType === 'ASSET');
+  let fromAccountId: number | null = null;
+  if (typeof paidFromAccountName === 'string' && paidFromAccountName.trim()) {
+    const accNeedle = paidFromAccountName.toLowerCase();
+    const matched = assetAccounts.find(a => a.name.toLowerCase().includes(accNeedle));
+    if (!matched) {
+      return {
+        error: `Account "${paidFromAccountName}" not found among ASSET accounts. Available: ${assetAccounts.map(a => a.name).join(', ')}`,
+      };
+    }
+    fromAccountId = matched.id;
+  } else if (assetAccounts.length === 1) {
+    fromAccountId = assetAccounts[0].id;
+  } else {
+    return {
+      error: `Multiple ASSET accounts found; pass paid_from_account_name to pick one. Available: ${assetAccounts.map(a => a.name).join(', ')}`,
+    };
+  }
+
+  // Parse the paste. The parser handles the run-on / rejected /
+  // skipped cases without any DB access.
+  const parsed = parseMortgagePayments(paymentsText);
+  if (parsed.valid.length === 0) {
+    return {
+      error: 'No valid payments found in payments_text.',
+      skipped: parsed.skipped.length,
+      unparsed: parsed.unparsed.length,
+    };
+  }
+
+  const result = await recordMortgagePayments({
+    mortgageId: mortgage.id,
+    payerOwnerId,
+    fromAccountId,
+    payments: parsed.valid.map(p => ({ date: p.date, amount: p.amount })),
+  });
+
+  return {
+    property: property.name,
+    mortgage_lender: mortgage.lender,
+    parsed: {
+      valid: parsed.valid.length,
+      skipped_rejected: parsed.skipped.filter(s => s.reason === 'rejected').length,
+      skipped_debit: parsed.skipped.filter(s => s.reason === 'debit').length,
+      unparsed: parsed.unparsed.length,
+    },
+    booked: {
+      added: result.added.length,
+      duplicates: result.duplicates.length,
+      errors: result.errors.length,
+    },
+    sample_added: result.added.slice(0, 5),
+    sample_duplicates: result.duplicates.slice(0, 3),
+    sample_errors: result.errors.slice(0, 3),
+  };
 }
 
 // -------------------------------------------------------------------

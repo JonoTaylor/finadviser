@@ -1,4 +1,4 @@
-import { eq, sql } from 'drizzle-orm';
+import { eq, inArray, sql } from 'drizzle-orm';
 import { getDb, schema } from '@/lib/db';
 
 const { accounts, bookEntries } = schema;
@@ -46,6 +46,7 @@ export const accountRepo = {
     isInvestment: boolean;
     investmentKind: string | null;
     ownerId: number | null;
+    paysOffAccountId: number | null;
   }>) {
     const db = getDb();
     const updates: Record<string, unknown> = {};
@@ -54,6 +55,7 @@ export const accountRepo = {
     if (patch.isInvestment !== undefined) updates.isInvestment = patch.isInvestment;
     if (patch.investmentKind !== undefined) updates.investmentKind = patch.investmentKind;
     if (patch.ownerId !== undefined) updates.ownerId = patch.ownerId;
+    if (patch.paysOffAccountId !== undefined) updates.paysOffAccountId = patch.paysOffAccountId;
     if (Object.keys(updates).length === 0) return this.getById(id);
     const [row] = await db
       .update(accounts)
@@ -67,6 +69,21 @@ export const accountRepo = {
     const db = getDb();
     const [row] = await db.select().from(accounts).where(eq(accounts.id, id));
     return row ?? null;
+  },
+
+  /**
+   * Bulk lookup of accounts by id, returning a Map<id, row>. Used by
+   * loop call sites (e.g. the bank-mapping API) that would otherwise
+   * issue one query per id and create an N+1 problem on large
+   * payloads.
+   */
+  async getByIds(ids: number[]) {
+    const map = new Map<number, typeof accounts.$inferSelect>();
+    if (ids.length === 0) return map;
+    const db = getDb();
+    const rows = await db.select().from(accounts).where(inArray(accounts.id, ids));
+    for (const r of rows) map.set(r.id, r);
+    return map;
   },
 
   async getByName(name: string) {

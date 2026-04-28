@@ -315,6 +315,55 @@ function humanizeProduct(type?: string, description?: string): string | null {
   return description ?? type ?? null;
 }
 
+interface MonzoPotWire {
+  id: string;
+  name: string;
+  currency?: string;
+  balance?: number;
+  deleted?: boolean;
+  type?: string;
+}
+
+/**
+ * GET /pots?current_account_id=...
+ *
+ * Monzo pots aren't returned by /accounts; they're fetched per main
+ * account. This is the lookup we use to substitute human-readable pot
+ * names ("Holiday Fund") for the raw `pot_xxx` IDs that otherwise
+ * leak through as transaction descriptions on pot top-ups / withdrawals.
+ *
+ * Filtered to non-deleted pots. The returned map is id -> name; we
+ * don't surface pots as separate AggregatorAccounts here because the
+ * sync engine and journal-shape were built around real spending
+ * accounts, and treating a pot as a sub-account is a follow-up refactor.
+ */
+export async function listMonzoPots(
+  accessToken: string,
+  currentAccountId: string,
+): Promise<Map<string, string>> {
+  const params = new URLSearchParams({ current_account_id: currentAccountId });
+  const res = await fetch(`${BASE_URL}/pots?${params}`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  if (res.status === 403) throw new MonzoSCAPendingError(await readBody(res));
+  if (res.status === 401) throw new MonzoAuthError(await readBody(res));
+  if (!res.ok) throw new MonzoApiError(res.status, await readBody(res));
+  // readBody is content-type-aware: returns the parsed JSON when
+  // application/json, the raw text otherwise (or null on parse error).
+  // Safer than res.json() on a code path that can be exercised by
+  // upstream errors that occasionally return HTML / text/plain.
+  const parsed = await readBody(res);
+  const pots = (parsed && typeof parsed === 'object' && 'pots' in parsed
+    ? (parsed as { pots?: MonzoPotWire[] }).pots
+    : null) ?? [];
+  const map = new Map<string, string>();
+  for (const p of pots) {
+    if (p.deleted) continue;
+    if (p.id && p.name) map.set(p.id, p.name);
+  }
+  return map;
+}
+
 /**
  * GET /transactions with cursor pagination. Each page is up to 100
  * transactions (Monzo's max). When a page returns the full 100 we
@@ -346,6 +395,20 @@ export async function listMonzoTransactions(
   // First page: time-based `since`. Subsequent pages: id-based cursor.
   let sinceCursor: string | null = input.dateFrom ? `${input.dateFrom}T00:00:00Z` : null;
 
+  // One-shot pot lookup: replace `pot_xxx` IDs in transaction
+  // descriptions with the human pot name (e.g. "Holiday Fund").
+  // Failures are non-fatal (the sync proceeds with raw IDs) but
+  // logged so production can see when Monzo's /pots endpoint changes
+  // shape or returns an outage page; otherwise pot IDs leaking
+  // through to /transactions would be silent and confusing.
+  let potNames: Map<string, string> = new Map();
+  try {
+    potNames = await listMonzoPots(accessToken, input.aggregatorAccountRef);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    console.warn(`[monzo] listMonzoPots failed for account ${input.aggregatorAccountRef}: ${msg}`);
+  }
+
   for (let page = 0; page < PAGE_LIMIT; page++) {
     const params = new URLSearchParams();
     params.set('account_id', input.aggregatorAccountRef);
@@ -364,7 +427,7 @@ export async function listMonzoTransactions(
 
     for (const t of body.transactions) {
       // Skip declined; they don't represent real money movement.
-      if (!t.decline_reason) out.push(normaliseMonzoTxn(t));
+      if (!t.decline_reason) out.push(normaliseMonzoTxn(t, potNames));
     }
 
     if (body.transactions.length < PAGE_SIZE) break;
@@ -376,7 +439,30 @@ export async function listMonzoTransactions(
   return out;
 }
 
-function normaliseMonzoTxn(t: MonzoTransactionWire): AggregatorTransaction {
+/**
+ * Substitute the human pot name when the entire description is a
+ * standalone `pot_xxx` ID, the shape Monzo writes for pot top-ups
+ * and withdrawals. The match is anchored, not substring: we only
+ * rewrite the description when it's the bare ID, not when the ID
+ * happens to appear inside a longer string. The direction prefix
+ * ("Transfer to" / "Transfer from") is inferred from amount sign.
+ */
+function describePotMovement(
+  raw: string,
+  potNames: Map<string, string>,
+  amount: number,
+): string {
+  const m = raw.match(/^pot_[A-Za-z0-9]+$/);
+  if (!m) return raw;
+  const name = potNames.get(raw);
+  if (!name) return raw;
+  return amount < 0 ? `Transfer to ${name}` : `Transfer from ${name}`;
+}
+
+function normaliseMonzoTxn(
+  t: MonzoTransactionWire,
+  potNames: Map<string, string> = new Map(),
+): AggregatorTransaction {
   // Monzo amount is integer pence; sign matches bank-perspective
   // (negative = debit). Convert to decimal GBP string.
   const sign = t.amount < 0 ? '-' : '';
@@ -411,8 +497,13 @@ function normaliseMonzoTxn(t: MonzoTransactionWire): AggregatorTransaction {
   }
 
   // Description: prefer merchant.name (clean) over description
-  // (often a cryptic card-network string).
-  const description = merchant?.name ?? t.description ?? '';
+  // (often a cryptic card-network string). For pot top-ups /
+  // withdrawals where Monzo writes the raw `pot_xxx` ID into
+  // description, look up the pot's human name and substitute so the
+  // /transactions UI shows "Transfer to Holiday Fund" instead of
+  // "pot_0000Axh4pFtsoio7cstlEx".
+  const rawDescription = merchant?.name ?? t.description ?? '';
+  const description = describePotMovement(rawDescription, potNames, t.amount);
   const merchantName = merchant?.name ?? null;
 
   // Pending vs settled. Monzo: settled empty string means

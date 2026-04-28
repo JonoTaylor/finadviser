@@ -1,6 +1,7 @@
 'use client';
 
 import { useMemo, useState, use } from 'react';
+import Decimal from 'decimal.js';
 import {
   Box, Typography, Card, CardContent, Button, Stack, TextField,
   MenuItem, Snackbar, Alert, CircularProgress, Divider, Chip,
@@ -61,7 +62,13 @@ export default function BulkMortgagePaymentsPage({
     })();
 
   const totalAmount = useMemo(() => {
-    return parsed.valid.reduce((sum, p) => sum + parseFloat(p.amount), 0);
+    // Sum with Decimal rather than parseFloat so accumulated
+    // floating-point error doesn't make the preview total drift on
+    // long lists. Returned as a string formatted to 2dp; the
+    // formatCurrency call below tolerates strings.
+    return parsed.valid
+      .reduce((sum, p) => sum.plus(new Decimal(p.amount)), new Decimal(0))
+      .toFixed(2);
   }, [parsed.valid]);
 
   async function handleSubmit() {

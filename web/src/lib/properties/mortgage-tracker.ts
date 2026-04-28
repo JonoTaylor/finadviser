@@ -104,7 +104,9 @@ export async function recordMortgagePayment(params: {
  * `mortgage_payment:<mortgageId>:<isoDate>:<amount-with-2dp>`; we
  * look those up first and skip any that already exist. The amount
  * portion of the reference is normalised to 2 decimals so "100" and
- * "100.00" produce the same key and dedup correctly.
+ * "100.00" produce the same key and dedup correctly. An in-batch
+ * Set guards against the same date+amount appearing twice in a
+ * single submission.
  *
  * Performance: shared resources (mortgage row, payer's capital
  * account, "Mortgage Interest" expense account, and the per-lender
@@ -112,12 +114,18 @@ export async function recordMortgagePayment(params: {
  * the loop, then the per-payment journals are inserted in two
  * multi-row INSERTs via journalRepo.createEntriesBulk. Without this
  * hoisting, recording 30+ payments would fire ~5 SELECTs and 3
- * INSERTs each — 240+ round-trips. With it, we hit the DB ~6 times
+ * INSERTs each - 240+ round-trips. With it, we hit the DB ~6 times
  * total regardless of payment count.
  *
- * For interest-only mortgages every payment is fully interest (no
- * principal/equity legs). For repayment mortgages the caller can
- * pass a per-payment principal split.
+ * Interest split: each payment defaults to fully-interest. Callers
+ * (CSV importer, AI tool) that know the principal portion ahead of
+ * time can pass `principal` per-payment; the function then books
+ * (total-principal) as Mortgage Interest and `principal` against
+ * the liability + equity contribution. A dynamic interest/principal
+ * split derived from the mortgage's rate history is NOT implemented
+ * here; the caller supplies the split or accepts the fully-interest
+ * default. (For interest-only mortgages, fully-interest is the
+ * correct answer.)
  */
 export async function recordMortgagePayments(params: {
   mortgageId: number;
@@ -205,8 +213,40 @@ export async function recordMortgagePayments(params: {
   }> = [];
 
   for (const p of payments) {
-    const totalDec = new Decimal(p.amount);
-    const principalDec = new Decimal(p.principal ?? '0');
+    // Wrap Decimal parsing in try so a single malformed row records
+    // an error instead of aborting the whole bulk run. The API
+    // boundary already enforces /^\d+(?:\.\d{1,2})?$/ but the bulk
+    // recorder is also reachable from in-process callers (AI tool,
+    // future direct repo callers) where defence-in-depth matters.
+    let totalDec: Decimal;
+    let principalDec: Decimal;
+    try {
+      totalDec = new Decimal(p.amount);
+      principalDec = new Decimal(p.principal ?? '0');
+    } catch (e) {
+      errors.push({
+        date: p.date,
+        amount: p.amount,
+        message: e instanceof Error ? e.message : 'invalid amount or principal',
+      });
+      continue;
+    }
+    if (!totalDec.isFinite() || totalDec.lte(0)) {
+      errors.push({
+        date: p.date,
+        amount: p.amount,
+        message: `amount must be > 0; got ${totalDec.toString()}`,
+      });
+      continue;
+    }
+    if (principalDec.isNegative()) {
+      errors.push({
+        date: p.date,
+        amount: p.amount,
+        message: `principal must be >= 0; got ${principalDec.toString()}`,
+      });
+      continue;
+    }
     const interestDec = totalDec.minus(principalDec);
     if (interestDec.isNegative()) {
       errors.push({

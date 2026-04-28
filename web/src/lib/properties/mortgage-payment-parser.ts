@@ -1,3 +1,5 @@
+import Decimal from 'decimal.js';
+
 /**
  * Pure-function parser for paste-style mortgage payment lists. The
  * user's mortgage provider exports payment history as a free-form
@@ -34,7 +36,19 @@ export interface ParseResult {
   unparsed: string[];
 }
 
-const DATE_RE = /\b(\d{1,2})\/(\d{1,2})\/(\d{4})\b/;
+// Date regex: DD/MM/YYYY. NO \b boundaries - the user's real paste
+// runs lines together as `Credit31/03/2026` where the previous chunk
+// ends with a letter and the next starts with a digit, and \b
+// requires a transition between \w and \W (digit-after-letter is
+// \w-after-\w, i.e. NO boundary). Using a bare digit-shape match
+// handles the run-on case correctly. The ISO date validation in
+// toIsoDate filters anything that isn't a real Gregorian date.
+const DATE_RE = /(\d{1,2})\/(\d{1,2})\/(\d{4})/;
+// Amount regex: £-prefixed only. The user's lender always emits the
+// £ symbol; if a future caller wants raw decimals they should
+// pre-process the input upstream rather than weakening the regex
+// here (a bare "1.5" elsewhere in the chunk would otherwise be
+// misread as a payment amount).
 const AMOUNT_RE = /£\s*([\d,]+(?:\.\d{1,2})?)/;
 
 /**
@@ -59,30 +73,39 @@ function toIsoDate(d: string, m: string, y: string): string | null {
 }
 
 /**
- * Normalise an amount string like "£1,382.36" or "1382.36" to a
- * positive decimal string with two decimal places. Returns null on
- * unparseable input. We don't preserve the leading sign here -
- * direction (Credit / Debit) is read from the surrounding text and
- * carried separately.
+ * Normalise the amount captured by AMOUNT_RE (which strips the
+ * leading £ already) into a positive decimal string with two
+ * decimal places. Uses Decimal rather than JS Number so the
+ * round-trip preserves the exact value the user typed: parseFloat
+ * + toFixed can drift on tricky values like 1234.005 (banker's
+ * rounding vs the JS spec's behaviour). Money math elsewhere in
+ * the codebase uses decimal.js for the same reason. Returns null
+ * on unparseable or non-positive input.
  */
 function normaliseAmount(raw: string): string | null {
   const stripped = raw.replace(/[£,\s]/g, '');
   if (!/^\d+(?:\.\d{1,2})?$/.test(stripped)) return null;
-  const num = Number(stripped);
-  if (!Number.isFinite(num) || num <= 0) return null;
-  return num.toFixed(2);
+  let dec: Decimal;
+  try {
+    dec = new Decimal(stripped);
+  } catch {
+    return null;
+  }
+  if (!dec.isPositive() || dec.isZero()) return null;
+  return dec.toFixed(2);
 }
 
 /**
  * Split the input on date boundaries so each emitted chunk starts
  * with a DD/MM/YYYY token. Handles the "Credit31/03/2026" run-on
- * case from the user's paste by using lookahead.
+ * case from the user's paste using a bare digit-shape lookahead
+ * (no \b - see DATE_RE comment above for why \b doesn't match
+ * between letter and digit).
  */
 function splitOnDates(input: string): string[] {
   const trimmed = input.replace(/\s+/g, ' ').trim();
   if (!trimmed) return [];
-  // Lookahead split: each chunk begins with a date.
-  return trimmed.split(/(?=\b\d{1,2}\/\d{1,2}\/\d{4}\b)/).map(s => s.trim()).filter(Boolean);
+  return trimmed.split(/(?=\d{1,2}\/\d{1,2}\/\d{4})/).map(s => s.trim()).filter(Boolean);
 }
 
 /**

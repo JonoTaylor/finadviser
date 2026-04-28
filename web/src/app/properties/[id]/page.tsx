@@ -138,7 +138,15 @@ export default function PropertyDetailPage({ params }: { params: Promise<{ id: s
                 variant="outlined"
                 size="small"
                 component={Link}
-                href={`/properties/${id}/mortgages/${property.mortgages[0].id}/payments`}
+                /* getMortgages orders by startDate ASC, so the LAST
+                 * entry is the most recent (active) mortgage - the
+                 * one the user most likely wants when bulk-adding
+                 * payments. Properties with only one mortgage land
+                 * on the same row either way. For multi-mortgage
+                 * properties (first + second charge) the bulk page
+                 * still requires picking the right mortgage but at
+                 * least the default is sensible. */
+                href={`/properties/${id}/mortgages/${property.mortgages[property.mortgages.length - 1].id}/payments`}
               >
                 Bulk add payments
               </Button>

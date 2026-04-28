@@ -1156,6 +1156,18 @@ DECLARE
     v_group_id    UUID;
     v_uncat_in    INTEGER;
     v_uncat_out   INTEGER;
+    -- Global "seen" set: every journal id that's been claimed by a
+    -- pair already processed in this loop. Critical for correctness:
+    -- two SELECT DISTINCT ONs (one on a_id, one on b_id) only enforce
+    -- per-side uniqueness, so a journal can still appear as `b` in
+    -- one pair and `a` in another (e.g. {(1,2,70), (2,3,60)} -> both
+    -- selected, journal 2 in both). Without this guard the second
+    -- pair would partially apply, stamping a group_id on 3 with a
+    -- partner pointer to 2 even though 2 is already in a different
+    -- group. That stranded row would never surface in the review
+    -- queue (the join expects two legs per group) and would be
+    -- skipped by future scans. Greedy by score-desc instead.
+    v_seen        INTEGER[] := ARRAY[]::INTEGER[];
 BEGIN
     SELECT id INTO v_uncat_in
       FROM accounts WHERE name = 'Uncategorized Income' LIMIT 1;
@@ -1165,10 +1177,12 @@ BEGIN
     -- Build the candidate set: pairs of journals where both legs land
     -- on real (non-Uncategorized) accounts, on different accounts,
     -- within +/- p_window_days, and whose real-account amounts net to
-    -- zero. Each candidate carries a score. SELECT DISTINCT ON keeps
-    -- only the best pair per source journal, breaking ties by score
-    -- desc. Then we DISTINCT ON the partner side too so neither
-    -- journal ends up paired twice.
+    -- zero. Each candidate carries a score. The loop processes pairs
+    -- in score-desc / drift-asc order and uses a "seen" set to
+    -- enforce global pair uniqueness (greedy maximum-weight matching):
+    -- once a journal is claimed by a pair, any subsequent pair that
+    -- references it is skipped. Real transfers score >= 80 with a
+    -- unique partner, so greedy is the right pragmatic choice here.
     FOR v_pair IN
         WITH journal_real_legs AS (
             SELECT je.id AS journal_id,
@@ -1252,36 +1266,39 @@ BEGIN
                AND (p_sync_run_id IS NULL
                     OR a.sync_run_id = p_sync_run_id
                     OR b.sync_run_id = p_sync_run_id)
-        ),
-        best_per_a AS (
-            SELECT DISTINCT ON (a_id)
-                   a_id, b_id, score, inferred_kind, drift
-              FROM candidates
-             ORDER BY a_id, score DESC, drift ASC, b_id
-        ),
-        best_unique AS (
-            SELECT DISTINCT ON (b_id)
-                   a_id, b_id, score, inferred_kind, drift
-              FROM best_per_a
-             ORDER BY b_id, score DESC, drift ASC, a_id
         )
-        SELECT * FROM best_unique
+        SELECT a_id, b_id, score, inferred_kind, drift
+          FROM candidates
+         WHERE score >= 40
+         ORDER BY score DESC, drift ASC, a_id ASC, b_id ASC
     LOOP
+        -- Skip any pair whose journals have already been claimed by a
+        -- higher-scored pair earlier in this loop. ARRAY membership
+        -- is O(N) but N is the count of pairs we've processed in
+        -- this call (typically tens), so the total cost is small.
+        IF v_pair.a_id = ANY(v_seen) OR v_pair.b_id = ANY(v_seen) THEN
+            CONTINUE;
+        END IF;
+
         IF v_pair.score >= 80 THEN
             BEGIN
                 PERFORM merge_transfer_pair(v_pair.a_id, v_pair.b_id, v_pair.inferred_kind);
                 v_merged := v_merged + 1;
+                v_seen := v_seen || v_pair.a_id || v_pair.b_id;
             EXCEPTION WHEN OTHERS THEN
                 -- Defensive: if a single pair fails (e.g. a partner
-                -- already merged via a previous loop iteration), skip
-                -- it without aborting the rest.
-                NULL;
+                -- changed mid-loop) skip it without aborting the rest.
+                -- Mark both legs as seen so a fallback lower-scored
+                -- pair touching the same journals doesn't try to
+                -- partial-apply on top.
+                v_seen := v_seen || v_pair.a_id || v_pair.b_id;
             END;
-        ELSIF v_pair.score >= 40 THEN
-            -- Stash a shared group id on both rows so the review
-            -- queue can surface the candidate; partner_journal_id
-            -- carries the suggested counterpart for one-click
-            -- confirm. Skip if either journal has since been merged.
+        ELSE
+            -- 40-79: stash a shared group id on both rows so the
+            -- review queue can surface the candidate;
+            -- partner_journal_id carries the suggested counterpart
+            -- for one-click confirm. The seen-set guarantees neither
+            -- leg has been claimed yet, so both UPDATEs hit a row.
             v_group_id := gen_random_uuid();
             UPDATE journal_entries
                SET transfer_group_id = v_group_id,
@@ -1297,6 +1314,7 @@ BEGIN
              WHERE id = v_pair.b_id
                AND COALESCE(is_transfer, FALSE) = FALSE
                AND transfer_group_id IS NULL;
+            v_seen := v_seen || v_pair.a_id || v_pair.b_id;
         END IF;
     END LOOP;
 

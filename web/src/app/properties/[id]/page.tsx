@@ -5,7 +5,7 @@ import { Box, Typography, Grid, Button, Card, CardContent, Skeleton, Stack, Divi
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import useSWR from 'swr';
 import Link from 'next/link';
-import { formatCurrency, formatPercentage } from '@/lib/utils/formatting';
+import { formatCurrency } from '@/lib/utils/formatting';
 import EquityBar from '@/components/properties/EquityBar';
 import OwnershipTable from '@/components/properties/OwnershipTable';
 import MortgageCard from '@/components/properties/MortgageCard';
@@ -16,6 +16,7 @@ import RecordPaymentDialog from '@/components/properties/RecordPaymentDialog';
 import TenanciesCard from '@/components/properties/TenanciesCard';
 import ExpensesCard from '@/components/properties/ExpensesCard';
 import MortgageInterestSummary from '@/components/properties/MortgageInterestSummary';
+import BtlDecisionCard from '@/components/properties/BtlDecisionCard';
 import ReceiptLongIcon from '@mui/icons-material/ReceiptLong';
 import { currentTaxYear } from '@/lib/tax/ukTaxYear';
 
@@ -83,6 +84,8 @@ export default function PropertyDetailPage({ params }: { params: Promise<{ id: s
               )}
             </CardContent>
           </Card>
+
+          <BtlDecisionCard propertyId={propertyId} />
 
           <TenanciesCard propertyId={propertyId} />
 

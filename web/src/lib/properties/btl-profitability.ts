@@ -1,6 +1,7 @@
 import Decimal from 'decimal.js';
 import { sql } from 'drizzle-orm';
 import { getDb } from '@/lib/db';
+import { ClientError } from '@/lib/errors';
 import { propertyRepo, rentalReportRepo, accountRepo } from '@/lib/repos';
 
 export interface BtlTaxAssumptions {
@@ -116,13 +117,15 @@ export async function calculateBtlProfitability(
   const usingDefaultIncomeTaxRate = params.incomeTaxRatePct == null || params.incomeTaxRatePct === '';
   const usingDefaultMortgageInterestReliefRate =
     params.mortgageInterestReliefRatePct == null || params.mortgageInterestReliefRatePct === '';
-  const incomeTaxRatePct = new Decimal(
+  const incomeTaxRatePct = parsePercentageAssumption(
     usingDefaultIncomeTaxRate ? DEFAULT_INCOME_TAX_RATE_PCT : params.incomeTaxRatePct!.toString(),
+    'incomeTaxRatePct',
   );
-  const mortgageInterestReliefRatePct = new Decimal(
+  const mortgageInterestReliefRatePct = parsePercentageAssumption(
     usingDefaultMortgageInterestReliefRate
       ? DEFAULT_MORTGAGE_INTEREST_RELIEF_RATE_PCT
       : params.mortgageInterestReliefRatePct!.toString(),
+    'mortgageInterestReliefRatePct',
   );
 
   if (usingDefaultIncomeTaxRate || usingDefaultMortgageInterestReliefRate) {
@@ -244,6 +247,20 @@ export async function calculateBtlProfitability(
     },
     warnings,
   };
+}
+
+
+function parsePercentageAssumption(value: string, name: string): Decimal {
+  let parsed: Decimal;
+  try {
+    parsed = new Decimal(value);
+  } catch {
+    throw new ClientError(`${name} must be a valid percentage`);
+  }
+  if (!parsed.isFinite() || parsed.lt(0) || parsed.gt(100)) {
+    throw new ClientError(`${name} must be between 0 and 100`);
+  }
+  return parsed;
 }
 
 function money(value: Decimal): string {

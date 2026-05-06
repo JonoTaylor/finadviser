@@ -104,6 +104,21 @@ export default function BtlDecisionCard({ propertyId }: { propertyId: number }) 
               </Alert>
             ))}
 
+            <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+              <Chip
+                size="small"
+                variant="outlined"
+                color={data.taxProfitEstimate.assumptions.usingDefaultIncomeTaxRate ? 'warning' : 'default'}
+                label={`Income tax assumption: ${formatPct(data.taxProfitEstimate.assumptions.incomeTaxRatePct)}`}
+              />
+              <Chip
+                size="small"
+                variant="outlined"
+                color={data.taxProfitEstimate.assumptions.usingDefaultMortgageInterestReliefRate ? 'warning' : 'default'}
+                label={`Mortgage interest relief: ${formatPct(data.taxProfitEstimate.assumptions.mortgageInterestReliefRatePct)}`}
+              />
+            </Stack>
+
             <Grid container spacing={1.5}>
               <HeadlineMetric
                 icon={<AccountBalanceWalletOutlinedIcon color="primary" />}

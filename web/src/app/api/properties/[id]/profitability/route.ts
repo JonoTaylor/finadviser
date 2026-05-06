@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { propertyRepo } from '@/lib/repos';
 import { currentTaxYear, taxYearRange } from '@/lib/tax/ukTaxYear';
 import { calculateBtlProfitability } from '@/lib/properties/btl-profitability';
+import { ClientError } from '@/lib/errors';
 
 export async function GET(
   request: NextRequest,
@@ -37,6 +38,9 @@ export async function GET(
       ...result,
     });
   } catch (error) {
+    if (error instanceof ClientError) {
+      return NextResponse.json({ error: error.message }, { status: error.status });
+    }
     const message = error instanceof Error ? error.message : 'Failed to build profitability view';
     return NextResponse.json({ error: message }, { status: 500 });
   }

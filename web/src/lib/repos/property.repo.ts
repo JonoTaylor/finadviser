@@ -1,4 +1,5 @@
 import { eq, sql, and, inArray } from 'drizzle-orm';
+import Decimal from 'decimal.js';
 import { getDb, schema } from '@/lib/db';
 
 const {
@@ -295,6 +296,90 @@ export const propertyRepo = {
       WHERE m.id = ${mortgageId}
     `);
     return rows.rows[0]?.balance as string ?? '0';
+  },
+
+  /**
+   * Reconstruct a dated outstanding-principal schedule for a mortgage
+   * from journal_entries + book_entries on the liability account.
+   *
+   * Shape: a list of `{ effectiveDate, principal }` rows in ascending
+   * date order, where `principal` is the OUTSTANDING balance from
+   * `effectiveDate` until the next entry's date (or forever, for the
+   * tail). The first entry is always `{ mortgage.startDate,
+   * originalAmount }` so callers don't have to special-case the
+   * pre-payment range.
+   *
+   * Convention: `recordMortgagePayment` (and the bulk path) book the
+   * principal portion of each payment as a POSITIVE book_entry on
+   * the liability account. We sum those by date and subtract the
+   * running total from `originalAmount` to derive the outstanding
+   * balance. Multiple payments on the same date collapse to one
+   * schedule entry (the balance after all of them).
+   *
+   * Returns an empty array when the mortgage doesn't exist; the
+   * caller can detect that condition and fall back to a single
+   * fixed-principal calculation. Returns `[{ startDate,
+   * originalAmount }]` (length 1) when the mortgage exists but has
+   * no recorded principal payments — same shape, lets the caller
+   * reuse the schedule path uniformly.
+   */
+  async getMortgageBalanceSchedule(
+    mortgageId: number,
+  ): Promise<Array<{ effectiveDate: string; principal: string }>> {
+    const mortgage = await this.getMortgage(mortgageId);
+    if (!mortgage) return [];
+
+    const db = getDb();
+    const rows = await db.execute(sql`
+      SELECT je.date AS payment_date,
+             SUM(be.amount::numeric) AS principal_paid
+      FROM journal_entries je
+      JOIN book_entries be ON be.journal_entry_id = je.id
+      WHERE be.account_id = ${mortgage.liabilityAccountId}
+        AND be.amount::numeric > 0
+        AND je.date >= ${mortgage.startDate}
+      GROUP BY je.date
+      ORDER BY je.date ASC
+    `);
+
+    // Decimal arithmetic for money - matches mortgage-tracker.ts
+    // and avoids JS-float drift accumulating across many payments.
+    const schedule: Array<{ effectiveDate: string; principal: string }> = [];
+    const original = new Decimal(mortgage.originalAmount);
+    let running = new Decimal(0);
+
+    schedule.push({
+      effectiveDate: mortgage.startDate,
+      principal: original.toFixed(2),
+    });
+
+    for (const r of rows.rows) {
+      let paid: Decimal;
+      try {
+        paid = new Decimal((r.principal_paid as number | string).toString());
+      } catch {
+        // Decimal parse failure here means the SUM(amount::numeric)
+        // returned a value that doesn't round-trip through Decimal -
+        // shouldn't happen in practice (the column is a Postgres
+        // numeric and the GROUP BY aggregates to numeric too), but
+        // log so a corrupted book_entry surfaces in production logs
+        // rather than silently leaving a gap in the schedule.
+        console.warn(
+          `[getMortgageBalanceSchedule] mortgageId=${mortgageId} date=${r.payment_date} ` +
+          `unparseable principal_paid=${String(r.principal_paid)}; skipping row`,
+        );
+        continue;
+      }
+      if (!paid.isFinite() || paid.lte(0)) continue;
+      running = running.plus(paid);
+      const remaining = Decimal.max(original.minus(running), 0);
+      schedule.push({
+        effectiveDate: r.payment_date as string,
+        principal: remaining.toFixed(2),
+      });
+    }
+
+    return schedule;
   },
 
   async getEquityView(propertyId: number) {

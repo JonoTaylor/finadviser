@@ -205,6 +205,20 @@ describe('computeInterestForRange — fallback when balance history is missing',
       }),
     ).toThrow(/must pass either `principal`/);
   });
+
+  it('throws when balanceSchedule does not cover the range start', () => {
+    // Schedule starts AFTER rangeFrom; without explicit coverage the
+    // calculator silently used the first entry, inventing a balance
+    // for an uncovered prefix. Defence-in-depth: throw instead.
+    expect(() =>
+      computeInterestForRange({
+        balanceSchedule: [{ effectiveDate: '2024-06-01', principal: '100000' }],
+        rangeFrom: '2024-04-06',
+        rangeTo: '2025-04-06',
+        rateHistory: [{ rate: '5.00', effectiveDate: '2024-04-06' }],
+      }),
+    ).toThrow(/balanceSchedule does not cover/);
+  });
 });
 
 describe('monthlyBreakdown — works with the new period principals', () => {

@@ -3,6 +3,7 @@ import Decimal from 'decimal.js';
 import { propertyRepo } from '@/lib/repos';
 import {
   computeInterestForRange,
+  determinePrincipalSource,
   nextDay,
 } from '@/lib/properties/mortgage-interest';
 import { taxYearRange } from '@/lib/tax/ukTaxYear';
@@ -54,7 +55,8 @@ export async function GET(
       mortgageId: number;
       lender: string;
       interestOnly: boolean;
-      principalUsed: string;
+      originalAmount: string;
+      principalAtRangeStart: string;
       principalSource: 'recorded_balances' | 'interest_only_fixed' | 'original_amount_fallback';
       totalInterest: string;
       totalDays: number;
@@ -71,45 +73,25 @@ export async function GET(
       const schedule = scheduleByMortgage.get(m.id);
       const hasRecordedPrincipalPayments = schedule !== undefined && schedule.length > 1;
 
-      let principalSource:
-        | 'recorded_balances'
-        | 'interest_only_fixed'
-        | 'original_amount_fallback';
-      let principalAssumption: string;
-      let calc;
-      if (m.interestOnly) {
-        principalSource = 'interest_only_fixed';
-        principalAssumption = 'interest-only: principal held at original_amount throughout the range';
-        calc = computeInterestForRange({
-          principal: m.originalAmount,
-          rangeFrom,
-          rangeTo: taxYearEndExclusive,
-          rateHistory: rates,
+      const { source: principalSource, assumption: principalAssumption } =
+        determinePrincipalSource({
+          interestOnly: m.interestOnly,
+          hasRecordedPrincipalPayments,
         });
-        usedInterestOnlyFixed += 1;
-      } else if (hasRecordedPrincipalPayments) {
-        principalSource = 'recorded_balances';
-        principalAssumption =
-          'repayment mortgage: outstanding principal reconstructed from recorded principal payments';
-        calc = computeInterestForRange({
-          balanceSchedule: schedule,
-          rangeFrom,
-          rangeTo: taxYearEndExclusive,
-          rateHistory: rates,
-        });
+      const calcParams: Parameters<typeof computeInterestForRange>[0] = {
+        rangeFrom,
+        rangeTo: taxYearEndExclusive,
+        rateHistory: rates,
+      };
+      if (principalSource === 'recorded_balances') {
+        calcParams.balanceSchedule = schedule;
         usedRecordedBalances += 1;
       } else {
-        principalSource = 'original_amount_fallback';
-        principalAssumption =
-          'repayment mortgage: no principal payments recorded yet; using original_amount as a placeholder';
-        calc = computeInterestForRange({
-          principal: m.originalAmount,
-          rangeFrom,
-          rangeTo: taxYearEndExclusive,
-          rateHistory: rates,
-        });
-        usedOriginalAmountFallback += 1;
+        calcParams.principal = m.originalAmount;
+        if (principalSource === 'interest_only_fixed') usedInterestOnlyFixed += 1;
+        else usedOriginalAmountFallback += 1;
       }
+      const calc = computeInterestForRange(calcParams);
       totalInterest = totalInterest.plus(calc.totalInterest);
       totalDays += calc.totalDays;
       uncoveredDays += calc.uncoveredDays;
@@ -117,7 +99,13 @@ export async function GET(
         mortgageId: m.id,
         lender: m.lender,
         interestOnly: m.interestOnly,
-        principalUsed: m.originalAmount,
+        originalAmount: m.originalAmount,
+        // Outstanding principal at the start of the calculated periods.
+        // For interest-only / fallback this equals originalAmount;
+        // for recorded_balances it reflects the schedule's value at
+        // rangeFrom - more useful than originalAmount when the
+        // calculation actually used a varying principal.
+        principalAtRangeStart: calc.periods[0]?.principal ?? m.originalAmount,
         principalSource,
         totalInterest: calc.totalInterest,
         totalDays: calc.totalDays,

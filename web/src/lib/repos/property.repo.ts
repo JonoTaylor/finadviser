@@ -1,4 +1,5 @@
 import { eq, sql, and, inArray } from 'drizzle-orm';
+import Decimal from 'decimal.js';
 import { getDb, schema } from '@/lib/db';
 
 const {
@@ -341,9 +342,11 @@ export const propertyRepo = {
       ORDER BY je.date ASC
     `);
 
+    // Decimal arithmetic for money - matches mortgage-tracker.ts
+    // and avoids JS-float drift accumulating across many payments.
     const schedule: Array<{ effectiveDate: string; principal: string }> = [];
-    let running = 0;
-    const original = parseFloat(mortgage.originalAmount);
+    const original = new Decimal(mortgage.originalAmount);
+    let running = new Decimal(0);
 
     schedule.push({
       effectiveDate: mortgage.startDate,
@@ -351,12 +354,18 @@ export const propertyRepo = {
     });
 
     for (const r of rows.rows) {
-      const paid = parseFloat((r.principal_paid as number | string).toString());
-      if (!Number.isFinite(paid) || paid <= 0) continue;
-      running += paid;
+      let paid: Decimal;
+      try {
+        paid = new Decimal((r.principal_paid as number | string).toString());
+      } catch {
+        continue;
+      }
+      if (!paid.isFinite() || paid.lte(0)) continue;
+      running = running.plus(paid);
+      const remaining = Decimal.max(original.minus(running), 0);
       schedule.push({
         effectiveDate: r.payment_date as string,
-        principal: Math.max(original - running, 0).toFixed(2),
+        principal: remaining.toFixed(2),
       });
     }
 

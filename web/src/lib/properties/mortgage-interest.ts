@@ -36,6 +36,45 @@ export interface BalanceScheduleEntry {
   effectiveDate: string; // ISO YYYY-MM-DD
 }
 
+export type PrincipalSource =
+  | 'recorded_balances'
+  | 'interest_only_fixed'
+  | 'original_amount_fallback';
+
+/**
+ * Pick the principal source for a mortgage interest calculation, plus
+ * the human-readable assumption string the API surfaces. Centralised
+ * so the per-mortgage and per-property routes report identical
+ * source labels and assumption copy.
+ *
+ * The decision is deliberately independent of `originalAmount` /
+ * `balanceSchedule` data — callers feed those into
+ * computeInterestForRange separately based on the returned `source`.
+ */
+export function determinePrincipalSource(params: {
+  interestOnly: boolean;
+  hasRecordedPrincipalPayments: boolean;
+}): { source: PrincipalSource; assumption: string } {
+  if (params.interestOnly) {
+    return {
+      source: 'interest_only_fixed',
+      assumption: 'interest-only: principal held at original_amount throughout the range',
+    };
+  }
+  if (params.hasRecordedPrincipalPayments) {
+    return {
+      source: 'recorded_balances',
+      assumption:
+        'repayment mortgage: outstanding principal reconstructed from recorded principal payments',
+    };
+  }
+  return {
+    source: 'original_amount_fallback',
+    assumption:
+      'repayment mortgage: no principal payments recorded yet; using original_amount as a placeholder',
+  };
+}
+
 export interface InterestPeriod {
   /** Half-open: [from, to). */
   from: string;
@@ -160,11 +199,22 @@ export function computeInterestForRange(params: {
 
   function principalAtDay(day: number): Decimal {
     if (sortedSchedule.length === 0) return new Decimal(principal!);
-    // Find the latest schedule entry with effectiveDate <= day.
-    let chosen = sortedSchedule[0];
+    // Find the latest schedule entry with effectiveDate <= day. If
+    // the range starts before the first entry the schedule doesn't
+    // cover the day - throw rather than silently picking the first
+    // entry, since that would invent a balance for a period the
+    // schedule explicitly doesn't describe. The repo-generated
+    // schedule always starts at mortgage.startDate, so this fires
+    // only on misuse from a different caller.
+    let chosen: BalanceScheduleEntry | null = null;
     for (let j = 0; j < sortedSchedule.length; j++) {
       if (scheduleEffectiveDays[j] <= day) chosen = sortedSchedule[j];
       else break;
+    }
+    if (!chosen) {
+      throw new Error(
+        `computeInterestForRange: balanceSchedule does not cover ${daysToIso(day)}; first entry is ${sortedSchedule[0].effectiveDate}`,
+      );
     }
     return new Decimal(chosen.principal);
   }

@@ -3,6 +3,7 @@ import Decimal from 'decimal.js';
 import { propertyRepo } from '@/lib/repos';
 import {
   computeInterestForRange,
+  determinePrincipalSource,
   monthlyBreakdown,
   nextDay,
 } from '@/lib/properties/mortgage-interest';
@@ -64,42 +65,22 @@ export async function GET(
       : await propertyRepo.getMortgageBalanceSchedule(mortgageId);
     const hasRecordedPrincipalPayments =
       balanceSchedule !== null && balanceSchedule.length > 1;
-    let principalSource:
-      | 'recorded_balances'
-      | 'interest_only_fixed'
-      | 'original_amount_fallback';
-    let principalAssumption: string;
-    let calc;
-    if (mortgage.interestOnly) {
-      principalSource = 'interest_only_fixed';
-      principalAssumption = 'interest-only: principal held at original_amount throughout the range';
-      calc = computeInterestForRange({
-        principal: mortgage.originalAmount,
-        rangeFrom,
-        rangeTo,
-        rateHistory: rates.map(r => ({ rate: r.rate, effectiveDate: r.effectiveDate })),
+    const { source: principalSource, assumption: principalAssumption } =
+      determinePrincipalSource({
+        interestOnly: mortgage.interestOnly,
+        hasRecordedPrincipalPayments,
       });
-    } else if (hasRecordedPrincipalPayments) {
-      principalSource = 'recorded_balances';
-      principalAssumption =
-        'repayment mortgage: outstanding principal reconstructed from recorded principal payments';
-      calc = computeInterestForRange({
-        balanceSchedule: balanceSchedule!,
-        rangeFrom,
-        rangeTo,
-        rateHistory: rates.map(r => ({ rate: r.rate, effectiveDate: r.effectiveDate })),
-      });
+    const calcParams: Parameters<typeof computeInterestForRange>[0] = {
+      rangeFrom,
+      rangeTo,
+      rateHistory: rates.map(r => ({ rate: r.rate, effectiveDate: r.effectiveDate })),
+    };
+    if (principalSource === 'recorded_balances') {
+      calcParams.balanceSchedule = balanceSchedule!;
     } else {
-      principalSource = 'original_amount_fallback';
-      principalAssumption =
-        'repayment mortgage: no principal payments recorded yet; using original_amount as a placeholder';
-      calc = computeInterestForRange({
-        principal: mortgage.originalAmount,
-        rangeFrom,
-        rangeTo,
-        rateHistory: rates.map(r => ({ rate: r.rate, effectiveDate: r.effectiveDate })),
-      });
+      calcParams.principal = mortgage.originalAmount;
     }
+    const calc = computeInterestForRange(calcParams);
 
     const months = monthlyBreakdown(calc);
 
@@ -113,7 +94,14 @@ export async function GET(
       interestOnly: mortgage.interestOnly,
       principalSource,
       principalAssumption,
-      principalUsed: mortgage.originalAmount,
+      // For interest-only / fallback this matches mortgage.originalAmount.
+      // For recorded_balances it's the OUTSTANDING principal at the
+      // start of the first computed period - the most useful single
+      // figure when the schedule varies across the range. The full
+      // schedule is implicit in `periods[].principal` and the
+      // monthly breakdown.
+      originalAmount: mortgage.originalAmount,
+      principalAtRangeStart: calc.periods[0]?.principal ?? mortgage.originalAmount,
       ...calc,
       months,
       basicRateCredit: credit,

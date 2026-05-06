@@ -97,6 +97,18 @@ export interface BtlProfitabilityParams {
 const DEFAULT_INCOME_TAX_RATE_PCT = '20';
 const DEFAULT_MORTGAGE_INTEREST_RELIEF_RATE_PCT = '20';
 
+// Patterns the recorded-mortgage-payments query uses to identify
+// payment journals. Centralised so a future rename of the reference
+// shape (recordMortgagePayments uses `mortgage_payment:<id>:<date>:
+// <amount>`) or the description (recordMortgagePayment uses
+// `Mortgage payment - <lender>`) only needs to change in one place.
+// If the producer-side strings drift without these being updated,
+// the query silently returns zero payments and cash-flow figures
+// are overstated - the warning code 'missing_mortgage_payments'
+// catches that loudly when it hits.
+const MORTGAGE_REFERENCE_PREFIX = 'mortgage_payment:%';
+const MORTGAGE_DESCRIPTION_PREFIX = 'Mortgage payment - %';
+
 /**
  * Build a BTL decision snapshot with deliberately separate concepts:
  * tax reporting profit, real bank cash flow, equity return and simple
@@ -335,7 +347,7 @@ async function fetchRecordedMortgagePayments(
         AND je.date >= ${startDate}
         AND je.date <= ${endDate}
         AND COALESCE(je.is_transfer, FALSE) = FALSE
-        AND (je.reference LIKE 'mortgage_payment:%' OR je.description LIKE 'Mortgage payment - %')
+        AND (je.reference LIKE ${MORTGAGE_REFERENCE_PREFIX} OR je.description LIKE ${MORTGAGE_DESCRIPTION_PREFIX})
       GROUP BY je.id
     ) payment_journals
   `);

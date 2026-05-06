@@ -184,11 +184,47 @@ export async function calculateBtlProfitability(
     ? cashFlowAfterTaxAnnual.div(equity).mul(100).toFixed(2)
     : null;
 
-  const vacancyOneMonthRent = rentIncome.div(12);
-  const vacancyOneMonthAnnual = cashFlowAfterTaxAnnual.minus(vacancyOneMonthRent);
-  const mortgagePaymentsUp10Pct = mortgagePayments.gt(0)
-    ? cashFlowAfterTaxAnnual.minus(mortgagePayments.mul(0.10))
-    : null;
+  // Stress tests model after-tax cash impact, not just gross. Both
+  // shocks change the tax bill (less rent -> less taxable profit;
+  // more interest -> more S.24 relief), so subtracting the gross
+  // figure overstates the cash hit at higher marginal rates.
+  //
+  // Vacancy: drop one month's rent from gross, recompute taxable
+  // rental profit (floored at 0), recompute tax due, and subtract
+  // the net (gross loss minus the resulting tax saving).
+  const vacancyOneMonthGrossLost = rentIncome.div(12);
+  const vacancyTaxableProfitForTax = Decimal.max(
+    taxableRentalProfit.minus(vacancyOneMonthGrossLost),
+    0,
+  );
+  const vacancyIncomeTaxBeforeMortgageRelief = vacancyTaxableProfitForTax
+    .mul(incomeTaxRatePct)
+    .div(100);
+  const vacancyEstimatedTaxDue = Decimal.max(
+    vacancyIncomeTaxBeforeMortgageRelief.minus(mortgageInterestRelief),
+    0,
+  );
+  const vacancyTaxSaving = estimatedTaxDue.minus(vacancyEstimatedTaxDue);
+  const vacancyAfterTaxLoss = vacancyOneMonthGrossLost.minus(vacancyTaxSaving);
+  const vacancyOneMonthAnnual = cashFlowAfterTaxAnnual.minus(vacancyAfterTaxLoss);
+
+  // Mortgage payments 10% higher: the +10% reflects a rate-rise
+  // scenario, so the increase IS interest and therefore S.24-
+  // deductible. More interest -> more relief -> partially offsets
+  // the cash hit. (For repayment mortgages where only the interest
+  // portion is rate-sensitive, treating the full +10% as additional
+  // interest slightly overstates the deductible amount; for
+  // interest-only it's exact. Conservative on the after-tax cost
+  // side either way.)
+  let mortgagePaymentsUp10Pct: Decimal | null = null;
+  if (mortgagePayments.gt(0)) {
+    const additionalMortgage = mortgagePayments.mul(0.10);
+    const additionalRelief = additionalMortgage.mul(mortgageInterestReliefRatePct).div(100);
+    const stressedTaxDue = Decimal.max(estimatedTaxDue.minus(additionalRelief), 0);
+    const taxSaving = estimatedTaxDue.minus(stressedTaxDue);
+    const additionalAfterTaxCost = additionalMortgage.minus(taxSaving);
+    mortgagePaymentsUp10Pct = cashFlowAfterTaxAnnual.minus(additionalAfterTaxCost);
+  }
 
   return {
     propertyId,
@@ -308,12 +344,23 @@ async function fetchRecordedMortgagePayments(
 
 async function fetchTotalMortgageBalance(propertyId: number): Promise<Decimal> {
   const mortgages = await propertyRepo.getMortgages(propertyId);
-  let total = new Decimal(0);
+  // Dedup first (a property could in principle have two `mortgages`
+  // rows pointing to the same liability account), then fetch the
+  // balances in parallel rather than serially - one round-trip per
+  // distinct mortgage instead of N sequential ones.
   const seen = new Set<number>();
+  const uniqueAccountIds: number[] = [];
   for (const mortgage of mortgages) {
     if (seen.has(mortgage.liabilityAccountId)) continue;
     seen.add(mortgage.liabilityAccountId);
-    total = total.plus(new Decimal(await accountRepo.getBalance(mortgage.liabilityAccountId)).abs());
+    uniqueAccountIds.push(mortgage.liabilityAccountId);
   }
-  return total;
+  if (uniqueAccountIds.length === 0) return new Decimal(0);
+  const balances = await Promise.all(
+    uniqueAccountIds.map(id => accountRepo.getBalance(id)),
+  );
+  return balances.reduce(
+    (acc, balance) => acc.plus(new Decimal(balance).abs()),
+    new Decimal(0),
+  );
 }

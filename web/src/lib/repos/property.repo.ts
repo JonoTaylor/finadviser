@@ -297,6 +297,72 @@ export const propertyRepo = {
     return rows.rows[0]?.balance as string ?? '0';
   },
 
+  /**
+   * Reconstruct a dated outstanding-principal schedule for a mortgage
+   * from journal_entries + book_entries on the liability account.
+   *
+   * Shape: a list of `{ effectiveDate, principal }` rows in ascending
+   * date order, where `principal` is the OUTSTANDING balance from
+   * `effectiveDate` until the next entry's date (or forever, for the
+   * tail). The first entry is always `{ mortgage.startDate,
+   * originalAmount }` so callers don't have to special-case the
+   * pre-payment range.
+   *
+   * Convention: `recordMortgagePayment` (and the bulk path) book the
+   * principal portion of each payment as a POSITIVE book_entry on
+   * the liability account. We sum those by date and subtract the
+   * running total from `originalAmount` to derive the outstanding
+   * balance. Multiple payments on the same date collapse to one
+   * schedule entry (the balance after all of them).
+   *
+   * Returns an empty array when the mortgage doesn't exist; the
+   * caller can detect that condition and fall back to a single
+   * fixed-principal calculation. Returns `[{ startDate,
+   * originalAmount }]` (length 1) when the mortgage exists but has
+   * no recorded principal payments — same shape, lets the caller
+   * reuse the schedule path uniformly.
+   */
+  async getMortgageBalanceSchedule(
+    mortgageId: number,
+  ): Promise<Array<{ effectiveDate: string; principal: string }>> {
+    const mortgage = await this.getMortgage(mortgageId);
+    if (!mortgage) return [];
+
+    const db = getDb();
+    const rows = await db.execute(sql`
+      SELECT je.date AS payment_date,
+             SUM(be.amount::numeric) AS principal_paid
+      FROM journal_entries je
+      JOIN book_entries be ON be.journal_entry_id = je.id
+      WHERE be.account_id = ${mortgage.liabilityAccountId}
+        AND be.amount::numeric > 0
+        AND je.date >= ${mortgage.startDate}
+      GROUP BY je.date
+      ORDER BY je.date ASC
+    `);
+
+    const schedule: Array<{ effectiveDate: string; principal: string }> = [];
+    let running = 0;
+    const original = parseFloat(mortgage.originalAmount);
+
+    schedule.push({
+      effectiveDate: mortgage.startDate,
+      principal: original.toFixed(2),
+    });
+
+    for (const r of rows.rows) {
+      const paid = parseFloat((r.principal_paid as number | string).toString());
+      if (!Number.isFinite(paid) || paid <= 0) continue;
+      running += paid;
+      schedule.push({
+        effectiveDate: r.payment_date as string,
+        principal: Math.max(original - running, 0).toFixed(2),
+      });
+    }
+
+    return schedule;
+  },
+
   async getEquityView(propertyId: number) {
     const db = getDb();
     const rows = await db.execute(sql`

@@ -16,10 +16,20 @@ import { taxYearRange } from '@/lib/tax/ukTaxYear';
  * Query params:
  * - year: tax-year label (e.g. "2026-27"). Required.
  *
- * For interest-only mortgages the principal is `original_amount`. For
- * non-interest-only mortgages we currently fall back to the same value
- * — repayment-mortgage amortisation is out of scope of this endpoint
- * and the response flags the assumption with `principalAssumption`.
+ * Principal source:
+ * - For repayment mortgages with at least one recorded principal
+ *   payment, we reconstruct a dated balance schedule from the
+ *   liability-account book_entries and feed it to the calculator so
+ *   each sub-period uses the outstanding balance in effect.
+ * - For interest-only mortgages we hold principal at `original_amount`
+ *   throughout the range (the actual semantic — there is no
+ *   amortisation).
+ * - For repayment mortgages with NO recorded principal payments we
+ *   fall back to `original_amount` as a placeholder and flag it
+ *   explicitly via `principalSource`.
+ *
+ * The response always includes `principalSource` so callers can
+ * distinguish between an authoritative calculation and a fallback.
  */
 export async function GET(
   request: NextRequest,
@@ -44,12 +54,52 @@ export async function GET(
     const rangeFrom = taxYear.startDate > mortgage.startDate ? taxYear.startDate : mortgage.startDate;
     const rangeTo = nextDay(taxYear.endDate);
 
-    const calc = computeInterestForRange({
-      principal: mortgage.originalAmount,
-      rangeFrom,
-      rangeTo,
-      rateHistory: rates.map(r => ({ rate: r.rate, effectiveDate: r.effectiveDate })),
-    });
+    // Decide the principal source. Interest-only short-circuits to the
+    // original-amount fixed path. Repayment uses the recorded balance
+    // schedule when at least one principal payment exists; otherwise
+    // the fallback (also fixed at original_amount, but flagged so the
+    // caller knows the figure is approximate).
+    const balanceSchedule = mortgage.interestOnly
+      ? null
+      : await propertyRepo.getMortgageBalanceSchedule(mortgageId);
+    const hasRecordedPrincipalPayments =
+      balanceSchedule !== null && balanceSchedule.length > 1;
+    let principalSource:
+      | 'recorded_balances'
+      | 'interest_only_fixed'
+      | 'original_amount_fallback';
+    let principalAssumption: string;
+    let calc;
+    if (mortgage.interestOnly) {
+      principalSource = 'interest_only_fixed';
+      principalAssumption = 'interest-only: principal held at original_amount throughout the range';
+      calc = computeInterestForRange({
+        principal: mortgage.originalAmount,
+        rangeFrom,
+        rangeTo,
+        rateHistory: rates.map(r => ({ rate: r.rate, effectiveDate: r.effectiveDate })),
+      });
+    } else if (hasRecordedPrincipalPayments) {
+      principalSource = 'recorded_balances';
+      principalAssumption =
+        'repayment mortgage: outstanding principal reconstructed from recorded principal payments';
+      calc = computeInterestForRange({
+        balanceSchedule: balanceSchedule!,
+        rangeFrom,
+        rangeTo,
+        rateHistory: rates.map(r => ({ rate: r.rate, effectiveDate: r.effectiveDate })),
+      });
+    } else {
+      principalSource = 'original_amount_fallback';
+      principalAssumption =
+        'repayment mortgage: no principal payments recorded yet; using original_amount as a placeholder';
+      calc = computeInterestForRange({
+        principal: mortgage.originalAmount,
+        rangeFrom,
+        rangeTo,
+        rateHistory: rates.map(r => ({ rate: r.rate, effectiveDate: r.effectiveDate })),
+      });
+    }
 
     const months = monthlyBreakdown(calc);
 
@@ -61,9 +111,8 @@ export async function GET(
       taxYearStart: taxYear.startDate,
       taxYearEnd: taxYear.endDate,
       interestOnly: mortgage.interestOnly,
-      principalAssumption: mortgage.interestOnly
-        ? 'interest-only: principal held at original_amount throughout the range'
-        : 'amortisation not implemented — using original_amount as a placeholder',
+      principalSource,
+      principalAssumption,
       principalUsed: mortgage.originalAmount,
       ...calc,
       months,

@@ -20,6 +20,22 @@ export interface RateHistoryEntry {
   effectiveDate: string; // ISO YYYY-MM-DD
 }
 
+/**
+ * Outstanding-principal at a given date. Each entry is taken as the
+ * principal in effect FROM `effectiveDate` until the next entry (or
+ * forever if it's the last). The schedule is expected to be sorted
+ * ascending by effectiveDate; duplicate dates use last-wins.
+ *
+ * Used by the BTL interest calculator to model repayment-mortgage
+ * amortisation: callers pass the schedule reconstructed from
+ * `journal_entries`-derived principal payments, and the calculator
+ * computes interest at the in-effect principal for each day.
+ */
+export interface BalanceScheduleEntry {
+  principal: string;
+  effectiveDate: string; // ISO YYYY-MM-DD
+}
+
 export interface InterestPeriod {
   /** Half-open: [from, to). */
   from: string;
@@ -85,20 +101,29 @@ export function nextDay(iso: string): string {
  * - Rate history must have at least one entry on or before rangeFrom
  *   for the prefix of the range to be covered. Days with no rate are
  *   reported in `uncoveredDays` and contribute zero interest.
- * - For repayment mortgages this caller currently has to pass the same
- *   `principal` for the whole range — i.e. the interest-only assumption.
- *   Adding amortisation = swap `principal` for a per-day balance
- *   lookup; the period-stitching logic stays the same.
+ * - Principal: pass either a single fixed `principal` (interest-only
+ *   semantics, or "no balance history available, use a placeholder")
+ *   OR a `balanceSchedule` (repayment mortgage — outstanding balance
+ *   reduces over time). When BOTH are passed, balanceSchedule wins
+ *   and `principal` is ignored. When NEITHER is passed, we throw -
+ *   the caller has to make an explicit choice between the two
+ *   modes so we don't silently return zero interest.
  */
 export function computeInterestForRange(params: {
-  principal: string;
+  principal?: string;
+  balanceSchedule?: BalanceScheduleEntry[];
   rangeFrom: string;
   rangeTo: string;
   rateHistory: RateHistoryEntry[];
 }): InterestCalculation {
-  const { principal, rangeFrom, rangeTo, rateHistory } = params;
+  const { principal, balanceSchedule, rangeFrom, rangeTo, rateHistory } = params;
 
-  const principalD = new Decimal(principal);
+  if (principal === undefined && (!balanceSchedule || balanceSchedule.length === 0)) {
+    throw new Error(
+      'computeInterestForRange: must pass either `principal` (fixed) or a non-empty `balanceSchedule`',
+    );
+  }
+
   const rangeFromDays = isoToDays(rangeFrom);
   const rangeToDays = isoToDays(rangeTo);
   if (rangeToDays <= rangeFromDays) {
@@ -112,21 +137,9 @@ export function computeInterestForRange(params: {
     };
   }
 
-  // Sort ascending by effectiveDate; if duplicates, the later push wins
-  // (last-write-wins semantics — the user can correct a wrong rate by
-  // entering a new row with the same effective date).
-  const sorted = [...rateHistory].sort((a, b) => a.effectiveDate.localeCompare(b.effectiveDate));
-
-  // Walk each rate's interval [effectiveDate, nextEffectiveDate) and
-  // intersect with [rangeFrom, rangeTo). Anything before the first rate
-  // counts as "uncovered" and is added to the diagnostic field but
-  // contributes zero interest.
-  const periods: InterestPeriod[] = [];
-  let totalInterest = new Decimal(0);
-
-  // Days before the first rate history entry — uncovered.
-  let coveredFromDays = rangeFromDays;
-  if (sorted.length === 0) {
+  // Sort rate history ascending; last-write-wins on duplicate dates.
+  const sortedRates = [...rateHistory].sort((a, b) => a.effectiveDate.localeCompare(b.effectiveDate));
+  if (sortedRates.length === 0) {
     return {
       rangeFrom,
       rangeTo,
@@ -137,23 +150,69 @@ export function computeInterestForRange(params: {
     };
   }
 
-  const firstRateDays = isoToDays(sorted[0].effectiveDate);
+  // Build the principal-lookup function. When a balanceSchedule is
+  // provided we look up the in-effect principal for each sub-period;
+  // otherwise the fixed `principal` is used everywhere.
+  const sortedSchedule: BalanceScheduleEntry[] = balanceSchedule
+    ? [...balanceSchedule].sort((a, b) => a.effectiveDate.localeCompare(b.effectiveDate))
+    : [];
+  const scheduleEffectiveDays = sortedSchedule.map(s => isoToDays(s.effectiveDate));
+
+  function principalAtDay(day: number): Decimal {
+    if (sortedSchedule.length === 0) return new Decimal(principal!);
+    // Find the latest schedule entry with effectiveDate <= day.
+    let chosen = sortedSchedule[0];
+    for (let j = 0; j < sortedSchedule.length; j++) {
+      if (scheduleEffectiveDays[j] <= day) chosen = sortedSchedule[j];
+      else break;
+    }
+    return new Decimal(chosen.principal);
+  }
+
+  // Days before the first rate history entry — uncovered.
+  let coveredFromDays = rangeFromDays;
+  const firstRateDays = isoToDays(sortedRates[0].effectiveDate);
   if (firstRateDays > rangeFromDays) {
     coveredFromDays = Math.min(firstRateDays, rangeToDays);
   }
   const uncoveredDays = coveredFromDays - rangeFromDays;
 
-  for (let i = 0; i < sorted.length; i++) {
-    const rateStartDays = Math.max(isoToDays(sorted[i].effectiveDate), coveredFromDays);
-    const nextRateDays =
-      i < sorted.length - 1 ? isoToDays(sorted[i + 1].effectiveDate) : Number.POSITIVE_INFINITY;
-    const rateEndDays = Math.min(nextRateDays, rangeToDays);
+  // Build the union of break points: rate-change dates + balance-
+  // schedule effectiveDates (clipped to the range, deduped, sorted).
+  // Each adjacent pair is a sub-period over which both rate and
+  // principal are constant.
+  const breakpoints = new Set<number>();
+  breakpoints.add(coveredFromDays);
+  breakpoints.add(rangeToDays);
+  for (let i = 0; i < sortedRates.length; i++) {
+    const d = isoToDays(sortedRates[i].effectiveDate);
+    if (d > coveredFromDays && d < rangeToDays) breakpoints.add(d);
+  }
+  for (const d of scheduleEffectiveDays) {
+    if (d > coveredFromDays && d < rangeToDays) breakpoints.add(d);
+  }
+  const sortedBreakpoints = Array.from(breakpoints).sort((a, b) => a - b);
 
-    if (rateEndDays <= rateStartDays) continue;
+  const periods: InterestPeriod[] = [];
+  let totalInterest = new Decimal(0);
 
-    const days = rateEndDays - rateStartDays;
-    const rateD = new Decimal(sorted[i].rate);
-    // interest = principal × (rate / 100) × (days / 365)
+  for (let i = 0; i < sortedBreakpoints.length - 1; i++) {
+    const segStart = sortedBreakpoints[i];
+    const segEnd = sortedBreakpoints[i + 1];
+    if (segEnd <= segStart) continue;
+    const days = segEnd - segStart;
+
+    // Find the rate in effect at segStart. The rate-history sort
+    // guarantees the latest entry with effectiveDate <= segStart wins.
+    let rateEntry: RateHistoryEntry | null = null;
+    for (let j = 0; j < sortedRates.length; j++) {
+      if (isoToDays(sortedRates[j].effectiveDate) <= segStart) rateEntry = sortedRates[j];
+      else break;
+    }
+    if (!rateEntry) continue; // entirely uncovered prefix
+
+    const principalD = principalAtDay(segStart);
+    const rateD = new Decimal(rateEntry.rate);
     const periodInterest = principalD
       .mul(rateD)
       .div(100)
@@ -163,9 +222,9 @@ export function computeInterestForRange(params: {
     totalInterest = totalInterest.plus(periodInterest);
 
     periods.push({
-      from: daysToIso(rateStartDays),
-      to: daysToIso(rateEndDays),
-      rate: sorted[i].rate,
+      from: daysToIso(segStart),
+      to: daysToIso(segEnd),
+      rate: rateEntry.rate,
       principal: principalD.toFixed(2),
       days,
       interest: periodInterest.toFixed(2),

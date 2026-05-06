@@ -358,6 +358,16 @@ export const propertyRepo = {
       try {
         paid = new Decimal((r.principal_paid as number | string).toString());
       } catch {
+        // Decimal parse failure here means the SUM(amount::numeric)
+        // returned a value that doesn't round-trip through Decimal -
+        // shouldn't happen in practice (the column is a Postgres
+        // numeric and the GROUP BY aggregates to numeric too), but
+        // log so a corrupted book_entry surfaces in production logs
+        // rather than silently leaving a gap in the schedule.
+        console.warn(
+          `[getMortgageBalanceSchedule] mortgageId=${mortgageId} date=${r.payment_date} ` +
+          `unparseable principal_paid=${String(r.principal_paid)}; skipping row`,
+        );
         continue;
       }
       if (!paid.isFinite() || paid.lte(0)) continue;

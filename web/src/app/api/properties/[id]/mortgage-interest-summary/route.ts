@@ -70,6 +70,11 @@ export async function GET(
     for (const m of mortgages) {
       const rates = ratesByMortgage.get(m.id) ?? [];
       const rangeFrom = taxYear.startDate > m.startDate ? taxYear.startDate : m.startDate;
+      // schedule is undefined for interest-only mortgages (filtered
+      // out of the parallel fetch above). determinePrincipalSource
+      // checks interestOnly first, so the short-circuit here is just
+      // a clean fallback to false on the rare case of an interest-
+      // only mortgage reaching this branch.
       const schedule = scheduleByMortgage.get(m.id);
       const hasRecordedPrincipalPayments = schedule !== undefined && schedule.length > 1;
 

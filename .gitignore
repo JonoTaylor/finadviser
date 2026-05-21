@@ -17,3 +17,4 @@ venv/
 .textual/
 .vercel
 .env*.local
+node_modules/

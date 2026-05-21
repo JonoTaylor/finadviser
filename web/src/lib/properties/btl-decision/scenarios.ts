@@ -97,11 +97,13 @@ export function evaluateScenario(params: {
   const grossRent = monthlyRent.mul(tenantedMonths);
   const runningCosts = monthlyRunningCosts.mul(scenario.monthsHeld);
   // Mortgage interest portion: approximate as the headline-rate
-  // monthly cost less an implied principal portion. For interest-only
-  // products this equals the monthly payment exactly; for repayment
-  // products it slightly overstates relief (conservative on after-tax
-  // carry). The scenario explorer is a comparison tool, not a tax
-  // return, so the approximation is acceptable here.
+  // monthly cost. For interest-only products this equals the monthly
+  // payment exactly; for repayment products it overstates the interest
+  // element (and therefore the Section 24 relief), making net rental
+  // after tax look slightly higher than it really is. That's optimistic
+  // on the carry side, so cross-product comparisons within a scenario
+  // stay valid but the absolute totals should be read as a ceiling on
+  // attractiveness, not a floor.
   const mortgageInterest = monthlyPayment.mul(scenario.monthsHeld);
 
   const tax = estimateRentalTax({

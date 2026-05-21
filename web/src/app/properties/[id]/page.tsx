@@ -18,6 +18,7 @@ import ExpensesCard from '@/components/properties/ExpensesCard';
 import MortgageInterestSummary from '@/components/properties/MortgageInterestSummary';
 import BtlDecisionCard from '@/components/properties/BtlDecisionCard';
 import ReceiptLongIcon from '@mui/icons-material/ReceiptLong';
+import InsightsOutlinedIcon from '@mui/icons-material/InsightsOutlined';
 import { currentTaxYear } from '@/lib/tax/ukTaxYear';
 
 const fetcher = (url: string) => fetch(url).then(r => r.json());
@@ -162,6 +163,15 @@ export default function PropertyDetailPage({ params }: { params: Promise<{ id: s
               startIcon={<ReceiptLongIcon />}
             >
               Tax-year report
+            </Button>
+            <Button
+              component={Link}
+              href={`/properties/${id}/decision`}
+              variant="outlined"
+              size="small"
+              startIcon={<InsightsOutlinedIcon />}
+            >
+              Decision support
             </Button>
           </Stack>
         </Grid>

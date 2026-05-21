@@ -3,6 +3,7 @@ import { sql } from 'drizzle-orm';
 import { getDb } from '@/lib/db';
 import { ClientError } from '@/lib/errors';
 import { propertyRepo, rentalReportRepo, accountRepo } from '@/lib/repos';
+import { estimateRentalTax } from './btl-decision/tax';
 
 export interface BtlTaxAssumptions {
   /** Marginal income-tax rate applied to taxable rental profit. */
@@ -153,10 +154,18 @@ export async function calculateBtlProfitability(
   const deductibleExpenses = new Decimal(report.totals.totalExpenses);
   const mortgageInterestForRelief = new Decimal(report.totals.mortgageInterest);
   const taxableRentalProfit = grossIncome.minus(deductibleExpenses);
-  const taxableProfitForTax = Decimal.max(taxableRentalProfit, 0);
-  const incomeTaxBeforeMortgageRelief = taxableProfitForTax.mul(incomeTaxRatePct).div(100);
-  const mortgageInterestRelief = mortgageInterestForRelief.mul(mortgageInterestReliefRatePct).div(100);
-  const estimatedTaxDue = Decimal.max(incomeTaxBeforeMortgageRelief.minus(mortgageInterestRelief), 0);
+  // Section 24 maths is shared with the scenario explorer through the
+  // btl-decision/tax module - keep one implementation, not two.
+  const tax = estimateRentalTax({
+    grossRent: grossIncome,
+    runningCosts: deductibleExpenses,
+    mortgageInterest: mortgageInterestForRelief,
+    marginalRatePct: incomeTaxRatePct,
+    reliefRatePct: mortgageInterestReliefRatePct,
+  });
+  const incomeTaxBeforeMortgageRelief = tax.incomeTaxBeforeRelief;
+  const mortgageInterestRelief = tax.mortgageInterestRelief;
+  const estimatedTaxDue = tax.estimatedTaxDue;
 
   const mortgages = await propertyRepo.getMortgages(propertyId);
   const mortgagePayments = await fetchRecordedMortgagePayments(propertyId, startDate, endDate);

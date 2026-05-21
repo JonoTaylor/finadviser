@@ -58,20 +58,18 @@ export async function GET(
     );
 
     // Annual running-cost baseline: pull the current tax-year report and
-    // use total expenses minus mortgage interest (the scenario explorer
-    // models mortgage interest separately via the product spec).
+    // use total expenses. `getTaxYearReport` already segregates mortgage
+    // interest into `totals.mortgageInterest` per UK Section 24 rules,
+    // so `totals.totalExpenses` excludes it. We use that figure
+    // directly; the scenario explorer models mortgage interest separately
+    // via the product spec.
     const range = currentTaxYear();
     const report = await rentalReportRepo.getTaxYearReport({
       propertyId,
       startDate: range.startDate,
       endDate: range.endDate,
     });
-    const totalExpenses = new Decimal(report.totals.totalExpenses);
-    const mortgageInterest = new Decimal(report.totals.mortgageInterest);
-    const runningCostsExMortgageInterest = Decimal.max(
-      totalExpenses.minus(mortgageInterest),
-      0,
-    ).toFixed(2);
+    const runningCostsExMortgageInterest = report.totals.totalExpenses;
 
     // Annual rent derived from the active tenancy if present, otherwise
     // from rent received over the current tax year.

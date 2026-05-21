@@ -250,8 +250,12 @@ export function buildKeyInsights(cells: ComparisonCell[]): KeyInsight[] {
 }
 
 function dominantCostDriver(result: ComparisonCell['result']): string {
+  // `mortgageCost` from totalMortgageCost is monthly_payment × months
+  // + product fee + exit fee + ERC. We pull ERC out into its own bucket
+  // so the residual is the cost of carrying the mortgage itself
+  // (payments + fees), not interest alone.
   const candidates: Array<{ label: string; amount: Decimal }> = [
-    { label: 'mortgage interest', amount: result.mortgageCost.minus(result.ercCost) },
+    { label: 'mortgage payments & fees', amount: result.mortgageCost.minus(result.ercCost) },
     { label: 'ERC', amount: result.ercCost },
     { label: 'void cost', amount: result.voidCost },
     { label: 'EPC remediation', amount: result.epcCost },

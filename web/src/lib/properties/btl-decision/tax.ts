@@ -45,15 +45,13 @@ export function estimateRentalTax(inputs: RentalTaxInputs): RentalTaxResult {
 }
 
 /**
- * The CGT rules differ from the income-tax marginal rate: as of the
- * 2024/25 tax year, residential property gains attract 24 percent for
- * higher/additional-rate payers and 18 percent for basic-rate payers.
- * Allowance is £3,000 per owner per year (2024/25 onwards).
+ * Residential-property CGT rates (2024/25 onwards): 24% for any portion
+ * of the gain that lands in the higher-rate band, 18% for any portion
+ * that fits inside the seller's remaining basic-rate band. Gains are
+ * added to income for the band-split calculation, so callers who know
+ * the seller's income headroom can pass `remainingBasicRateBand` to
+ * `estimateNetSaleProceeds`. Allowance is £3,000 per owner per year.
  */
 export const CGT_RATE_HIGHER_PCT = new Decimal(24);
 export const CGT_RATE_BASIC_PCT = new Decimal(18);
 export const CGT_ANNUAL_ALLOWANCE = new Decimal(3000);
-
-export function cgtRateForMarginalRate(marginalRatePct: Decimal): Decimal {
-  return marginalRatePct.lte(20) ? CGT_RATE_BASIC_PCT : CGT_RATE_HIGHER_PCT;
-}

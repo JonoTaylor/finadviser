@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import Decimal from 'decimal.js';
-import { estimateRentalTax, cgtRateForMarginalRate } from './tax';
+import { estimateRentalTax } from './tax';
 
 describe('estimateRentalTax', () => {
   it('computes tax due net of basic-rate mortgage-interest relief at the higher rate', () => {
@@ -46,16 +46,3 @@ describe('estimateRentalTax', () => {
   });
 });
 
-describe('cgtRateForMarginalRate', () => {
-  it('returns the 18% basic rate for basic-rate taxpayers', () => {
-    expect(cgtRateForMarginalRate(new Decimal(20)).toString()).toBe('18');
-  });
-
-  it('returns the 24% higher rate for higher-rate taxpayers', () => {
-    expect(cgtRateForMarginalRate(new Decimal(40)).toString()).toBe('24');
-  });
-
-  it('returns the 24% higher rate for additional-rate taxpayers', () => {
-    expect(cgtRateForMarginalRate(new Decimal(45)).toString()).toBe('24');
-  });
-});

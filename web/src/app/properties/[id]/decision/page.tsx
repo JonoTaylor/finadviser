@@ -78,20 +78,28 @@ interface DecisionContextResponse {
   annualRunningCosts: string;
 }
 
+/**
+ * Months between today and `endDate`. Returns null for open-ended
+ * tenancies. Shared between `buildScenarios` and the timeline so the
+ * tenancy-end value the chart shows matches the one the scenario
+ * engine derives.
+ */
+function monthsUntil(endDate: string | null): number | null {
+  if (!endDate) return null;
+  const today = new Date();
+  const end = new Date(endDate);
+  return Math.max(
+    0,
+    Math.ceil((end.getTime() - today.getTime()) / (1000 * 60 * 60 * 24 * 30)),
+  );
+}
+
 function buildScenarios(
   sensitivity: SensitivityState,
   activeTenancyEnd: string | null,
 ): ScenarioInputs[] {
-  let monthsToTenancyEnd = 12;
-  if (activeTenancyEnd) {
-    const today = new Date();
-    const end = new Date(activeTenancyEnd);
-    const diff = Math.max(
-      1,
-      Math.ceil((end.getTime() - today.getTime()) / (1000 * 60 * 60 * 24 * 30)),
-    );
-    monthsToTenancyEnd = diff;
-  }
+  // 12 months when the tenancy is open-ended OR has already ended.
+  const monthsToTenancyEnd = Math.max(1, monthsUntil(activeTenancyEnd) ?? 12);
 
   const baseSellingCosts = new Decimal(8000);
   const salePrice = new Decimal(sensitivity.salePrice);
@@ -101,12 +109,15 @@ function buildScenarios(
   const epc = new Decimal(sensitivity.epcRemediation);
   const userVoidMonths = sensitivity.voidMonths;
 
-  return [
+  // Void months can never exceed the holding period (you can't sit
+  // empty for 12 months on a 3-month hold). Clamping here keeps carry
+  // costs physically possible regardless of slider combinations.
+  const scenarios: Array<Omit<ScenarioInputs, 'voidMonths'> & { voidMonthsRaw: number }> = [
     {
       key: 'ride_out',
       label: 'Ride out tenancy',
       monthsHeld: sensitivity.saleCompletionMonths,
-      voidMonths: Math.max(0, userVoidMonths),
+      voidMonthsRaw: Math.max(0, userVoidMonths),
       salePrice,
       sellingCosts: baseSellingCosts,
       epcRemediation: epc,
@@ -116,7 +127,7 @@ function buildScenarios(
       key: 'fast_forced',
       label: 'Fast forced sale',
       monthsHeld: Math.max(3, Math.min(sensitivity.saleCompletionMonths, monthsToTenancyEnd - 1)),
-      voidMonths: Math.max(2, userVoidMonths + 2),
+      voidMonthsRaw: Math.max(2, userVoidMonths + 2),
       salePrice: tenantedSalePrice,
       sellingCosts: baseSellingCosts,
       epcRemediation: epc,
@@ -126,7 +137,7 @@ function buildScenarios(
       key: 'delay_dodge_erc',
       label: 'Delay past ERC',
       monthsHeld: Math.max(25, sensitivity.saleCompletionMonths),
-      voidMonths: Math.max(0, userVoidMonths),
+      voidMonthsRaw: Math.max(0, userVoidMonths),
       salePrice,
       sellingCosts: baseSellingCosts,
       epcRemediation: epc,
@@ -136,13 +147,18 @@ function buildScenarios(
       key: 're_let',
       label: 'Re-let, hold long term',
       monthsHeld: 24,
-      voidMonths: Math.max(1, userVoidMonths),
+      voidMonthsRaw: Math.max(1, userVoidMonths),
       salePrice: new Decimal(0),
       sellingCosts: new Decimal(0),
       epcRemediation: new Decimal(0),
       resultsInSale: false,
     },
   ];
+
+  return scenarios.map(({ voidMonthsRaw, ...rest }) => ({
+    ...rest,
+    voidMonths: Math.min(voidMonthsRaw, rest.monthsHeld),
+  }));
 }
 
 export default function DecisionPage({ params }: { params: Promise<{ id: string }> }) {
@@ -207,20 +223,22 @@ export default function DecisionPage({ params }: { params: Promise<{ id: string 
     [validProducts, cells],
   );
   const insights = useMemo(() => buildKeyInsights(cells), [cells]);
-  const leadingErcSteps = useMemo(() => {
-    if (validProducts.length === 0) return [];
-    return validProducts[0].ercSchedule.map(t => t.untilMonth);
-  }, [validProducts]);
 
-  const monthsToTenancyEnd = (() => {
-    if (!data?.activeTenancy?.endDate) return null;
-    const today = new Date();
-    const end = new Date(data.activeTenancy.endDate);
-    return Math.max(
-      0,
-      Math.ceil((end.getTime() - today.getTime()) / (1000 * 60 * 60 * 24 * 30)),
+  // ERC step months should match whichever product is actually leading
+  // the comparison under the current sensitivity inputs, not whichever
+  // product the user happened to type first. Pick the leader from the
+  // `ride_out` scenario (the headline plan) and read its schedule.
+  const leadingErcSteps = useMemo(() => {
+    const rideOutCells = cells.filter(c => c.scenarioKey === 'ride_out');
+    if (rideOutCells.length === 0) return [];
+    const leader = rideOutCells.reduce((best, c) =>
+      c.result.totalCarryCost.lt(best.result.totalCarryCost) ? c : best,
     );
-  })();
+    const leaderProduct = validProducts.find(p => p.id === leader.productId);
+    return leaderProduct?.ercSchedule.map(t => t.untilMonth) ?? [];
+  }, [cells, validProducts]);
+
+  const monthsToTenancyEnd = monthsUntil(data?.activeTenancy?.endDate ?? null);
 
   if (isLoading) {
     return <Skeleton variant="rounded" height={400} />;
@@ -258,6 +276,7 @@ export default function DecisionPage({ params }: { params: Promise<{ id: string 
         onMarginalRateChange={r =>
           setSensitivity(s => ({ ...s, marginalRatePct: r }))
         }
+        showMarginalRateControl={tab !== 'sensitivity'}
       />
 
       {!isPrintMode && (
@@ -328,10 +347,12 @@ function ContextSummary({
   data,
   marginalRatePct,
   onMarginalRateChange,
+  showMarginalRateControl,
 }: {
   data: DecisionContextResponse;
   marginalRatePct: '20' | '40' | '45';
   onMarginalRateChange: (value: '20' | '40' | '45') => void;
+  showMarginalRateControl: boolean;
 }) {
   const items: Array<{ label: string; value: string }> = [
     {
@@ -371,20 +392,22 @@ function ContextSummary({
           </Typography>
         </Box>
       ))}
-      <Box>
-        <Typography variant="caption" color="text.secondary">
-          Marginal tax rate
-        </Typography>
-        <select
-          value={marginalRatePct}
-          onChange={e => onMarginalRateChange(e.target.value as '20' | '40' | '45')}
-          style={{ display: 'block', marginTop: 4, padding: '4px 8px', borderRadius: 4 }}
-        >
-          <option value="20">Basic 20%</option>
-          <option value="40">Higher 40%</option>
-          <option value="45">Additional 45%</option>
-        </select>
-      </Box>
+      {showMarginalRateControl && (
+        <Box>
+          <Typography variant="caption" color="text.secondary">
+            Marginal tax rate
+          </Typography>
+          <select
+            value={marginalRatePct}
+            onChange={e => onMarginalRateChange(e.target.value as '20' | '40' | '45')}
+            style={{ display: 'block', marginTop: 4, padding: '4px 8px', borderRadius: 4 }}
+          >
+            <option value="20">Basic 20%</option>
+            <option value="40">Higher 40%</option>
+            <option value="45">Additional 45%</option>
+          </select>
+        </Box>
+      )}
     </Stack>
   );
 }

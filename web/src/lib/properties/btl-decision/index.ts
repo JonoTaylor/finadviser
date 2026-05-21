@@ -26,3 +26,17 @@ export type {
   ComparisonCell,
 } from './scenarios';
 export { evaluateScenario, runScenarioComparison } from './scenarios';
+
+export type {
+  StackedCostSeries,
+  BreakEvenSeries,
+  BreakEvenSeriesPoint,
+  DecisionMatrixCell,
+  KeyInsight,
+} from './chart-data';
+export {
+  buildStackedCostSeries,
+  buildBreakEvenSeries,
+  buildDecisionMatrix,
+  buildKeyInsights,
+} from './chart-data';

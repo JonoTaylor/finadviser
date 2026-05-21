@@ -21,6 +21,7 @@
     "@emotion/styled": "^11.14.1",
     "@mui/icons-material": "^7.3.7",
     "@mui/material": "^7.3.7",
+    "@mui/x-charts": "^9.2.0",
     "@neondatabase/serverless": "^1.0.2",
     "ai": "^5.0.0",
     "date-fns": "^4.1.0",

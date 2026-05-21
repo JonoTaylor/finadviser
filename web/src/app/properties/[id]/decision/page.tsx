@@ -1,12 +1,13 @@
 'use client';
 
-import { useMemo, useState, use, lazy, Suspense } from 'react';
+import { useMemo, useRef, useState, use, lazy, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import {
   Alert,
   Box,
   Button,
+  Chip,
   Grid,
   Skeleton,
   Stack,
@@ -22,6 +23,8 @@ import MortgageProductForm from '@/components/properties/decision/MortgageProduc
 import ScenarioCards from '@/components/properties/decision/ScenarioCards';
 import SensitivityControls, {
   DEFAULT_SENSITIVITY,
+  salePriceRangeFromValuation,
+  type SalePriceRange,
   type SensitivityState,
 } from '@/components/properties/decision/SensitivityControls';
 import KeyInsights from '@/components/properties/decision/KeyInsights';
@@ -31,6 +34,7 @@ import {
   buildKeyInsights,
   buildStackedCostSeries,
   runScenarioComparison,
+  type ComparisonCell,
   type MortgageProduct,
   type PropertyContext,
   type ScenarioInputs,
@@ -85,16 +89,22 @@ interface DecisionContextResponse {
   annualRunningCosts: string;
 }
 
-// Shared assumptions used by both the scenario engine and the Sell-vs-Hold
-// projection so all three tabs reason about the same numbers.
+interface SavedProductsResponse {
+  products: Array<{
+    id: number;
+    name: string;
+    productType: string;
+    ratePct: string;
+    productFee: string;
+    exitFee: string;
+    monthlyPayment: string;
+    ercSchedule: Array<{ untilMonth: number; pct: string }>;
+  }>;
+}
+
 const BASE_SELLING_COSTS_GBP = new Decimal(8000);
 const FALLBACK_MORTGAGE_RATE_PCT = new Decimal('5.49');
 
-/**
- * Pick the latest in-effect rate across a property's mortgages,
- * weighted by outstanding balance. Falls back to `FALLBACK_MORTGAGE_RATE_PCT`
- * when no rate history is available (e.g. a freshly added mortgage).
- */
 function currentBlendedMortgageRatePct(
   mortgages: DecisionContextResponse['mortgages'],
 ): Decimal {
@@ -112,12 +122,6 @@ function currentBlendedMortgageRatePct(
   return totalBalance.gt(0) ? weightedRate.div(totalBalance) : FALLBACK_MORTGAGE_RATE_PCT;
 }
 
-/**
- * Months between today and `endDate`. Returns null for open-ended
- * tenancies. Shared between `buildScenarios` and the timeline so the
- * tenancy-end value the chart shows matches the one the scenario
- * engine derives.
- */
 function monthsUntil(endDate: string | null): number | null {
   if (!endDate) return null;
   const today = new Date();
@@ -132,7 +136,6 @@ function buildScenarios(
   sensitivity: SensitivityState,
   activeTenancyEnd: string | null,
 ): ScenarioInputs[] {
-  // 12 months when the tenancy is open-ended OR has already ended.
   const monthsToTenancyEnd = Math.max(1, monthsUntil(activeTenancyEnd) ?? 12);
 
   const baseSellingCosts = BASE_SELLING_COSTS_GBP;
@@ -143,9 +146,6 @@ function buildScenarios(
   const epc = new Decimal(sensitivity.epcRemediation);
   const userVoidMonths = sensitivity.voidMonths;
 
-  // Void months can never exceed the holding period (you can't sit
-  // empty for 12 months on a 3-month hold). Clamping here keeps carry
-  // costs physically possible regardless of slider combinations.
   const scenarios: Array<Omit<ScenarioInputs, 'voidMonths'> & { voidMonthsRaw: number }> = [
     {
       key: 'ride_out',
@@ -195,43 +195,230 @@ function buildScenarios(
   }));
 }
 
+/**
+ * Map server-side saved products onto the in-memory `MortgageProduct`
+ * shape. The form uses string IDs (UUIDs for unsaved rows, the numeric
+ * server ID stringified for saved rows) so the inner component can
+ * tell which is which when persisting.
+ */
+function mapSavedToProducts(saved: SavedProductsResponse['products']): MortgageProduct[] {
+  return saved.map(p => ({
+    id: String(p.id),
+    name: p.name,
+    type: p.productType as MortgageProduct['type'],
+    ratePct: p.ratePct,
+    productFee: p.productFee,
+    exitFee: p.exitFee,
+    monthlyPayment: p.monthlyPayment,
+    ercSchedule: p.ercSchedule ?? [],
+  }));
+}
+
+/**
+ * Find the leading product across `ride_out` cells (lowest total carry
+ * cost). Used by the Sell-vs-Hold panel so the hold-path interest is
+ * derived from whichever product you'd actually switch to, not a
+ * blended DB rate. Returns null when no products are entered yet.
+ */
+function findLeadingProduct(
+  cells: ComparisonCell[],
+  products: MortgageProduct[],
+): MortgageProduct | null {
+  const rideOut = cells.filter(c => c.scenarioKey === 'ride_out');
+  if (rideOut.length === 0) return null;
+  const leaderCell = rideOut.reduce((best, c) =>
+    c.result.totalCarryCost.lt(best.result.totalCarryCost) ? c : best,
+  );
+  return products.find(p => p.id === leaderCell.productId) ?? null;
+}
+
 export default function DecisionPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
+
+  const { data: context, error: contextError, isLoading: contextLoading } =
+    useSWR<DecisionContextResponse>(
+      `/api/properties/${id}/decision-context`,
+      fetcher,
+    );
+  const { data: savedProducts, error: productsError, isLoading: productsLoading } =
+    useSWR<SavedProductsResponse>(
+      `/api/properties/${id}/decision-products`,
+      fetcher,
+    );
+
+  if (contextLoading || productsLoading) {
+    return <Skeleton variant="rounded" height={400} />;
+  }
+  if (contextError || productsError || !context || !savedProducts) {
+    return <Alert severity="error">Could not load decision context for this property.</Alert>;
+  }
+
+  // Split the page into outer (data-loading) and inner (interactive)
+  // shells. Once SWR delivers both responses, mount the inner with the
+  // saved products as the initial value of its local state. The outer
+  // never re-mounts the inner on subsequent SWR revalidations, so the
+  // user's in-progress edits aren't blown away by background refreshes.
+  return (
+    <DecisionPageInner
+      pathId={id}
+      context={context}
+      initialProducts={mapSavedToProducts(savedProducts.products)}
+    />
+  );
+}
+
+function DecisionPageInner({
+  pathId,
+  context: data,
+  initialProducts,
+}: {
+  pathId: string;
+  context: DecisionContextResponse;
+  initialProducts: MortgageProduct[];
+}) {
   const searchParams = useSearchParams();
   const isPrintMode = searchParams?.get('print') === '1';
 
-  const { data, error, isLoading } = useSWR<DecisionContextResponse>(
-    `/api/properties/${id}/decision-context`,
-    fetcher,
+  const valuationNumber = data.latestValuation
+    ? Number(data.latestValuation.valuation)
+    : Number(data.property.purchasePrice ?? 0) || 400_000;
+  const salePriceRange = useMemo<SalePriceRange>(
+    () => salePriceRangeFromValuation(valuationNumber),
+    [valuationNumber],
   );
 
   const [tab, setTab] = useState<'scenarios' | 'sensitivity' | 'sell_vs_hold'>('scenarios');
-  const [products, setProducts] = useState<MortgageProduct[]>([]);
-  const [sensitivity, setSensitivity] = useState<SensitivityState>(DEFAULT_SENSITIVITY);
+  const [products, setProducts] = useState<MortgageProduct[]>(initialProducts);
+  const [sensitivity, setSensitivity] = useState<SensitivityState>(() => ({
+    ...DEFAULT_SENSITIVITY,
+    salePrice: salePriceRange.default,
+  }));
+  const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
 
-  const handleProductsChange = (next: MortgageProduct[]) => {
-    setProducts(next);
+  // Track per-row pending save timers so rapid edits to the same row
+  // coalesce into one PATCH instead of one per keystroke. The map key
+  // is the client-side product id; values are setTimeout handles.
+  const pendingTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+
+  const persistProduct = async (product: MortgageProduct, previousId?: string) => {
+    setSaveStatus('saving');
+    try {
+      const isPersisted = /^\d+$/.test(product.id);
+      if (isPersisted) {
+        const res = await fetch(
+          `/api/properties/${pathId}/decision-products/${product.id}`,
+          {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              name: product.name,
+              productType: product.type,
+              ratePct: product.ratePct,
+              productFee: product.productFee,
+              exitFee: product.exitFee,
+              monthlyPayment: product.monthlyPayment,
+              ercSchedule: product.ercSchedule,
+            }),
+          },
+        );
+        if (!res.ok) throw new Error(`PATCH ${res.status}`);
+      } else if (
+        product.name &&
+        product.ratePct &&
+        product.monthlyPayment &&
+        Number(product.monthlyPayment) > 0
+      ) {
+        const res = await fetch(`/api/properties/${pathId}/decision-products`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: product.name,
+            productType: product.type,
+            ratePct: product.ratePct,
+            productFee: product.productFee,
+            exitFee: product.exitFee,
+            monthlyPayment: product.monthlyPayment,
+            ercSchedule: product.ercSchedule,
+          }),
+        });
+        if (!res.ok) throw new Error(`POST ${res.status}`);
+        const body = await res.json();
+        const newId = String(body.product.id);
+        // Re-key the row so subsequent edits go through PATCH against
+        // the persisted ID instead of creating duplicates.
+        setProducts(prev =>
+          prev.map(p => (p.id === (previousId ?? product.id) ? { ...p, id: newId } : p)),
+        );
+      }
+      setSaveStatus('saved');
+    } catch {
+      setSaveStatus('error');
+    }
   };
 
-  const context = useMemo<PropertyContext | null>(() => {
-    if (!data) return null;
-    const valuation = data.latestValuation
-      ? new Decimal(data.latestValuation.valuation)
-      : new Decimal(data.property.purchasePrice ?? '0');
-    return {
+  const archiveProduct = async (productId: string) => {
+    if (!/^\d+$/.test(productId)) return;
+    setSaveStatus('saving');
+    try {
+      const res = await fetch(
+        `/api/properties/${pathId}/decision-products/${productId}`,
+        { method: 'DELETE' },
+      );
+      if (!res.ok) throw new Error(`DELETE ${res.status}`);
+      setSaveStatus('saved');
+    } catch {
+      setSaveStatus('error');
+    }
+  };
+
+  const handleProductsChange = (next: MortgageProduct[]) => {
+    const prevById = new Map(products.map(p => [p.id, p]));
+    const nextIds = new Set(next.map(p => p.id));
+    setProducts(next);
+
+    // Per-row coalescing: schedule a save 300ms after the last change
+    // to the same row, cancelling any prior pending save for that row.
+    for (const product of next) {
+      const prev = prevById.get(product.id);
+      if (!prev || JSON.stringify(prev) === JSON.stringify(product)) continue;
+      const existingTimer = pendingTimers.current.get(product.id);
+      if (existingTimer) clearTimeout(existingTimer);
+      const timer = setTimeout(() => {
+        pendingTimers.current.delete(product.id);
+        void persistProduct(product, product.id);
+      }, 300);
+      pendingTimers.current.set(product.id, timer);
+    }
+
+    // Removed rows fire DELETE immediately (no need to coalesce a delete).
+    for (const prev of products) {
+      if (!nextIds.has(prev.id)) {
+        const t = pendingTimers.current.get(prev.id);
+        if (t) {
+          clearTimeout(t);
+          pendingTimers.current.delete(prev.id);
+        }
+        void archiveProduct(prev.id);
+      }
+    }
+  };
+
+  const propertyContext = useMemo<PropertyContext>(
+    () => ({
       mortgageBalance: new Decimal(data.totalOutstandingBalance),
-      latestValuation: valuation,
+      latestValuation: new Decimal(valuationNumber),
       acquisitionCost: new Decimal(data.property.purchasePrice ?? '0'),
       ownerCount: data.ownerCount || 1,
       annualRent: new Decimal(data.annualRent),
       annualRunningCosts: new Decimal(data.annualRunningCosts),
       marginalRatePct: new Decimal(sensitivity.marginalRatePct),
-    };
-  }, [data, sensitivity.marginalRatePct]);
+    }),
+    [data, valuationNumber, sensitivity.marginalRatePct],
+  );
 
   const scenarios = useMemo(
-    () => buildScenarios(sensitivity, data?.activeTenancy?.endDate ?? null),
-    [sensitivity, data?.activeTenancy?.endDate],
+    () => buildScenarios(sensitivity, data.activeTenancy?.endDate ?? null),
+    [sensitivity, data.activeTenancy?.endDate],
   );
 
   const validProducts = useMemo(
@@ -243,50 +430,53 @@ export default function DecisionPage({ params }: { params: Promise<{ id: string 
   );
 
   const cells = useMemo(() => {
-    if (!context || validProducts.length === 0) return [];
-    return runScenarioComparison({ products: validProducts, scenarios, context });
-  }, [validProducts, scenarios, context]);
+    if (validProducts.length === 0) return [];
+    return runScenarioComparison({ products: validProducts, scenarios, context: propertyContext });
+  }, [validProducts, scenarios, propertyContext]);
 
   const stackedSeries = useMemo(() => buildStackedCostSeries(cells), [cells]);
   const breakEvenSeries = useMemo(() => {
-    if (!context || validProducts.length === 0) return [];
-    return buildBreakEvenSeries(validProducts, context.mortgageBalance, 36);
-  }, [validProducts, context]);
+    if (validProducts.length === 0) return [];
+    return buildBreakEvenSeries(validProducts, propertyContext.mortgageBalance, 36);
+  }, [validProducts, propertyContext]);
   const matrix = useMemo(
     () => buildDecisionMatrix({ products: validProducts, cells }),
     [validProducts, cells],
   );
   const insights = useMemo(() => buildKeyInsights(cells), [cells]);
 
-  // ERC step months should match whichever product is actually leading
-  // the comparison under the current sensitivity inputs, not whichever
-  // product the user happened to type first. Pick the leader from the
-  // `ride_out` scenario (the headline plan) and read its schedule.
-  const leadingErcSteps = useMemo(() => {
-    const rideOutCells = cells.filter(c => c.scenarioKey === 'ride_out');
-    if (rideOutCells.length === 0) return [];
-    const leader = rideOutCells.reduce((best, c) =>
-      c.result.totalCarryCost.lt(best.result.totalCarryCost) ? c : best,
-    );
-    const leaderProduct = validProducts.find(p => p.id === leader.productId);
-    return leaderProduct?.ercSchedule.map(t => t.untilMonth) ?? [];
-  }, [cells, validProducts]);
+  const leadingProduct = useMemo(
+    () => findLeadingProduct(cells, validProducts),
+    [cells, validProducts],
+  );
 
-  const monthsToTenancyEnd = monthsUntil(data?.activeTenancy?.endDate ?? null);
+  const leadingErcSteps = useMemo(
+    () => leadingProduct?.ercSchedule.map(t => t.untilMonth) ?? [],
+    [leadingProduct],
+  );
 
-  if (isLoading) {
-    return <Skeleton variant="rounded" height={400} />;
-  }
-  if (error || !data) {
-    return <Alert severity="error">Could not load decision context for this property.</Alert>;
-  }
+  // For the Sell-vs-Hold projection we want the hold-path interest to
+  // reflect whichever product you'd actually switch to. If you've got
+  // products entered, use the leading one's rate. Otherwise fall back
+  // to the blended DB rate across the actual mortgages on file.
+  const annualMortgageInterest = useMemo(() => {
+    if (leadingProduct?.ratePct) {
+      const rate = new Decimal(leadingProduct.ratePct);
+      return propertyContext.mortgageBalance.mul(rate).div(100);
+    }
+    return propertyContext.mortgageBalance
+      .mul(currentBlendedMortgageRatePct(data.mortgages))
+      .div(100);
+  }, [leadingProduct, propertyContext, data.mortgages]);
+
+  const monthsToTenancyEnd = monthsUntil(data.activeTenancy?.endDate ?? null);
 
   return (
     <Box>
       {!isPrintMode && (
         <Button
           component={Link}
-          href={`/properties/${id}`}
+          href={`/properties/${pathId}`}
           startIcon={<ArrowBackIcon />}
           sx={{ mb: 2 }}
         >
@@ -294,9 +484,10 @@ export default function DecisionPage({ params }: { params: Promise<{ id: string 
         </Button>
       )}
 
-      <Typography variant="h4" sx={{ mb: 0.5 }}>
-        Decision support
-      </Typography>
+      <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 0.5 }}>
+        <Typography variant="h4">Decision support</Typography>
+        {!isPrintMode && <SaveStatusChip status={saveStatus} />}
+      </Stack>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
         {data.property.name}
         {data.property.address ? `, ${data.property.address}` : ''}
@@ -333,7 +524,11 @@ export default function DecisionPage({ params }: { params: Promise<{ id: string 
       {(tab === 'sensitivity' || isPrintMode) && (
         <Box>
           {!isPrintMode && (
-            <SensitivityControls value={sensitivity} onChange={setSensitivity} />
+            <SensitivityControls
+              value={sensitivity}
+              onChange={setSensitivity}
+              salePriceRange={salePriceRange}
+            />
           )}
           <KeyInsights insights={insights} />
           <Suspense fallback={<Skeleton variant="rounded" height={320} />}>
@@ -362,22 +557,29 @@ export default function DecisionPage({ params }: { params: Promise<{ id: string 
         </Box>
       )}
 
-      {(tab === 'sell_vs_hold' || isPrintMode) && context && (
+      {(tab === 'sell_vs_hold' || isPrintMode) && (
         <Box>
           <Suspense fallback={<Skeleton variant="rounded" height={320} />}>
             <SellVsHoldPanel
-              context={context}
-              annualMortgageInterest={context.mortgageBalance
-                .mul(currentBlendedMortgageRatePct(data.mortgages))
-                .div(100)}
+              context={propertyContext}
+              annualMortgageInterest={annualMortgageInterest}
               defaultSalePrice={new Decimal(sensitivity.salePrice)}
               sellingCosts={BASE_SELLING_COSTS_GBP}
+              leadingProductLabel={leadingProduct?.name ?? null}
             />
           </Suspense>
         </Box>
       )}
+
     </Box>
   );
+}
+
+function SaveStatusChip({ status }: { status: 'idle' | 'saving' | 'saved' | 'error' }) {
+  if (status === 'idle') return null;
+  if (status === 'saving') return <Chip size="small" label="Saving…" />;
+  if (status === 'saved') return <Chip size="small" label="Saved" color="success" variant="outlined" />;
+  return <Chip size="small" label="Save failed" color="error" />;
 }
 
 function ContextSummary({

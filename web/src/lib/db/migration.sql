@@ -1364,3 +1364,24 @@ EXCEPTION WHEN OTHERS THEN
     RAISE NOTICE 'find_and_pair_transfers backfill failed (non-fatal): %', SQLERRM;
 END $$;
 
+
+-- BTL decision-support: per-property mortgage product candidates.
+-- Idempotent: IF NOT EXISTS so re-deploys don't fail. erc_schedule
+-- holds the ERC tier array (untilMonth + pct) as JSONB so the front
+-- end can serialise the same shape it uses in memory.
+CREATE TABLE IF NOT EXISTS btl_decision_products (
+    id SERIAL PRIMARY KEY,
+    property_id INTEGER NOT NULL REFERENCES properties(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    product_type TEXT NOT NULL,
+    rate_pct NUMERIC(6,3) NOT NULL,
+    product_fee NUMERIC(12,2) NOT NULL DEFAULT 0,
+    exit_fee NUMERIC(12,2) NOT NULL DEFAULT 0,
+    monthly_payment NUMERIC(12,2) NOT NULL,
+    erc_schedule JSONB NOT NULL DEFAULT '[]'::jsonb,
+    created_at TIMESTAMP NOT NULL DEFAULT now(),
+    archived_at TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_btl_decision_products_property
+    ON btl_decision_products(property_id) WHERE archived_at IS NULL;

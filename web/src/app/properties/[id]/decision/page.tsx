@@ -1,6 +1,7 @@
 'use client';
 
 import { useMemo, useState, use, lazy, Suspense } from 'react';
+import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import {
   Alert,
@@ -49,6 +50,9 @@ const TimelineChart = lazy(
 );
 const DecisionMatrix = lazy(
   () => import('@/components/properties/decision/DecisionMatrix'),
+);
+const SellVsHoldPanel = lazy(
+  () => import('@/components/properties/decision/SellVsHoldPanel'),
 );
 
 const fetcher = async (url: string) => {
@@ -143,6 +147,9 @@ function buildScenarios(
 
 export default function DecisionPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
+  const searchParams = useSearchParams();
+  const isPrintMode = searchParams?.get('print') === '1';
+
   const { data, error, isLoading } = useSWR<DecisionContextResponse>(
     `/api/properties/${id}/decision-context`,
     fetcher,
@@ -151,6 +158,10 @@ export default function DecisionPage({ params }: { params: Promise<{ id: string 
   const [tab, setTab] = useState<'scenarios' | 'sensitivity' | 'sell_vs_hold'>('scenarios');
   const [products, setProducts] = useState<MortgageProduct[]>([]);
   const [sensitivity, setSensitivity] = useState<SensitivityState>(DEFAULT_SENSITIVITY);
+
+  const handleProductsChange = (next: MortgageProduct[]) => {
+    setProducts(next);
+  };
 
   const context = useMemo<PropertyContext | null>(() => {
     if (!data) return null;
@@ -220,14 +231,16 @@ export default function DecisionPage({ params }: { params: Promise<{ id: string 
 
   return (
     <Box>
-      <Button
-        component={Link}
-        href={`/properties/${id}`}
-        startIcon={<ArrowBackIcon />}
-        sx={{ mb: 2 }}
-      >
-        Back to property
-      </Button>
+      {!isPrintMode && (
+        <Button
+          component={Link}
+          href={`/properties/${id}`}
+          startIcon={<ArrowBackIcon />}
+          sx={{ mb: 2 }}
+        >
+          Back to property
+        </Button>
+      )}
 
       <Typography variant="h4" sx={{ mb: 0.5 }}>
         Decision support
@@ -247,23 +260,25 @@ export default function DecisionPage({ params }: { params: Promise<{ id: string 
         }
       />
 
-      <Tabs value={tab} onChange={(_, v) => setTab(v)} sx={{ mb: 2 }}>
-        <Tab label="Scenario explorer" value="scenarios" />
-        <Tab label="Sensitivity" value="sensitivity" />
-        <Tab label="Sell vs hold" value="sell_vs_hold" disabled />
-      </Tabs>
+      {!isPrintMode && (
+        <Tabs value={tab} onChange={(_, v) => setTab(v)} sx={{ mb: 2 }}>
+          <Tab label="Scenario explorer" value="scenarios" />
+          <Tab label="Sensitivity" value="sensitivity" />
+          <Tab label="Sell vs hold" value="sell_vs_hold" />
+        </Tabs>
+      )}
 
       {tab === 'scenarios' && (
         <Box>
-          <MortgageProductForm products={products} onChange={setProducts} />
+          <MortgageProductForm products={products} onChange={handleProductsChange} />
           <ScenarioCards cells={cells} />
         </Box>
       )}
 
-      {tab === 'sensitivity' && (
+      {(tab === 'sensitivity' || isPrintMode) && (
         <Box>
           <SensitivityControls value={sensitivity} onChange={setSensitivity} />
-          <MortgageProductForm products={products} onChange={setProducts} />
+          <MortgageProductForm products={products} onChange={handleProductsChange} />
           <KeyInsights insights={insights} />
           <Suspense fallback={<Skeleton variant="rounded" height={320} />}>
             <Grid container spacing={2} sx={{ mb: 2 }}>
@@ -287,6 +302,21 @@ export default function DecisionPage({ params }: { params: Promise<{ id: string 
                 <DecisionMatrix matrix={matrix} />
               </Grid>
             </Grid>
+          </Suspense>
+        </Box>
+      )}
+
+      {(tab === 'sell_vs_hold' || isPrintMode) && context && (
+        <Box>
+          <Suspense fallback={<Skeleton variant="rounded" height={320} />}>
+            <SellVsHoldPanel
+              context={context}
+              annualMortgageInterest={context.mortgageBalance
+                .mul(new Decimal('5.49'))
+                .div(100)}
+              defaultSalePrice={new Decimal(sensitivity.salePrice)}
+              sellingCosts={new Decimal(8000)}
+            />
           </Suspense>
         </Box>
       )}

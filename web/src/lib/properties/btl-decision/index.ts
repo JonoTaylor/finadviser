@@ -40,3 +40,13 @@ export {
   buildDecisionMatrix,
   buildKeyInsights,
 } from './chart-data';
+
+export type { GlidePathInputs, GlidePathYear } from './glide-path';
+export { projectGlidePath } from './glide-path';
+
+export type {
+  OpportunityCostInputs,
+  OpportunityCostYear,
+  OpportunityCostResult,
+} from './opportunity-cost';
+export { projectOpportunityCost } from './opportunity-cost';

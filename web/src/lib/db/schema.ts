@@ -451,3 +451,23 @@ export const syncRuns = pgTable('sync_runs', {
   txnsUpdated: integer('txns_updated').notNull().default(0),
   errorMessage: text('error_message'),
 });
+
+// Mortgage product candidates the user wants to compare for a property
+// on the Decision Support page. Stored per-property; the CRUD API is
+// wired up so callers (chat tools, future UI flows) can persist a
+// candidate list. The current page-side UI doesn't hydrate from this
+// table yet — that's a planned follow-up. `archivedAt` (soft delete)
+// keeps history without polluting active comparisons.
+export const btlDecisionProducts = pgTable('btl_decision_products', {
+  id: serial('id').primaryKey(),
+  propertyId: integer('property_id').notNull().references(() => properties.id, { onDelete: 'cascade' }),
+  name: text('name').notNull(),
+  productType: text('product_type').notNull(),
+  ratePct: numeric('rate_pct', { precision: 6, scale: 3 }).notNull(),
+  productFee: numeric('product_fee', { precision: 12, scale: 2 }).notNull().default('0'),
+  exitFee: numeric('exit_fee', { precision: 12, scale: 2 }).notNull().default('0'),
+  monthlyPayment: numeric('monthly_payment', { precision: 12, scale: 2 }).notNull(),
+  ercSchedule: jsonb('erc_schedule').notNull().default([]),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  archivedAt: timestamp('archived_at'),
+});

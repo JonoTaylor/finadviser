@@ -22,3 +22,5 @@ export { documentRepo } from './document.repo';
 export type { DocumentMeta, DocumentKind } from './document.repo';
 export { transactionMetadataRepo } from './transaction-metadata.repo';
 export type { TransactionMetadata, TransactionMetadataInput } from './transaction-metadata.repo';
+export { btlDecisionProductRepo } from './btl-decision-product.repo';
+export type { BtlDecisionProductRow, BtlDecisionProductInput } from './btl-decision-product.repo';

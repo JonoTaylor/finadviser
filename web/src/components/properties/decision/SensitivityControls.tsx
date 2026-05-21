@@ -32,15 +32,53 @@ export const DEFAULT_SENSITIVITY: SensitivityState = {
   marginalRatePct: '40',
 };
 
+/**
+ * Slider bounds for the sale-price input. Bracketing ±15% around the
+ * current valuation covers a realistic spread (slow market 12% below,
+ * bidding war 12% above) without making the slider feel meaningless on
+ * the tails. Step is sized to the property's scale so a £200k flat and
+ * a £1.5m house both get usable granularity.
+ */
+export interface SalePriceRange {
+  min: number;
+  max: number;
+  step: number;
+  default: number;
+}
+
+export function salePriceRangeFromValuation(valuation: number): SalePriceRange {
+  const v = Math.max(50_000, Math.round(valuation));
+  // Snap min/max to the nearest £5k for a tidier slider.
+  const snap = (x: number) => Math.max(5000, Math.round(x / 5000) * 5000);
+  const min = snap(v * 0.85);
+  const max = snap(v * 1.15);
+  // Step roughly 1% of valuation, rounded to a nice multiple.
+  const rawStep = v * 0.01;
+  const step = rawStep >= 5000 ? 5000 : rawStep >= 1000 ? 1000 : 500;
+  return { min, max, step, default: v };
+}
+
 export interface SensitivityControlsProps {
   value: SensitivityState;
   onChange: (next: SensitivityState) => void;
+  salePriceRange: SalePriceRange;
 }
 
-export default function SensitivityControls({ value, onChange }: SensitivityControlsProps) {
+export default function SensitivityControls({
+  value,
+  onChange,
+  salePriceRange,
+}: SensitivityControlsProps) {
   const update = <K extends keyof SensitivityState>(key: K, v: SensitivityState[K]) => {
     onChange({ ...value, [key]: v });
   };
+
+  // Clamp the current slider value into the adaptive range so a user
+  // landing on a £200k flat doesn't see the marker stuck at £400k.
+  const clampedSalePrice = Math.min(
+    Math.max(value.salePrice, salePriceRange.min),
+    salePriceRange.max,
+  );
 
   return (
     <Card sx={{ mb: 3 }}>
@@ -55,7 +93,9 @@ export default function SensitivityControls({ value, onChange }: SensitivityCont
           <Button
             startIcon={<RestartAltIcon />}
             size="small"
-            onClick={() => onChange(DEFAULT_SENSITIVITY)}
+            onClick={() =>
+              onChange({ ...DEFAULT_SENSITIVITY, salePrice: salePriceRange.default })
+            }
           >
             Reset
           </Button>
@@ -74,11 +114,11 @@ export default function SensitivityControls({ value, onChange }: SensitivityCont
             />
             <SliderRow
               label="Sale price achieved"
-              value={value.salePrice}
-              min={400000}
-              max={500000}
-              step={5000}
-              valueLabel={`£${value.salePrice.toLocaleString()}`}
+              value={clampedSalePrice}
+              min={salePriceRange.min}
+              max={salePriceRange.max}
+              step={salePriceRange.step}
+              valueLabel={`£${clampedSalePrice.toLocaleString()}`}
               onChange={v => update('salePrice', v)}
             />
             <SliderRow

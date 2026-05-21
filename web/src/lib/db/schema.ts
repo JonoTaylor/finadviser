@@ -453,9 +453,11 @@ export const syncRuns = pgTable('sync_runs', {
 });
 
 // Mortgage product candidates the user wants to compare for a property
-// on the Decision Support page. Stored per-property so the form
-// pre-populates on return visits. `archivedAt` (soft delete) keeps a
-// history without polluting active comparisons.
+// on the Decision Support page. Stored per-property; the CRUD API is
+// wired up so callers (chat tools, future UI flows) can persist a
+// candidate list. The current page-side UI doesn't hydrate from this
+// table yet — that's a planned follow-up. `archivedAt` (soft delete)
+// keeps history without polluting active comparisons.
 export const btlDecisionProducts = pgTable('btl_decision_products', {
   id: serial('id').primaryKey(),
   propertyId: integer('property_id').notNull().references(() => properties.id, { onDelete: 'cascade' }),

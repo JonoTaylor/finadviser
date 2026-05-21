@@ -66,6 +66,13 @@ interface DecisionContextResponse {
   latestValuation: { valuation: string; valuationDate: string } | null;
   ownerCount: number;
   totalOutstandingBalance: string;
+  mortgages: Array<{
+    id: number;
+    lender: string;
+    outstandingBalance: string;
+    interestOnly: boolean;
+    rates: Array<{ rate: string; effectiveDate: string }>;
+  }>;
   activeTenancy: {
     id: number;
     tenantName: string;
@@ -76,6 +83,33 @@ interface DecisionContextResponse {
   } | null;
   annualRent: string;
   annualRunningCosts: string;
+}
+
+// Shared assumptions used by both the scenario engine and the Sell-vs-Hold
+// projection so all three tabs reason about the same numbers.
+const BASE_SELLING_COSTS_GBP = new Decimal(8000);
+const FALLBACK_MORTGAGE_RATE_PCT = new Decimal('5.49');
+
+/**
+ * Pick the latest in-effect rate across a property's mortgages,
+ * weighted by outstanding balance. Falls back to `FALLBACK_MORTGAGE_RATE_PCT`
+ * when no rate history is available (e.g. a freshly added mortgage).
+ */
+function currentBlendedMortgageRatePct(
+  mortgages: DecisionContextResponse['mortgages'],
+): Decimal {
+  if (!mortgages || mortgages.length === 0) return FALLBACK_MORTGAGE_RATE_PCT;
+  let weightedRate = new Decimal(0);
+  let totalBalance = new Decimal(0);
+  for (const m of mortgages) {
+    const sortedRates = [...m.rates].sort((a, b) => b.effectiveDate.localeCompare(a.effectiveDate));
+    const latest = sortedRates[0];
+    if (!latest) continue;
+    const balance = new Decimal(m.outstandingBalance);
+    weightedRate = weightedRate.plus(new Decimal(latest.rate).mul(balance));
+    totalBalance = totalBalance.plus(balance);
+  }
+  return totalBalance.gt(0) ? weightedRate.div(totalBalance) : FALLBACK_MORTGAGE_RATE_PCT;
 }
 
 /**
@@ -101,7 +135,7 @@ function buildScenarios(
   // 12 months when the tenancy is open-ended OR has already ended.
   const monthsToTenancyEnd = Math.max(1, monthsUntil(activeTenancyEnd) ?? 12);
 
-  const baseSellingCosts = new Decimal(8000);
+  const baseSellingCosts = BASE_SELLING_COSTS_GBP;
   const salePrice = new Decimal(sensitivity.salePrice);
   const tenantedSalePrice = salePrice.mul(
     new Decimal(100 - sensitivity.tenantedSaleDiscountPct).div(100),
@@ -287,17 +321,20 @@ export default function DecisionPage({ params }: { params: Promise<{ id: string 
         </Tabs>
       )}
 
-      {tab === 'scenarios' && (
+      {(tab === 'scenarios' || isPrintMode) && (
         <Box>
-          <MortgageProductForm products={products} onChange={handleProductsChange} />
+          {!isPrintMode && (
+            <MortgageProductForm products={products} onChange={handleProductsChange} />
+          )}
           <ScenarioCards cells={cells} />
         </Box>
       )}
 
       {(tab === 'sensitivity' || isPrintMode) && (
         <Box>
-          <SensitivityControls value={sensitivity} onChange={setSensitivity} />
-          <MortgageProductForm products={products} onChange={handleProductsChange} />
+          {!isPrintMode && (
+            <SensitivityControls value={sensitivity} onChange={setSensitivity} />
+          )}
           <KeyInsights insights={insights} />
           <Suspense fallback={<Skeleton variant="rounded" height={320} />}>
             <Grid container spacing={2} sx={{ mb: 2 }}>
@@ -331,10 +368,10 @@ export default function DecisionPage({ params }: { params: Promise<{ id: string 
             <SellVsHoldPanel
               context={context}
               annualMortgageInterest={context.mortgageBalance
-                .mul(new Decimal('5.49'))
+                .mul(currentBlendedMortgageRatePct(data.mortgages))
                 .div(100)}
               defaultSalePrice={new Decimal(sensitivity.salePrice)}
-              sellingCosts={new Decimal(8000)}
+              sellingCosts={BASE_SELLING_COSTS_GBP}
             />
           </Suspense>
         </Box>

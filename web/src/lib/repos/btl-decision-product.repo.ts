@@ -71,10 +71,14 @@ export const btlDecisionProductRepo = {
           and(
             eq(btlDecisionProducts.id, id),
             eq(btlDecisionProducts.propertyId, propertyId),
+            isNull(btlDecisionProducts.archivedAt),
           ),
         );
       return row ?? null;
     }
+    // Refuse to mutate soft-archived rows so historical product
+    // candidates stay immutable — same archived_at guard as the
+    // archive() helper for consistency.
     const [row] = await db
       .update(btlDecisionProducts)
       .set(updates)
@@ -82,6 +86,7 @@ export const btlDecisionProductRepo = {
         and(
           eq(btlDecisionProducts.id, id),
           eq(btlDecisionProducts.propertyId, propertyId),
+          isNull(btlDecisionProducts.archivedAt),
         ),
       )
       .returning();

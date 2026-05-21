@@ -46,8 +46,19 @@ export async function POST(
     if (!property) {
       return NextResponse.json({ error: 'Property not found' }, { status: 404 });
     }
-    const body = await request.json();
-    if (!body?.name || !body?.ratePct || !body?.monthlyPayment) {
+    let body: Record<string, unknown>;
+    try {
+      body = await request.json();
+    } catch {
+      return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
+    }
+    // Use null/undefined checks rather than truthiness so a valid `0`
+    // for ratePct or monthlyPayment isn't rejected as "missing".
+    if (
+      typeof body?.name !== 'string' || body.name.trim() === '' ||
+      body?.ratePct == null ||
+      body?.monthlyPayment == null
+    ) {
       return NextResponse.json(
         { error: 'name, ratePct and monthlyPayment are required' },
         { status: 400 },
@@ -55,13 +66,15 @@ export async function POST(
     }
     const row = await btlDecisionProductRepo.create({
       propertyId,
-      name: body.name,
-      productType: body.productType ?? 'fixed',
+      name: body.name as string,
+      productType: typeof body.productType === 'string' ? body.productType : 'fixed',
       ratePct: String(body.ratePct),
       productFee: String(body.productFee ?? '0'),
       exitFee: String(body.exitFee ?? '0'),
       monthlyPayment: String(body.monthlyPayment),
-      ercSchedule: Array.isArray(body.ercSchedule) ? body.ercSchedule : [],
+      ercSchedule: Array.isArray(body.ercSchedule)
+        ? (body.ercSchedule as Array<{ untilMonth: number; pct: string }>)
+        : [],
     });
     return NextResponse.json({ product: row }, { status: 201 });
   } catch (error) {

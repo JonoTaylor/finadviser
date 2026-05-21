@@ -22,16 +22,23 @@ export async function PATCH(
     if (!property) {
       return NextResponse.json({ error: 'Property not found' }, { status: 404 });
     }
-    const body = await request.json();
+    let body: Record<string, unknown>;
+    try {
+      body = await request.json();
+    } catch {
+      return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
+    }
     const row = await btlDecisionProductRepo.update(numericProductId, propertyId, {
-      name: body.name,
-      productType: body.productType,
+      name: typeof body.name === 'string' ? body.name : undefined,
+      productType: typeof body.productType === 'string' ? body.productType : undefined,
       ratePct: body.ratePct != null ? String(body.ratePct) : undefined,
       productFee: body.productFee != null ? String(body.productFee) : undefined,
       exitFee: body.exitFee != null ? String(body.exitFee) : undefined,
       monthlyPayment:
         body.monthlyPayment != null ? String(body.monthlyPayment) : undefined,
-      ercSchedule: Array.isArray(body.ercSchedule) ? body.ercSchedule : undefined,
+      ercSchedule: Array.isArray(body.ercSchedule)
+        ? (body.ercSchedule as Array<{ untilMonth: number; pct: string }>)
+        : undefined,
     });
     if (!row) {
       return NextResponse.json({ error: 'Product not found' }, { status: 404 });

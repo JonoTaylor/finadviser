@@ -3,16 +3,24 @@ import Decimal from 'decimal.js';
 /**
  * Model the "sell now, ISA-glide the proceeds" alternative.
  *
- * Each year:
- *   - Up to £20,000 per owner can go into a Stocks & Shares ISA
- *     (tax-free growth, tax-free withdrawal).
- *   - Anything above the ISA capacity sits in a General Investment
- *     Account (GIA), where dividends + realised gains attract tax.
- *   - Both pots compound at `equityReturnPct`; the GIA additionally
- *     suffers a `giaDragPct` drag each year that approximates the
- *     income/dividend tax + CGT-within-allowance tax drag.
+ * Year 1:
+ *   - Initial proceeds are deployed: up to the annual ISA cap (£20k
+ *     per owner) goes into a Stocks & Shares ISA, the rest into a
+ *     General Investment Account (GIA).
+ *   - Both balances then grow at `equityReturnPct` for the rest of
+ *     the year. The GIA additionally suffers `giaDragPct`, an
+ *     approximation of dividend/CGT-within-allowance tax drag.
  *
- * Annual ISA allowance of £20k/owner is the current UK rule (2024/25).
+ * Years 2+:
+ *   - A bed-and-ISA-style transfer moves up to the annual ISA
+ *     allowance from the GIA into the ISA each year (capped at the
+ *     GIA balance available). This is the standard glide pattern for
+ *     someone with cash above the year-1 ISA cap: drip-feed it into
+ *     the tax shelter as fast as the rules allow.
+ *   - Both balances then grow for the year.
+ *
+ * End-of-year balances are reported, consistent with how the Hold
+ * path in `opportunity-cost.ts` reports year-end property + cash.
  */
 export interface GlidePathInputs {
   initialProceeds: Decimal;
@@ -40,24 +48,36 @@ export function projectGlidePath(inputs: GlidePathInputs): GlidePathYear[] {
   const growthMultiplier = inputs.equityReturnPct.div(100).plus(1);
   const giaDragMultiplier = new Decimal(1).minus(giaDragPct.div(100));
 
-  let cashAwaitingDeployment = inputs.initialProceeds;
   let isaBalance = new Decimal(0);
   let giaBalance = new Decimal(0);
   const out: GlidePathYear[] = [];
 
   for (let year = 1; year <= inputs.yearsToProject; year++) {
-    // Grow existing balances first.
+    let isaContribution: Decimal;
+    let giaContribution: Decimal;
+
+    if (year === 1) {
+      // Deploy the lump sum: ISA up to capacity, residual to GIA.
+      isaContribution = Decimal.min(inputs.initialProceeds, annualIsaCapacity);
+      giaContribution = inputs.initialProceeds.minus(isaContribution);
+    } else {
+      // Bed-and-ISA-style transfer: move up to the annual allowance
+      // from the GIA into the ISA, capped at the available GIA
+      // balance. The GIA reports a negative contribution (outflow).
+      isaContribution = Decimal.min(annualIsaCapacity, giaBalance);
+      giaContribution = isaContribution.negated();
+    }
+
+    isaBalance = isaBalance.plus(isaContribution);
+    giaBalance = giaBalance.plus(giaContribution);
+
+    // Year-end compounding. ISA grows tax-free; GIA grows at the
+    // equity return less the configurable tax drag. Doing this AFTER
+    // the contribution lines up with the Hold path's year-end
+    // reporting in opportunity-cost.ts, so apples-to-apples year 1
+    // shows growth on the deployed lump sum rather than zero.
     isaBalance = isaBalance.mul(growthMultiplier);
     giaBalance = giaBalance.mul(growthMultiplier).mul(giaDragMultiplier);
-
-    // Then deploy this year's contributions: ISA up to capacity, rest to GIA.
-    const isaContribution = Decimal.min(cashAwaitingDeployment, annualIsaCapacity);
-    cashAwaitingDeployment = cashAwaitingDeployment.minus(isaContribution);
-    isaBalance = isaBalance.plus(isaContribution);
-
-    const giaContribution = cashAwaitingDeployment;
-    cashAwaitingDeployment = new Decimal(0);
-    giaBalance = giaBalance.plus(giaContribution);
 
     out.push({
       yearIndex: year,
@@ -67,11 +87,6 @@ export function projectGlidePath(inputs: GlidePathInputs): GlidePathYear[] {
       giaBalance,
       totalBalance: isaBalance.plus(giaBalance),
     });
-
-    // Once the principal is deployed in Y1, subsequent years deploy
-    // zero. The model assumes no additional savings flow in (a
-    // user-tunable savings stream could be added later).
-    cashAwaitingDeployment = new Decimal(0);
   }
 
   return out;

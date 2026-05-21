@@ -68,6 +68,7 @@ export default function SellVsHoldPanel({
   const holdSeries = result.years.map(y => Math.round(y.hold.netWealth.toNumber()));
   const sellSeries = result.years.map(y => Math.round(y.sellAndGlide.netWealth.toNumber()));
   const finalYear = result.years[result.years.length - 1];
+  if (!finalYear) return null;
 
   return (
     <Box>
@@ -77,9 +78,10 @@ export default function SellVsHoldPanel({
             Sell vs hold
           </Typography>
           <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-            Hold path: property grows, after-tax cash flow accumulates as
-            equity-market exposure. Sell path: net proceeds flow into an ISA
-            (up to £20k per owner per year), the rest into a GIA.
+            Hold path: property grows, after-tax rental cash flow accumulates
+            and compounds at the equity return. Sell path: net proceeds flow
+            into an ISA (up to £20k per owner per year), the rest into a GIA
+            and bed-and-ISA into the shelter over subsequent years.
           </Typography>
 
           <Grid container spacing={3}>

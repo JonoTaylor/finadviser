@@ -1,6 +1,7 @@
 import { eq, sql, and, inArray } from 'drizzle-orm';
 import Decimal from 'decimal.js';
 import { getDb, schema } from '@/lib/db';
+import type { LettingType } from '@/lib/db/schema';
 
 const {
   properties,
@@ -38,6 +39,25 @@ export const propertyRepo = {
   async getProperty(id: number) {
     const db = getDb();
     const [row] = await db.select().from(properties).where(eq(properties.id, id));
+    return row ?? null;
+  },
+
+  /**
+   * Update the editable property fields. Only lettingType today; returns
+   * the updated row, or null when the property doesn't exist.
+   */
+  async updateProperty(id: number, patch: { lettingType?: LettingType }) {
+    const db = getDb();
+    const updates: Partial<typeof properties.$inferInsert> = {};
+    if (patch.lettingType !== undefined) updates.lettingType = patch.lettingType;
+    if (Object.keys(updates).length === 0) {
+      return this.getProperty(id);
+    }
+    const [row] = await db
+      .update(properties)
+      .set(updates)
+      .where(eq(properties.id, id))
+      .returning();
     return row ?? null;
   },
 

@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import JSZip from 'jszip';
 import Decimal from 'decimal.js';
-import { ownerReportRepo, rentalReportRepo } from '@/lib/repos';
+import { ownerReportRepo, ownerTaxRepo, rentalReportRepo } from '@/lib/repos';
+import type { OwnerTaxComputationResult } from '@/lib/repos';
+import { taxComputationCsv } from '@/lib/tax/computationCsv';
 import { taxYearRange, currentTaxYear } from '@/lib/tax/ukTaxYear';
 import { ClientError, NotFoundError } from '@/lib/errors';
 import type { RentalIncomeLine, RentalExpenseLine } from '@/lib/repos/rental-report.repo';
@@ -19,6 +21,7 @@ import type { RentalIncomeLine, RentalExpenseLine } from '@/lib/repos/rental-rep
  *   property-<id>-<slug>/expenses.csv                         itemised deductible
  *   property-<id>-<slug>/mortgage-interest.csv                S.24 restricted
  *   property-<id>-<slug>/other-income.csv                     only when non-empty
+ *   tax-computation.csv                                       income-tax estimate + working
  */
 export async function GET(
   request: NextRequest,
@@ -74,8 +77,20 @@ export async function GET(
       }
     }
 
+    // The tax computation is an add-on to the pack: if it can't be built
+    // (say, a bad figure in the saved profile) the rest of the bundle is
+    // still useful, so skip it and say why on the cover sheet.
+    let computation: OwnerTaxComputationResult | null = null;
+    let computationError: string | null = null;
+    try {
+      computation = await ownerTaxRepo.getTaxComputation({ ownerId, year });
+      zip.file('tax-computation.csv', taxComputationCsv(computation));
+    } catch (e) {
+      computationError = e instanceof Error ? e.message : 'unknown error';
+    }
+
     zip.file('summary.csv', summaryCsv(rollup));
-    zip.file('cover.txt', coverSheet(rollup, perProperty));
+    zip.file('cover.txt', coverSheet(rollup, perProperty, computation, computationError));
 
     // Note on memory: generateAsync builds the zip in memory before we
     // return it. That's fine at the expected scale (1-2 properties, 12
@@ -208,7 +223,12 @@ function summaryCsv(rollup: RollupShape): string {
   return [header, ...body, total].join('\n');
 }
 
-function coverSheet(rollup: RollupShape, perProperty: PerPropertyEntry[]): string {
+function coverSheet(
+  rollup: RollupShape,
+  perProperty: PerPropertyEntry[],
+  computation: OwnerTaxComputationResult | null,
+  computationError: string | null,
+): string {
   const lines: string[] = [];
   const fmt = (v: string) => `£${new Decimal(v).toFixed(2)}`;
   lines.push(`Accountant pack — ${rollup.owner.name}`);
@@ -235,6 +255,9 @@ function coverSheet(rollup: RollupShape, perProperty: PerPropertyEntry[]): strin
   lines.push('');
   lines.push('Files in this pack');
   lines.push('  summary.csv                              one row per property + total');
+  if (computation) {
+    lines.push('  tax-computation.csv                      income-tax estimate with step-by-step working');
+  }
   for (const entry of perProperty) {
     lines.push(`  ${entry.folderName}/income.csv             rent schedule from tenancy contracts`);
     lines.push(`  ${entry.folderName}/expenses.csv           itemised deductible expenses`);
@@ -252,6 +275,12 @@ function coverSheet(rollup: RollupShape, perProperty: PerPropertyEntry[]): strin
   lines.push('    contract.');
   lines.push('  - other-income.csv only appears for properties with non-rent INCOME');
   lines.push('    journal entries in the year.');
+  if (computation) {
+    lines.push('  - tax-computation.csv is an ESTIMATE, not tax advice. It uses the saved tax');
+    lines.push('    profile (salary, PAYE, dividends, losses brought forward); please check it.');
+  } else if (computationError) {
+    lines.push(`  - tax-computation.csv was left out because it could not be built: ${computationError}`);
+  }
   lines.push('');
   lines.push(`Generated ${new Date().toISOString()}`);
   return lines.join('\n');

@@ -5,6 +5,7 @@ import { getDb } from '@/lib/db';
 import { londonTodayIso } from '@/lib/dates/today';
 import { appSettingsRepo } from '@/lib/repos/app-settings.repo';
 import { retirementInputSchema } from '@/lib/retirement/projection';
+import { loadFinancialContext, resolveCashAccessibility, cashExclusionReason } from '@/lib/finance-context';
 import type { PlanningInput, PlanningProfile, PlanningTransaction } from './types';
 
 export const PLANNING_PROFILE_KEY = 'planning.profile.v1';
@@ -62,7 +63,9 @@ export async function savePlanningProfile(profile: PlanningProfile): Promise<voi
 
 export interface PlanningDataSource {
   scope: 'household';
-  cashAccessibility: 'inferred';
+  cashAccessibility: 'inferred' | 'confirmed';
+  selectedOwnerId: number | null;
+  personalContextSaved: boolean;
   asOf: string;
   periodStart: string;
   periodEnd: string;
@@ -117,15 +120,6 @@ function amount(value: string | number): number {
   }
 }
 
-function isLiquidCash(account: AccountRow): boolean {
-  if (account.account_type !== 'ASSET' || account.is_property_asset) return false;
-  // Investment tagging is authoritative: pensions and market investments
-  // must never inflate the accessible emergency fund.
-  if (/\b(fixed|term|notice|locked|bond)\b/i.test(account.name)) return false;
-  if (account.is_investment) return account.investment_kind === 'savings';
-  return /\b(bank|cash|current|savings|monzo|barclays|natwest|hsbc|lloyds|starling|revolut|santander)\b/i.test(account.name);
-}
-
 function isoDay(date: Date): string {
   return date.toISOString().slice(0, 10);
 }
@@ -147,7 +141,7 @@ export async function loadPlanningInput(now = new Date()): Promise<{
     isoDay(new Date(Date.UTC(calendarDate.getUTCFullYear(), calendarDate.getUTCMonth() - offset, 1))).slice(0, 7),
   );
   const db = getDb();
-  const [accountResult, transactionResult, propertyResult, budgetResult, profileResult] = await Promise.all([
+  const [accountResult, transactionResult, propertyResult, budgetResult, profileResult, contextResult] = await Promise.all([
     db.execute(sql`
       SELECT a.id, a.name, a.account_type,
              (v.balance - COALESCE((
@@ -251,11 +245,20 @@ export async function loadPlanningInput(now = new Date()): Promise<{
       ORDER BY c.name
     `),
     loadPlanningProfile(),
+    loadFinancialContext(),
   ]);
 
   const accountRows = accountResult.rows as unknown as AccountRow[];
   const transactionRows = transactionResult.rows as unknown as TransactionRow[];
   const propertyRows = propertyResult.rows as unknown as PropertyRow[];
+  const cashAccount = (account: AccountRow) => ({
+    id: account.id, name: account.name, accountType: account.account_type,
+    isInvestment: account.is_investment, investmentKind: account.investment_kind,
+    isPropertyAsset: account.is_property_asset,
+  });
+  const accessibility = new Map(accountRows.map(account => [account.id, resolveCashAccessibility(cashAccount(account), contextResult.data)]));
+  const cashCandidates = accountRows.filter(account => cashExclusionReason(cashAccount(account)) === null);
+  const cashAccessibility = cashCandidates.length > 0 && cashCandidates.every(account => accessibility.get(account.id)?.source === 'confirmed') ? 'confirmed' : 'inferred';
   if (propertyRows.some(property => property.shared_mortgage_account)) {
     throw new InvalidPlanningDataError('A mortgage liability account is linked to more than one property. Correct the property account mappings so debt is counted once.');
   }
@@ -281,11 +284,13 @@ export async function loadPlanningInput(now = new Date()): Promise<{
     'Imported activity can be incomplete even when every month has transactions. Reconcile accounts before relying on a spending or surplus figure.',
     'Cash outgoings include recorded mortgage principal repayments. Investment and account transfers are excluded, so surplus is before saving or investing.',
     'All figures are treated as GBP; convert foreign-currency accounts into GBP before including their balances.',
-    'Cash accessibility is inferred from bank/cash account names and savings tags. Confirm withdrawal restrictions, earmarked money and account completeness before relying on emergency-fund coverage.',
+    cashAccessibility === 'confirmed'
+      ? 'Cash accessibility uses your saved account confirmations. Balances are still recorded ledger amounts; reconcile statements and earmarked money before relying on reserve coverage.'
+      : `Cash accessibility is ${cashCandidates.some(account => accessibility.get(account.id)?.source === 'confirmed') ? 'partly ' : ''}inferred from account names and savings tags. Confirm withdrawal restrictions and earmarked money in My context before relying on emergency-fund coverage.`,
     'Property monthly rent and costs are averages of tagged ledger activity over the last three completed months. They do not include unrecorded rent schedules, tax, future repairs or missing mortgage payments.',
   ];
   if (transactions.length === 0) warnings.push('No income or expense activity was found in the last six completed months or the current month. Import transactions to establish cashflow.');
-  if (accountRows.some(account => account.account_type === 'ASSET' && !account.is_investment && !account.is_property_asset && !isLiquidCash(account))) {
+  if (cashCandidates.some(account => accessibility.get(account.id)?.source === 'inferred' && !accessibility.get(account.id)?.eligible)) {
     warnings.push('Some assets cannot be confirmed as accessible cash from their account names. They are excluded from the emergency fund; review account names and investment tags.');
   }
   if (accountRows.some(account => account.is_property_asset)) {
@@ -303,7 +308,7 @@ export async function loadPlanningInput(now = new Date()): Promise<{
   return {
     input: {
       asOf,
-      cashAccessibility: 'inferred',
+      cashAccessibility,
       transactions,
       // Mortgage debt is netted against properties once. The acquisition
       // value of identifiable property assets is replaced by its valuation.
@@ -315,7 +320,7 @@ export async function loadPlanningInput(now = new Date()): Promise<{
         isInvestment: account.is_investment,
         investmentKind: account.investment_kind,
         ownerId: account.owner_id,
-        isLiquidCash: isLiquidCash(account),
+        isLiquidCash: accessibility.get(account.id)?.eligible ?? false,
       })),
       properties: propertyRows.map(property => {
         const activity = transactions.filter(transaction => transaction.propertyId === property.id && recentMonths.includes(transaction.date.slice(0, 7)));
@@ -340,7 +345,9 @@ export async function loadPlanningInput(now = new Date()): Promise<{
     profileSaved: profileResult.saved,
     source: {
       scope: 'household',
-      cashAccessibility: 'inferred',
+      cashAccessibility,
+      selectedOwnerId: contextResult.data.ownerId,
+      personalContextSaved: contextResult.revision > 0,
       asOf,
       periodStart,
       periodEnd: asOf,

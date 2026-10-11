@@ -25,6 +25,7 @@ import ShowChartRoundedIcon from '@mui/icons-material/ShowChartRounded';
 import ExploreRoundedIcon from '@mui/icons-material/ExploreRounded';
 import FlagRoundedIcon from '@mui/icons-material/FlagRounded';
 import SavingsRoundedIcon from '@mui/icons-material/SavingsRounded';
+import PersonOutlineRoundedIcon from '@mui/icons-material/PersonOutlineRounded';
 import useMediaQuery from '@mui/material/useMediaQuery';
 import { useTheme } from '@mui/material/styles';
 import { softTokens, serifFamily } from '@/theme/theme';
@@ -35,6 +36,7 @@ const DRAWER_WIDTH = 240;
 const navItems = [
   { label: 'Dashboard',    href: '/',              icon: <DashboardRoundedIcon /> },
   { label: 'Financial plan', href: '/plan',       icon: <ExploreRoundedIcon /> },
+  { label: 'My context', href: '/profile',        icon: <PersonOutlineRoundedIcon /> },
   { label: 'Spending',     href: '/spending',      icon: <ShowChartRoundedIcon /> },
   { label: 'Savings goals', href: '/goals',        icon: <FlagRoundedIcon /> },
   { label: 'Transactions', href: '/transactions',  icon: <ReceiptLongRoundedIcon /> },
@@ -92,7 +94,7 @@ export default function Sidebar({ children }: { children: React.ReactNode }) {
         </Box>
       </Box>
 
-      <List sx={{ flex: 1, px: 1, pt: 1 }}>
+      <List sx={{ flex: 1, minHeight: 0, overflowY: 'auto', px: 1, pt: 1 }}>
         {navItems.map((item) => {
           const isActive = item.href === '/'
             ? pathname === '/'

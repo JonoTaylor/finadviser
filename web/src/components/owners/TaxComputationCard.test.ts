@@ -75,4 +75,33 @@ describe('TaxComputationCard', () => {
     expect(html).toContain('£3,750.00');
     expect(html).toContain('alternative method');
   });
+
+  it('shows one pooled rent-a-room line under a single limit, with each home and the reason', () => {
+    const homeA: PropertyLetting = { name: '1 Mill Lane', lettingType: 'rent_a_room', grossIncome: '5000', totalExpenses: '0', mortgageInterest: '0', rentARoomShared: false };
+    const homeB: PropertyLetting = { name: '2 Mill Lane', lettingType: 'rent_a_room', grossIncome: '5000', totalExpenses: '0', mortgageInterest: '0', rentARoomShared: false };
+    const html = render([homeA, homeB]);
+    expect(html).toContain('Rent-a-room, 1 Mill Lane: receipts £5,000.00');
+    expect(html).toContain('Rent-a-room, 2 Mill Lane: receipts £5,000.00');
+    expect(html).toContain('Rent-a-room, all lettings pooled: receipts £10,000.00 against a single £7,500.00 limit');
+    expect(html).toContain('Alternative method used: pooled receipts £10,000.00 exceed the single £7,500.00 limit');
+    // Every method x treatment option is listed, and exactly one is marked as used.
+    expect(html).toContain('Method and rent-a-room treatment');
+    expect(html).toContain('Actual expenses, rent-a-room normal method');
+    expect(html).toContain('Actual expenses, rent-a-room alternative method');
+    expect(html.match(/>Used</g)).toHaveLength(1);
+  });
+
+  it('says so when the owner elects out of the exemption', () => {
+    const flatShare: PropertyLetting = { name: 'Flat', lettingType: 'standard', grossIncome: '15000', totalExpenses: '2000', mortgageInterest: '0' };
+    const home: PropertyLetting = { name: 'Home', lettingType: 'rent_a_room', grossIncome: '5000', totalExpenses: '10000', mortgageInterest: '0', rentARoomShared: false };
+    const html = render([flatShare, home]);
+    expect(html).toContain('Elected out of the exemption: the normal method gives a £5,000.00 loss that reduces income tax by £1,000.00');
+    expect(html).toContain('(a loss)');
+  });
+
+  it('shows no rent-a-room text for an owner without rent-a-room lettings', () => {
+    const html = render([FRANCIS]);
+    expect(html).not.toContain('all lettings pooled');
+    expect(html).not.toContain('Method and rent-a-room treatment');
+  });
 });

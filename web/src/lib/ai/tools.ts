@@ -446,7 +446,7 @@ export const TOOL_DEFINITIONS: Tool[] = [
   {
     name: 'get_owner_tax_computation',
     description:
-      'Estimate one owner\'s UK income tax for a tax year with their rental income worked through in full: property profit at their ownership share (actual expenses vs the £1,000 property allowance, whichever is cheaper), rent-a-room relief for properties let in the owner\'s own home, the Section 24 mortgage-interest tax reducer, tax by band, the Self Assessment balance after PAYE, payments on account, "tax attributable to rental income", and Making Tax Digital status. Uses the owner\'s saved tax profile (salary, PAYE paid, dividends, losses brought forward) for that year. Use for "how much tax will Emily pay on her rental income for 2025-26?". It is an estimate: always say it is not tax advice and should be checked with an accountant, and mention any warnings it returns (for example a missing tax profile or provisional rates). Identify the owner by owner_name (case-insensitive, unambiguous fragment) or owner_id.',
+      'Estimate one owner\'s UK income tax for a tax year with their rental income worked through in full: property profit at their ownership share (actual expenses vs the £1,000 property allowance, whichever is cheaper), rent-a-room relief for properties let in the owner\'s own home (all of an owner\'s rent-a-room lettings share ONE limit; the exempt, alternative or normal method is chosen by the lowest final tax), the Section 24 mortgage-interest tax reducer, tax by band, the Self Assessment balance after PAYE, payments on account, "tax attributable to rental income", and Making Tax Digital status. Uses the owner\'s saved tax profile (salary, PAYE paid, dividends, losses brought forward) for that year. Use for "how much tax will Emily pay on her rental income for 2025-26?". It is an estimate: always say it is not tax advice and should be checked with an accountant, and mention any warnings it returns (for example a missing tax profile or provisional rates). Identify the owner by owner_name (case-insensitive, unambiguous fragment) or owner_id.',
     input_schema: {
       type: 'object' as const,
       properties: {
@@ -1659,13 +1659,30 @@ async function executeGetOwnerTaxComputation(input: Record<string, unknown>) {
         why: c.property.methodReason,
         taxableProfit: formatCurrency(c.property.taxableProfit),
         lossesCarriedForward: formatCurrency(c.property.lossesCarriedForward),
-        rentARoom: c.property.rentARoom.map(r => ({
-          property: r.name,
-          receipts: formatCurrency(r.receipts),
-          limit: formatCurrency(r.limit),
-          outcome: r.outcome,
-          taxable: formatCurrency(r.taxable),
-        })),
+        // All rent-a-room lettings are pooled under ONE limit; null when there are none.
+        rentARoom: c.property.rentARoomPool
+          ? {
+              treatment: c.property.rentARoomPool.treatment,
+              why: c.property.rentARoomPool.reason,
+              pooledReceipts: formatCurrency(c.property.rentARoomPool.receipts),
+              limit: formatCurrency(c.property.rentARoomPool.limit),
+              shared: c.property.rentARoomPool.shared,
+              effectOnPropertyBusiness: formatCurrency(c.property.rentARoomPool.taxable),
+              lettings: c.property.rentARoom.map(r => ({
+                property: r.name,
+                receipts: formatCurrency(r.receipts),
+                expenses: formatCurrency(r.expenses),
+                mortgageInterest: formatCurrency(r.financeCosts),
+              })),
+            }
+          : null,
+        optionsCompared: c.property.methods
+          .filter(m => m.available)
+          .map(m => ({
+            option: m.label,
+            used: m.chosen,
+            incomeTax: formatCurrency(m.liability ?? '0'),
+          })),
       },
       financeCostRelief: {
         reducer: formatCurrency(c.financeCosts.reducer),

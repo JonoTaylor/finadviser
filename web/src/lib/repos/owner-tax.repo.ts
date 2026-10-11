@@ -42,7 +42,7 @@ export interface OwnerTaxComputationProperty {
   propertyName: string;
   lettingType: LettingType;
   allocationPct: string;
-  /** Rent-a-room only: another owner also receives income, so the limit is halved. */
+  /** Rent-a-room only: another owner also receives income, so the limit is halved (for all the owner's rent-a-room lettings together, if any one is shared). */
   rentARoomShared: boolean;
   grossIncome: string;
   totalExpenses: string;

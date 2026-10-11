@@ -2,9 +2,11 @@ import { describe, it, expect } from 'vitest';
 import { ClientError } from '@/lib/errors';
 import {
   computeOwnerTax,
+  type OwnerTaxComputation,
   type OwnerTaxProfileInput,
   type PropertyLetting,
 } from './ownerTaxComputation';
+import noRentARoomFixture from './__fixtures__/ownerTaxNoRentARoom.json';
 
 const EMPTY_PROFILE: OwnerTaxProfileInput = {
   employmentIncome: 0,
@@ -279,7 +281,8 @@ describe('computeOwnerTax: rent-a-room (the family home)', () => {
 
   it('is exempt under the shared limit', () => {
     const r = run([home(3000)], { employmentIncome: 12570 });
-    expect(r.property.rentARoom[0]).toMatchObject({ outcome: 'exempt', limit: '3750.00', taxable: '0.00' });
+    expect(r.property.rentARoomPool).toMatchObject({ treatment: 'exempt', limit: '3750.00', taxable: '0.00' });
+    expect(r.property.rentARoom).toEqual([{ name: 'Home', receipts: '3000.00', expenses: '0.00', financeCosts: '0.00', shared: true }]);
     expect(r.incomeTax.liability).toBe('0.00');
     expect(r.taxOnRentalIncome.amount).toBe('0.00');
   });
@@ -287,7 +290,7 @@ describe('computeOwnerTax: rent-a-room (the family home)', () => {
   it('taxes only the excess over the shared limit by the alternative method', () => {
     // Her 65.08% share of 8,000 of rent = 5,206.40; limit 3,750; taxable 1,456.40 x 20% = 291.28.
     const r = run([home(5206.4)], { employmentIncome: 12570 });
-    expect(r.property.rentARoom[0]).toMatchObject({ outcome: 'alternative', taxable: '1456.40' });
+    expect(r.property.rentARoomPool).toMatchObject({ treatment: 'alternative', taxable: '1456.40' });
     expect(r.incomeTax.liability).toBe('291.28');
   });
 
@@ -299,6 +302,307 @@ describe('computeOwnerTax: rent-a-room (the family home)', () => {
   it('warns when a rent-a-room home has recorded expenses or mortgage interest', () => {
     const r = run([{ ...home(5000), totalExpenses: 300 }], { employmentIncome: 12570 });
     expect(r.warnings.some(w => w.includes('rent-a-room letting'))).toBe(true);
+  });
+});
+
+// A rent_a_room letting at the owner's share. `shared` halves the limit.
+function room(name: string, income: number, expenses: number, shared = false, interest = 0): PropertyLetting {
+  return { name, lettingType: 'rent_a_room', grossIncome: income, totalExpenses: expenses, mortgageInterest: interest, rentARoomShared: shared };
+}
+
+/** Every option's income tax, keyed `<method>/<rent-a-room treatment>` ('-' = unavailable). */
+function liabilities(r: OwnerTaxComputation): Record<string, string> {
+  return Object.fromEntries(r.property.methods.map(m => [`${m.method}/${m.rentARoom ?? 'none'}`, m.liability ?? '-']));
+}
+
+describe('computeOwnerTax: rent-a-room is pooled under one limit (PIM4010)', () => {
+  it('taxes two £5,000 homes by the alternative method instead of exempting both', () => {
+    // Employment 12,570 is covered by the allowance. Pooled receipts 10,000 against ONE 7,500 limit.
+    // Alternative: (10,000 - 7,500) = 2,500 x 20% = 500.00.
+    // Normal: no expenses, so profit 10,000 x 20% = 2,000.00 (allowance on the merged pool: 9,000 x 20% = 1,800.00).
+    // The old per-property rule exempted both homes (each 5,000 < 7,500) and gave 0.00.
+    const r = run([room('Home A', 5000, 0), room('Home B', 5000, 0)], { employmentIncome: 12570 });
+    expect(r.property.rentARoomPool).toMatchObject({
+      treatment: 'alternative', receipts: '10000.00', limit: '7500.00', shared: false,
+      alternativeTaxable: '2500.00', normalResult: '10000.00', taxable: '2500.00',
+    });
+    expect(r.property.rentARoom.map(l => [l.name, l.receipts])).toEqual([['Home A', '5000.00'], ['Home B', '5000.00']]);
+    expect(r.property.taxableProfit).toBe('2500.00');
+    expect(r.incomeTax.liability).toBe('500.00');
+    expect(liabilities(r)).toEqual({
+      'expenses/normal': '2000.00',
+      'allowance/normal': '1800.00',
+      'expenses/alternative': '500.00',
+      'allowance/alternative': '-', // no standard receipts for the allowance to cover
+    });
+    expect(r.property.methods.filter(m => m.chosen).map(m => [m.method, m.rentARoom])).toEqual([['expenses', 'alternative']]);
+  });
+
+  it('applies the halved limit to the combined receipts when one of two homes is shared', () => {
+    // Home A 2,000 (not shared) + Home B 3,000 (shared) = 5,000 against 3,750, not 7,500.
+    // Alternative: (5,000 - 3,750) = 1,250 x 20% = 250.00. Normal on the allowance: (5,000 - 1,000) x 20% = 800.00.
+    // Per property each was under its own limit (7,500 and 3,750), so both were exempt.
+    const r = run([room('Home A', 2000, 0, false), room('Home B', 3000, 0, true)], { employmentIncome: 12570 });
+    expect(r.property.rentARoomPool).toMatchObject({
+      treatment: 'alternative', receipts: '5000.00', limit: '3750.00', shared: true, taxable: '1250.00',
+    });
+    expect(r.incomeTax.liability).toBe('250.00');
+    expect(r.property.methods.find(m => m.method === 'allowance' && m.rentARoom === 'normal')?.liability).toBe('800.00');
+  });
+
+  it('names every home in the breakdown, with the pooled total', () => {
+    const r = run([room('Home A', 5000, 0), room('Home B', 5000, 0)], { employmentIncome: 12570 });
+    const text = r.breakdown.filter(l => l.section === 'Property income').map(l => l.text);
+    expect(text.some(t => t.startsWith('Rent-a-room (Home A): receipts £5,000.00'))).toBe(true);
+    expect(text.some(t => t.startsWith('Rent-a-room (Home B): receipts £5,000.00'))).toBe(true);
+    expect(text.some(t => t.includes('all 2 lettings together') && t.includes('£10,000.00') && t.includes('single limit of £7,500.00'))).toBe(true);
+  });
+});
+
+describe('computeOwnerTax: the rent-a-room choice is made on final tax, not profit (PIM4030, PIM4460)', () => {
+  // Employment 20,000, rent-a-room receipts 10,000 (not shared: limit 7,500), no ordinary expenses,
+  // mortgage interest 10,000. Taxable employment 20,000 - 12,570 = 7,430 -> 1,486.00.
+  const r = run([room('Home', 10000, 0, false, 10000)], { employmentIncome: 20000 });
+
+  it('picks the normal method because only it keeps the S.24 reducer', () => {
+    // Alternative: profit 2,500 x 20% = 500 -> 1,986.00; no finance-cost relief. Adds 500.
+    // Normal: profit 10,000 x 20% = 2,000 -> 3,486.00 before reductions; reducer 20% x min(10,000 interest,
+    //   10,000 profit, 17,430 income above allowance) = 2,000.00 -> 1,486.00. Adds 0.
+    // Normal on the allowance: 9,000 x 20% = 1,800 -> 3,286.00 and the reducer is forfeited.
+    expect(r.property.rentARoomPool?.treatment).toBe('normal');
+    expect(r.property.method).toBe('expenses');
+    expect(r.financeCosts.reducer).toBe('2000.00');
+    expect(r.incomeTax.liability).toBe('1486.00');
+    expect(r.taxOnRentalIncome.amount).toBe('0.00');
+    expect(liabilities(r)).toEqual({
+      'expenses/normal': '1486.00',
+      'allowance/normal': '3286.00',
+      'expenses/alternative': '1986.00',
+      'allowance/alternative': '-',
+    });
+  });
+
+  it('explains why, and keeps the comparison in the breakdown', () => {
+    expect(r.property.rentARoomPool?.reason).toBe(
+      'Normal method used: pooled receipts £10,000.00 exceed the single £7,500.00 limit, and receipts less expenses ' +
+        '(finance costs earning the S.24 reducer) give income tax of £1,486.00 against £1,986.00 with the alternative method, ' +
+        'which allows no expenses and no finance-cost relief.',
+    );
+    const method = r.breakdown.filter(l => l.section === 'Property method').map(l => l.text);
+    expect(method).toContain(r.property.rentARoomPool?.reason);
+    expect(method.some(t => t.startsWith('Actual expenses, rent-a-room alternative method:') && t.includes('income tax £1,986.00'))).toBe(true);
+  });
+
+  it('still picks the alternative method when there is no finance cost to lose', () => {
+    // Same receipts, no mortgage interest: alternative 500.00 total against normal 2,000.00 -> alternative.
+    const noInterest = run([room('Home', 10000, 0, false, 0)], { employmentIncome: 20000 });
+    expect(noInterest.property.rentARoomPool?.treatment).toBe('alternative');
+    expect(noInterest.incomeTax.liability).toBe('1986.00');
+  });
+
+  it('picks the alternative method when it is only just over the limit and cheaper', () => {
+    // Receipts 7,600, no expenses or finance costs, employment 12,570. Over the 7,500 limit by 100.
+    // Alternative: 100 x 20% = 20.00. Normal: 7,600 x 20% = 1,520.00 (allowance: 6,600 x 20% = 1,320.00).
+    const justOver = run([room('Home', 7600, 0)], { employmentIncome: 12570 });
+    expect(justOver.property.rentARoomPool).toMatchObject({ treatment: 'alternative', taxable: '100.00' });
+    expect(justOver.incomeTax.liability).toBe('20.00');
+    expect(liabilities(justOver)).toMatchObject({ 'expenses/normal': '1520.00', 'allowance/normal': '1320.00', 'expenses/alternative': '20.00' });
+  });
+});
+
+describe('computeOwnerTax: electing out of the exemption (PIM4020)', () => {
+  it('lets a rent-a-room loss offset standard letting profit', () => {
+    // Employment 12,570. Flat: 15,000 receipts, 2,000 expenses. Home: 5,000 receipts (within the 7,500 limit),
+    // 10,000 expenses.
+    // Exempt: Flat profit 13,000 x 20% = 2,600.00 (allowance: 14,000 x 20% = 2,800.00).
+    // Normal: pool receipts 20,000 - expenses 12,000 = 8,000 x 20% = 1,600.00, so Home contributes a 5,000 loss
+    //   and tax falls by 1,000.00 (allowance on the merged pool: 19,000 x 20% = 3,800.00).
+    const r = run([flat(15000, 2000), room('Home', 5000, 10000)], { employmentIncome: 12570 });
+    expect(r.property.rentARoomPool).toMatchObject({ treatment: 'normal', taxable: '-5000.00', normalResult: '-5000.00' });
+    expect(r.property.taxableProfit).toBe('8000.00');
+    expect(r.incomeTax.liability).toBe('1600.00');
+    expect(liabilities(r)).toEqual({
+      'expenses/exempt': '2600.00',
+      'allowance/exempt': '2800.00',
+      'expenses/normal': '1600.00',
+      'allowance/normal': '3800.00',
+    });
+    expect(r.property.rentARoomPool?.reason).toBe(
+      'Elected out of the exemption: the normal method gives a £5,000.00 loss that reduces income tax by £1,000.00 ' +
+        '(£1,600.00 against £2,600.00 with the exemption).',
+    );
+  });
+
+  it('carries the loss forward when there is no other property profit, even though tax is nil either way', () => {
+    // Employment 0. Home: receipts 5,000, expenses 10,000. Exempt: tax 0.00, nothing carried forward.
+    // Normal: loss of 5,000, tax 0.00, loss carried forward 5,000. Equal tax, so more carry-forward wins.
+    const r = run([room('Home', 5000, 10000)]);
+    expect(liabilities(r)).toMatchObject({ 'expenses/exempt': '0.00', 'expenses/normal': '0.00' });
+    expect(r.property.rentARoomPool?.treatment).toBe('normal');
+    expect(r.property.currentYearResult).toBe('-5000.00');
+    expect(r.property.lossesCarriedForward).toBe('5000.00');
+    expect(r.property.hasLosses).toBe(true);
+    expect(r.property.rentARoomPool?.reason).toContain('Income tax is the same (£0.00), but £5,000.00 more loss and finance costs carry forward.');
+  });
+
+  it('stays exempt when the receipts are within the limit and the expenses are small', () => {
+    // Employment 12,570. Receipts 5,000, expenses 500. Exempt: 0.00. Normal: 4,500 x 20% = 900.00
+    // (allowance on the merged pool: 4,000 x 20% = 800.00).
+    const r = run([room('Home', 5000, 500)], { employmentIncome: 12570 });
+    expect(r.property.rentARoomPool?.treatment).toBe('exempt');
+    expect(r.incomeTax.liability).toBe('0.00');
+    expect(liabilities(r)).toMatchObject({ 'expenses/exempt': '0.00', 'expenses/normal': '900.00', 'allowance/normal': '800.00' });
+    expect(r.property.rentARoomPool?.reason).toContain('Electing out (normal method) would give income tax of £800.00 against £0.00');
+  });
+
+  it('judges the property allowance on the merged pool once the rent-a-room is outside the scheme', () => {
+    // Employment 12,570. Home: receipts 5,000, expenses 10,000 -> loss 5,000 (expenses). On the allowance the merged
+    // pool is just 5,000 - 1,000 = 4,000 profit, never a loss, so expenses win.
+    const r = run([room('Home', 5000, 10000)], { employmentIncome: 12570 });
+    const normalAllowance = r.property.methods.find(m => m.method === 'allowance' && m.rentARoom === 'normal');
+    expect(normalAllowance).toMatchObject({ available: true, liability: '800.00', propertyProfit: '4000.00' });
+    expect(r.property.method).toBe('expenses');
+  });
+});
+
+describe('computeOwnerTax: tie-breaks between rent-a-room treatments', () => {
+  it('prefers the exemption over the normal method when tax and carry-forward are equal', () => {
+    // Employment 0. Receipts 5,000, expenses 1,000: exempt 0.00; normal profit 4,000 is inside the allowance, 0.00.
+    // No loss or finance cost is carried forward either way, so the exemption wins.
+    const r = run([room('Home', 5000, 1000)]);
+    expect(liabilities(r)).toMatchObject({ 'expenses/exempt': '0.00', 'expenses/normal': '0.00' });
+    expect(r.property.rentARoomPool?.treatment).toBe('exempt');
+    expect(r.property.rentARoomPool?.reason).toContain('no more loss or finance costs carried forward, so the exemption is kept');
+  });
+
+  it('prefers the normal method over the alternative when tax and carry-forward are equal', () => {
+    // Employment 0. Receipts 8,000, no expenses (limit 7,500): alternative profit 500, normal profit 8,000.
+    // Both sit inside the personal allowance, so tax is 0.00 and nothing is carried forward either way.
+    const r = run([room('Home', 8000, 0)]);
+    expect(liabilities(r)).toMatchObject({ 'expenses/normal': '0.00', 'expenses/alternative': '0.00' });
+    expect(r.property.rentARoomPool?.treatment).toBe('normal');
+    expect(r.property.rentARoomPool?.reason).toContain('give the same income tax (£0.00) as the alternative method');
+  });
+
+  it('puts more carry-forward ahead of the treatment order on a tax tie', () => {
+    // Employment 0, losses brought forward 5,000. Receipts 8,000, no expenses (limit 7,500).
+    // Alternative: profit 500 uses 500 of the losses -> 4,500 carried forward, taxable profit 0, tax 0.00.
+    // Normal: profit 8,000 uses all 5,000 -> 0 carried forward, taxable profit 3,000 sits inside the personal
+    //   allowance, tax 0.00.
+    // The normal method is preferred on order, but the alternative keeps 4,500 of losses alive, so it wins.
+    const r = run([room('Home', 8000, 0)], { propertyLossesBroughtForward: 5000 });
+    expect(liabilities(r)).toMatchObject({ 'expenses/normal': '0.00', 'expenses/alternative': '0.00' });
+    expect(r.property.rentARoomPool?.treatment).toBe('alternative');
+    expect(r.property.lossesCarriedForward).toBe('4500.00');
+    expect(r.property.rentARoomPool?.reason).toContain('same income tax (£0.00) but less loss and finance costs carried forward');
+  });
+
+  it('ties between expenses and the allowance still go to actual expenses', () => {
+    // Employment 0, Flat receipts 500, expenses 100, plus an exempt Home: tax is nil under both methods.
+    const r = run([flat(500, 100), room('Home', 2000, 0)]);
+    expect(r.property.method).toBe('expenses');
+    expect(r.property.rentARoomPool?.treatment).toBe('exempt');
+  });
+});
+
+describe('computeOwnerTax: the Emily-like case with a rent-a-room home is unchanged', () => {
+  // Standard share of Francis Road: gross 13,200.00, expenses 776.51, mortgage interest 8,375.20.
+  // Denbigh Road (rent_a_room, shared): receipts 1,432.17, expenses 51.57, no mortgage interest.
+  // Employment 12,570 with no PAYE.
+  const emily = run(
+    [
+      { name: '249 Francis Road', lettingType: 'standard', grossIncome: '13200.00', totalExpenses: '776.51', mortgageInterest: '8375.20' },
+      { name: '20 Denbigh Road', lettingType: 'rent_a_room', grossIncome: '1432.17', totalExpenses: '51.57', mortgageInterest: '0.00', rentARoomShared: true },
+    ],
+    { employmentIncome: 12570, payeTaxPaid: 0 },
+  );
+
+  it('stays exempt and gives the same liability as before', () => {
+    // Denbigh 1,432.17 is within the shared limit of 3,750, so it is exempt.
+    // Francis Road: 13,200.00 - 776.51 = 12,423.49 x 20% = 2,484.70 (2,484.698 rounded).
+    // S.24: 20% x min(8,375.20, 12,423.49, 12,423.49) = 1,675.04. Liability 2,484.70 - 1,675.04 = 809.66.
+    expect(emily.property.rentARoomPool).toMatchObject({ treatment: 'exempt', limit: '3750.00', shared: true, receipts: '1432.17', taxable: '0.00' });
+    expect(emily.property.method).toBe('expenses');
+    expect(emily.property.taxableProfit).toBe('12423.49');
+    expect(emily.financeCosts.reducer).toBe('1675.04');
+    expect(emily.incomeTax.liability).toBe('809.66');
+  });
+
+  it('rejects the alternatives on tax', () => {
+    // Exempt on the allowance: (13,200.00 - 1,000) x 20% = 2,440.00, no reducer.
+    // Elected out: pool 14,632.17 - 828.08 = 13,804.09 x 20% = 2,760.82; less the same 1,675.04 reducer = 1,085.78
+    // (allowance on the merged pool: 13,632.17 x 20% = 2,726.43).
+    expect(liabilities(emily)).toEqual({
+      'expenses/exempt': '809.66',
+      'allowance/exempt': '2440.00',
+      'expenses/normal': '1085.78',
+      'allowance/normal': '2726.43',
+    });
+  });
+
+  it('keeps the warning about recorded expenses, worded for the method that is not claiming them', () => {
+    expect(emily.warnings).toEqual([
+      '20 Denbigh Road is a rent-a-room letting but has recorded expenses or mortgage interest. They are not claimed under the exempt method; ' +
+        'only the part that relates to the let room would be claimable under the normal method, so make sure these figures are already apportioned.',
+    ]);
+  });
+});
+
+describe('computeOwnerTax: rent-a-room warning when the normal method is chosen', () => {
+  it('says the figures count and still asks for them to be apportioned', () => {
+    const r = run([flat(15000, 2000), room('Home', 5000, 10000)], { employmentIncome: 12570 });
+    expect(r.property.rentARoomPool?.treatment).toBe('normal');
+    expect(r.warnings).toEqual([
+      'Home is a rent-a-room letting but has recorded expenses or mortgage interest. The normal method is being used, so they count: ' +
+        'only the part that relates to the let room is claimable; make sure these figures are already apportioned.',
+    ]);
+  });
+});
+
+describe('computeOwnerTax: without rent-a-room lettings nothing changes', () => {
+  // The fixture is the full output of the engine before rent-a-room pooling was added, for three owners with
+  // only standard lettings: Emily-like (expenses + S.24), allowance chosen at the higher rate with savings and
+  // dividends, and brought-forward losses and finance costs in 2027-28. Equality is exact (every number and
+  // every line of working); only the new, additive fields are dropped before comparing.
+  const profile = (over: Partial<OwnerTaxProfileInput>) => ({ ...EMPTY_PROFILE, ...over });
+  const cases: Record<string, OwnerTaxComputation> = {
+    emilyLike: computeOwnerTax({
+      taxYear: '2025-26', properties: [flat(10000, 1800, 2400, '249 Francis Road')], profile: profile({ employmentIncome: 12570 }),
+    }),
+    allowanceChosen: computeOwnerTax({
+      taxYear: '2025-26', properties: [flat(3000, 400, 0, 'Flat A'), flat(900, 50, 0, 'Flat B')],
+      profile: profile({ employmentIncome: 45000, payeTaxPaid: 6486, savingsInterest: 800, dividends: 1500 }),
+    }),
+    carryForwards: computeOwnerTax({
+      taxYear: '2027-28', properties: [flat(9000, 4000, 3000, 'Flat A'), flat(2000, 2500, 500, 'Flat B')],
+      profile: profile({ employmentIncome: 30000, propertyLossesBroughtForward: 1200, financeCostsBroughtForward: 700 }),
+    }),
+  };
+
+  for (const [name, result] of Object.entries(cases)) {
+    it(`gives the same output as before for ${name}`, () => {
+      // The additive fields are empty here...
+      expect(result.property.rentARoomPool).toBeNull();
+      expect(result.property.rentARoom).toEqual([]);
+      expect(result.property.methods.map(m => m.rentARoom)).toEqual([null, null]);
+      // ...and dropping them leaves exactly the old output.
+      const old = JSON.parse(JSON.stringify(result)) as {
+        property: { rentARoomPool?: unknown; methods: Array<Record<string, unknown>> };
+      };
+      delete old.property.rentARoomPool;
+      for (const m of old.property.methods) {
+        delete m.rentARoom;
+        delete m.chosen;
+      }
+      expect(old).toEqual((noRentARoomFixture as Record<string, unknown>)[name]);
+    });
+  }
+
+  it('flags exactly one option as chosen, and it is the method that was used', () => {
+    for (const result of Object.values(cases)) {
+      const chosen = result.property.methods.filter(m => m.chosen);
+      expect(chosen.map(m => m.method)).toEqual([result.property.method]);
+    }
   });
 });
 

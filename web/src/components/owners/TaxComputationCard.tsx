@@ -56,7 +56,7 @@ const FORM_FIELDS: Array<{ name: FormField; label: string; help?: string }> = [
 ];
 
 const LETTING_LABEL = { standard: 'Standard letting', rent_a_room: 'Rent-a-room (in own home)' } as const;
-const OUTCOME_LABEL = {
+const TREATMENT_LABEL = {
   exempt: 'exempt (within the limit)',
   alternative: 'alternative method (receipts less limit)',
   normal: 'normal method (receipts less expenses)',
@@ -183,7 +183,7 @@ export default function TaxComputationCard({ ownerId, year }: { ownerId: number 
   const sa = data.selfAssessment;
   const poa = sa.paymentsOnAccount;
   const fc = data.financeCosts;
-  const usedMethod = data.property.method;
+  const roomPool = data.property.rentARoomPool;
   const mtdColor = data.mtd.scope === 'in_scope' ? 'warning' : data.mtd.scope === 'below_threshold' ? 'success' : 'default';
   const mtdLabel =
     data.mtd.scope === 'in_scope' ? 'MTD ITSA mandatory'
@@ -230,7 +230,7 @@ export default function TaxComputationCard({ ownerId, year }: { ownerId: number 
         <Table size="small">
           <TableHead>
             <TableRow>
-              <TableCell>Method</TableCell>
+              <TableCell>{roomPool ? 'Method and rent-a-room treatment' : 'Method'}</TableCell>
               <TableCell align="right">Taxed property profit</TableCell>
               <TableCell align="right">S.24 credit</TableCell>
               <TableCell align="right">Income tax</TableCell>
@@ -238,10 +238,10 @@ export default function TaxComputationCard({ ownerId, year }: { ownerId: number 
           </TableHead>
           <TableBody>
             {data.property.methods.map(m => (
-              <TableRow key={m.method} selected={m.available && m.method === usedMethod}>
+              <TableRow key={`${m.method}-${m.rentARoom ?? 'standard'}`} selected={m.chosen}>
                 <TableCell>
                   {m.label}{' '}
-                  {m.available && m.method === usedMethod && <Chip size="small" color="primary" label="Used" />}
+                  {m.chosen && <Chip size="small" color="primary" label="Used" />}
                   {!m.available && <Typography variant="caption" color="text.secondary" display="block">{m.note}</Typography>}
                 </TableCell>
                 <TableCell align="right">{m.available ? formatCurrency(m.propertyProfit ?? '0') : '–'}</TableCell>
@@ -253,10 +253,20 @@ export default function TaxComputationCard({ ownerId, year }: { ownerId: number 
         </Table>
         {data.property.rentARoom.map(r => (
           <Typography key={r.name} variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-            Rent-a-room, {r.name}: receipts {formatCurrency(r.receipts)} against a {formatCurrency(r.limit)} limit
-            {r.shared ? ' (shared)' : ''} → {OUTCOME_LABEL[r.outcome]}; taxable {formatCurrency(r.taxable)}.
+            Rent-a-room, {r.name}: receipts {formatCurrency(r.receipts)}
+            {r.shared ? ' (shared)' : ''}, expenses {formatCurrency(r.expenses)}, mortgage interest {formatCurrency(r.financeCosts)}.
           </Typography>
         ))}
+        {roomPool && (
+          <>
+            <Typography variant="body2" sx={{ mt: 1 }}>
+              Rent-a-room, all lettings pooled: receipts {formatCurrency(roomPool.receipts)} against a single{' '}
+              {formatCurrency(roomPool.limit)} limit{roomPool.shared ? ' (shared)' : ''} → {TREATMENT_LABEL[roomPool.treatment]};
+              effect on the property business {formatCurrency(roomPool.taxable)}{roomPool.taxable.startsWith('-') ? ' (a loss)' : ''}.
+            </Typography>
+            <Typography variant="body2" color="text.secondary">{roomPool.reason}</Typography>
+          </>
+        )}
         {data.property.hasLosses ? (
           <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
             Losses brought forward {formatCurrency(data.property.lossesBroughtForward)}, used {formatCurrency(data.property.lossesUsed)},

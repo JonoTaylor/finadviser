@@ -69,7 +69,10 @@ export interface TaxRateTable {
 
   /** Trading/property allowance for gross property receipts. */
   propertyAllowance: Decimal;
-  /** Rent-a-room limit for one person; halved when the letting is shared. */
+  /**
+   * Rent-a-room limit for one person for the whole tax year, across all their
+   * lettings (HMRC PIM4010); halved when the letting is shared.
+   */
   rentARoomLimit: Decimal;
   /**
    * Rate of the S.24 residential finance-cost tax reducer. The basic rate

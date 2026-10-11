@@ -9,6 +9,12 @@ function csvRow(cells: Array<string | number | null | undefined>): string {
   return cells.map(csvEscape).join(',');
 }
 
+const RENT_A_ROOM_TREATMENT_LABEL = {
+  exempt: 'Exempt (within the limit)',
+  alternative: 'Alternative method (receipts less limit)',
+  normal: 'Normal method (receipts less expenses)',
+} as const;
+
 /**
  * One CSV with three parts, all in Section / Line / Amount columns: the
  * headline figures, any warnings, then every step of the working so the
@@ -22,6 +28,13 @@ export function taxComputationCsv(c: OwnerTaxComputation & { owner: { name: stri
     ['Summary', 'Tax year', c.taxYear],
     ['Summary', `Rates used${c.rates.assumed ? ' (assumed)' : ''}${c.rates.provisional ? ' (provisional)' : ''}`, c.rates.taxYear],
     ['Summary', 'Property method', c.property.method === 'allowance' ? 'Property allowance' : 'Actual expenses'],
+    ...(c.property.rentARoomPool
+      ? ([
+          ['Summary', 'Rent-a-room treatment', RENT_A_ROOM_TREATMENT_LABEL[c.property.rentARoomPool.treatment]],
+          ['Summary', `Rent-a-room pooled receipts (limit ${c.property.rentARoomPool.limit}${c.property.rentARoomPool.shared ? ', shared' : ''})`, c.property.rentARoomPool.receipts],
+          ['Summary', 'Rent-a-room effect on property business', c.property.rentARoomPool.taxable],
+        ] as Array<[string, string, string]>)
+      : []),
     ['Summary', 'Taxable UK property profit', c.property.taxableProfit],
     ['Summary', 'Property losses carried forward', c.property.lossesCarriedForward],
     ['Summary', 'S.24 finance-cost tax reducer', c.financeCosts.reducer],

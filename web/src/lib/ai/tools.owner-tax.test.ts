@@ -23,7 +23,19 @@ import { TOOL_DEFINITIONS, TOOL_LABELS, executeTool } from './tools';
 interface TaxToolAnswer {
   owner: { id: number; name: string };
   taxOnRentalIncome: string;
-  propertyIncome: { methodUsed: string };
+  propertyIncome: {
+    methodUsed: string;
+    rentARoom: null | {
+      treatment: string;
+      why: string;
+      pooledReceipts: string;
+      limit: string;
+      shared: boolean;
+      effectOnPropertyBusiness: string;
+      lettings: Array<{ property: string; receipts: string }>;
+    };
+    optionsCompared: Array<{ option: string; used: boolean; incomeTax: string }>;
+  };
   financeCostRelief: { reducer: string };
   selfAssessment: {
     balanceDue: string;
@@ -89,6 +101,39 @@ describe('get_owner_tax_computation tool', () => {
     expect(r.selfAssessment.dueOnDeadline).toBe('£1,740.00');
     expect(r.estimate).toContain('not tax advice');
     expect(r.breakdown.length).toBeGreaterThan(10);
+  });
+
+  it('reports the pooled rent-a-room treatment and every option compared', async () => {
+    const home = (name: string) => ({ name, lettingType: 'rent_a_room' as const, grossIncome: '5000.00', totalExpenses: '0.00', mortgageInterest: '0.00', rentARoomShared: false });
+    const computation = computeOwnerTax({
+      taxYear: '2025-26',
+      properties: [home('Home A'), home('Home B')],
+      profile: {
+        employmentIncome: '12570.00', payeTaxPaid: '0.00', selfEmploymentIncome: '0.00', savingsInterest: '0.00',
+        dividends: '0.00', otherIncome: '0.00', propertyLossesBroughtForward: '0.00', financeCostsBroughtForward: '0.00',
+      },
+    });
+    getTaxComputation.mockResolvedValue({ ...computation, owner: { id: 1, name: 'Emily Pun' }, profileSaved: true, properties: [] });
+    const r = (await executeTool('get_owner_tax_computation', { owner_name: 'emily', tax_year: '2025-26' })) as TaxToolAnswer;
+    expect(r.propertyIncome.rentARoom).toMatchObject({
+      treatment: 'alternative',
+      pooledReceipts: '£10,000.00',
+      limit: '£7,500.00',
+      shared: false,
+      effectOnPropertyBusiness: '£2,500.00',
+    });
+    expect(r.propertyIncome.rentARoom?.why).toContain('Alternative method used');
+    expect(r.propertyIncome.rentARoom?.lettings.map(l => [l.property, l.receipts])).toEqual([['Home A', '£5,000.00'], ['Home B', '£5,000.00']]);
+    expect(r.propertyIncome.optionsCompared.filter(o => o.used)).toEqual([
+      { option: 'Actual expenses, rent-a-room alternative method', used: true, incomeTax: '£500.00' },
+    ]);
+  });
+
+  it('reports no rent-a-room section when the owner has none', async () => {
+    getTaxComputation.mockResolvedValue(emilyResult());
+    const r = (await executeTool('get_owner_tax_computation', { owner_name: 'emily', tax_year: '2025-26' })) as TaxToolAnswer;
+    expect(r.propertyIncome.rentARoom).toBeNull();
+    expect(r.propertyIncome.optionsCompared.map(o => [o.option, o.used])).toEqual([['Actual expenses', true], ['Property allowance', false]]);
   });
 
   it('accepts owner_id and defaults the year to the current tax year', async () => {

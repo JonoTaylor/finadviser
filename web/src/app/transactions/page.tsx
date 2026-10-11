@@ -2,7 +2,7 @@
 
 import { useState, useCallback } from 'react';
 import {
-  Box, Typography, Button, Snackbar, Alert, FormControlLabel, Switch, Stack, Badge,
+  Box, Button, Snackbar, Alert, FormControlLabel, Switch, Badge,
 } from '@mui/material';
 import AutoFixHighRoundedIcon from '@mui/icons-material/AutoFixHighRounded';
 import SwapHorizRoundedIcon from '@mui/icons-material/SwapHorizRounded';
@@ -12,8 +12,21 @@ import TransactionFilters from '@/components/transactions/TransactionFilters';
 import TransactionTable from '@/components/transactions/TransactionTable';
 import CategoryEditDialog from '@/components/transactions/CategoryEditDialog';
 import MarkAsTransferDialog from '@/components/transactions/MarkAsTransferDialog';
+import PageHeader from '@/components/ui/PageHeader';
+import { fetchJson } from '@/lib/http/client';
+import type { Entry } from '@/components/transactions/TransactionTable';
 
-const fetcher = (url: string) => fetch(url).then(r => r.json());
+const fetcher = fetchJson;
+async function fetchList<T>(url: string): Promise<T[]> {
+  const data = await fetchJson<unknown>(url);
+  if (!Array.isArray(data)) throw new Error('This list could not be read. Please retry.');
+  return data;
+}
+async function fetchJournal(url: string): Promise<{ entries: Entry[]; total: number }> {
+  const data = await fetchJson<{ entries: Entry[]; total: number }>(url);
+  if (!Array.isArray(data.entries) || !Number.isInteger(data.total) || data.total < 0) throw new Error('Your transaction list could not be read. Please retry.');
+  return data;
+}
 
 export default function TransactionsPage() {
   const [filters, setFilters] = useState({
@@ -45,9 +58,9 @@ export default function TransactionsPage() {
   queryParams.set('limit', String(pageSize));
   queryParams.set('offset', String(page * pageSize));
 
-  const { data, isLoading, mutate } = useSWR(`/api/journal?${queryParams}`, fetcher);
-  const { data: categories } = useSWR('/api/categories', fetcher);
-  const { data: accounts } = useSWR('/api/accounts', fetcher);
+  const { data, error, isLoading, mutate } = useSWR(`/api/journal?${queryParams}`, fetchJournal, { shouldRetryOnError: false });
+  const { data: categories, error: categoriesError } = useSWR<Parameters<typeof TransactionFilters>[0]['categories']>('/api/categories', fetchList, { shouldRetryOnError: false });
+  const { data: accounts, error: accountsError } = useSWR<Parameters<typeof TransactionFilters>[0]['accounts']>('/api/accounts', fetchList, { shouldRetryOnError: false });
   const { data: review } = useSWR<{ candidates: unknown[] }>('/api/journal/transfers/review', fetcher);
   const reviewCount = review?.candidates?.length ?? 0;
 
@@ -57,7 +70,7 @@ export default function TransactionsPage() {
   }, []);
 
   const handleCategoryUpdate = useCallback(async (journalId: number, categoryId: number, createRule: boolean, description?: string) => {
-    await fetch(`/api/journal/${journalId}`, {
+    await fetchJson(`/api/journal/${journalId}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ categoryId, createRule, description }),
@@ -69,8 +82,7 @@ export default function TransactionsPage() {
   const handleAutoCategorize = useCallback(async () => {
     setAutoCategorizing(true);
     try {
-      const res = await fetch('/api/journal/auto-categorize', { method: 'POST' });
-      const result = await res.json();
+      const result = await fetchJson<{ error?: string; total: number; ruleBased: number; aiCategorized: number; remaining: number; aiSkippedReason?: string }>('/api/journal/auto-categorize', { method: 'POST' });
       if (result.error) {
         setSnackbar({ open: true, message: result.error, severity: 'error' });
       } else if (result.total === 0) {
@@ -107,15 +119,7 @@ export default function TransactionsPage() {
 
   return (
     <Box>
-      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 3 }}>
-        <Box>
-          <Typography variant="h4">Transactions</Typography>
-          <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-            {data?.total ? `${data.total} total` : 'Loading...'}
-            {hideTransfers ? ' (transfers hidden)' : ''}
-          </Typography>
-        </Box>
-        <Stack direction="row" spacing={1} alignItems="center">
+      <PageHeader title="Transactions" description={error ? 'Your transaction records are unavailable.' : isLoading ? 'Loading your transaction records…' : `${data?.total ?? 0} transactions${hideTransfers ? ' · transfers hidden' : ''}`} actions={<>
           <Badge badgeContent={reviewCount} color="warning" max={99}>
             <Button
               component={Link}
@@ -130,12 +134,12 @@ export default function TransactionsPage() {
             variant="outlined"
             startIcon={<AutoFixHighRoundedIcon />}
             onClick={handleAutoCategorize}
-            disabled={autoCategorizing}
+            disabled={autoCategorizing || Boolean(error || categoriesError)}
           >
-            {autoCategorizing ? 'Categorizing...' : 'Auto-Categorize'}
+            {autoCategorizing ? 'Categorising…' : 'Categorise transactions'}
           </Button>
-        </Stack>
-      </Box>
+      </>} />
+      {(categoriesError || accountsError) && <Alert severity="warning" sx={{ mb: 2 }}>Some filter options could not be loaded. Retry when your accounts and categories are available.</Alert>}
       <Box sx={{ display: 'flex', justifyContent: 'flex-end', mb: 1 }}>
         <FormControlLabel
           control={
@@ -157,7 +161,7 @@ export default function TransactionsPage() {
         accounts={accounts ?? []}
         onFilterChange={handleFilterChange}
       />
-      <TransactionTable
+      {error ? <Alert severity="warning" action={<Button size="small" onClick={() => void mutate()}>Retry</Button>}>Your transactions could not be loaded. Your records have not been replaced with an empty list.</Alert> : <TransactionTable
         entries={data?.entries ?? []}
         total={data?.total ?? 0}
         page={page}
@@ -165,18 +169,18 @@ export default function TransactionsPage() {
         loading={isLoading}
         onPageChange={setPage}
         onPageSizeChange={setPageSize}
-        onRowClick={(entry) => setEditEntry({ id: entry.id, categoryId: entry.category_id, description: entry.description })}
+        onRowClick={(entry) => categoriesError ? setSnackbar({ open: true, message: 'Categories could not be loaded. Please reload the page before editing.', severity: 'error' }) : setEditEntry({ id: entry.id, categoryId: entry.category_id, description: entry.description })}
         onMarkAsTransfer={(entry) => setTransferEntry({ id: entry.id, description: entry.description })}
-      />
+      />}
       <CategoryEditDialog
         open={editEntry !== null}
         currentCategoryId={editEntry?.categoryId ?? null}
         description={editEntry?.description}
         categories={categories ?? []}
         onClose={() => setEditEntry(null)}
-        onSave={(categoryId, createRule) =>
-          editEntry && handleCategoryUpdate(editEntry.id, categoryId, createRule, editEntry.description)
-        }
+        onSave={async (categoryId, createRule) => {
+          if (editEntry) await handleCategoryUpdate(editEntry.id, categoryId, createRule, editEntry.description);
+        }}
       />
       <MarkAsTransferDialog
         open={transferEntry !== null}

@@ -11,10 +11,10 @@ import {
 } from '@mui/material';
 import AddRoundedIcon from '@mui/icons-material/AddRounded';
 import ExpandMoreRoundedIcon from '@mui/icons-material/ExpandMoreRounded';
+import MetricCard from '@/components/ui/MetricCard';
 import { fetchJson } from '@/lib/http/client';
 import { londonTodayIso } from '@/lib/dates/today';
 import { formatCurrency } from '@/lib/utils/formatting';
-import { serifFamily, softTokens } from '@/theme/theme';
 import { ASSET_CLASSES, ASSET_CLASS_LABELS, holdingSchema, platformSchema, type AssetClass, type PortfolioData, type PortfolioHolding } from '@/lib/portfolio/schema';
 import type { PortfolioWorkspaceResponse } from '@/lib/portfolio/load';
 
@@ -25,12 +25,8 @@ interface HoldingForm {
 function fromHolding(holding: PortfolioHolding): HoldingForm {
   return { ...holding, accountId: String(holding.accountId), feeRate: holding.feeRate ?? '', provider: holding.provider ?? '' };
 }
-function metric(label: string, value: string, detail: string, tone: string) {
-  return <Card sx={{ height: '100%', bgcolor: tone }}><CardContent>
-    <Typography variant="subtitle2">{label}</Typography>
-    <Typography variant="h4" sx={{ mt: 1, mb: 1, fontFamily: serifFamily, fontStyle: 'italic' }}>{value}</Typography>
-    <Typography variant="body2">{detail}</Typography>
-  </CardContent></Card>;
+function metric(label: string, value: string, detail: string) {
+  return <MetricCard label={label} value={value} detail={detail} />;
 }
 
 export default function PortfolioWorkspace() {
@@ -109,25 +105,25 @@ export default function PortfolioWorkspace() {
   const negativeAccount = analysis.accounts.some(account => new Decimal(account.balance).lt(0));
   return <Stack spacing={3}>
     {message && <Alert severity="success" onClose={() => setMessage('')}>{message}</Alert>}
-    <Alert severity="info">
-      Household overview · ledger cutoff {analysis.asOf}. Holdings describe balances already included in your finances.
-      Values are manually recorded in GBP; update them from provider statements.
-    </Alert>
+    <Box sx={{ pb: 2, borderBottom: '1px solid', borderColor: 'divider' }}>
+      <Typography variant="body2">Household overview · ledger cutoff {analysis.asOf} · GBP</Typography>
+      <Typography variant="caption" sx={{ display: 'block', mt: 0.5 }}>Holdings describe balances already included in your finances. Values are manually recorded; update them from provider statements.</Typography>
+    </Box>
     {analysis.hasInconsistencies && <Alert severity="warning">Some holdings do not reconcile with the current ledger. Review the account warnings before relying on allocation or fee figures.</Alert>}
     <Grid container spacing={2}>
-      <Grid size={{ xs: 12, sm: 6, lg: 3 }}>{metric('Recorded account value', formatCurrency(analysis.totalLedgerBalance), `${analysis.accounts.length} investment accounts, all owners`, softTokens.fog)}</Grid>
-      <Grid size={{ xs: 12, sm: 6, lg: 3 }}>{metric('Holdings recorded', formatCurrency(analysis.totalAllocated), analysis.allocationCoveragePercent === null ? 'No positive account balance to compare' : `${analysis.allocationCoveragePercent}% of positive account value${analysis.hasInconsistencies ? ' · review gaps' : ''}`, softTokens.mint.main)}</Grid>
-      <Grid size={{ xs: 12, sm: 6, lg: 3 }}>{metric('Unclassified value', formatCurrency(analysis.totalUnclassified), `Reconciliation excess ${formatCurrency(analysis.totalOverallocated)}`, softTokens.lemon.main)}</Grid>
-      <Grid size={{ xs: 12, sm: 6, lg: 3 }}>{metric('Known annual charges', formatCurrency(analysis.fees.annualKnownCharges), analysis.fees.complete ? 'Illustrative percentage charges; exclusions apply' : 'Partial estimate: some fees or holdings are unknown', softTokens.peach.main)}</Grid>
+      <Grid size={{ xs: 6, lg: 3 }}>{metric('Recorded account value', formatCurrency(analysis.totalLedgerBalance), `${analysis.accounts.length} investment accounts, all owners`)}</Grid>
+      <Grid size={{ xs: 6, lg: 3 }}>{metric('Holdings recorded', formatCurrency(analysis.totalAllocated), analysis.allocationCoveragePercent === null ? 'No positive account balance to compare' : `${analysis.allocationCoveragePercent}% of positive account value${analysis.hasInconsistencies ? ' · review gaps' : ''}`)}</Grid>
+      <Grid size={{ xs: 6, lg: 3 }}>{metric('Unclassified value', formatCurrency(analysis.totalUnclassified), `Reconciliation excess ${formatCurrency(analysis.totalOverallocated)}`)}</Grid>
+      <Grid size={{ xs: 6, lg: 3 }}>{metric('Known annual charges', formatCurrency(analysis.fees.annualKnownCharges), analysis.fees.complete ? 'Illustrative percentage charges; exclusions apply' : 'Partial estimate: some fees or holdings are unknown')}</Grid>
     </Grid>
     <Grid container spacing={3}>
       <Grid size={{ xs: 12, md: 7 }}><Card sx={{ height: '100%' }}><CardContent>
-        <Typography variant="h6" sx={{ mb: 1 }}>Your recorded asset mix</Typography>
-        <Typography variant="body2" sx={{ mb: 3 }}>Percentages describe recorded holdings. Unclassified value is shown separately; pensions and ISAs are account wrappers.</Typography>
+        <Typography variant="h6" sx={{ mb: 0.75 }}>Recorded asset mix</Typography>
+        <Typography variant="body2" sx={{ mb: 2.5 }}>Percentages describe recorded holdings. Unclassified value is shown separately; pensions and ISAs are account wrappers.</Typography>
         {new Decimal(analysis.totalAllocated).eq(0) ? <Typography color="text.secondary">Add the funds or assets from your statements to see your allocation.</Typography> : <Stack spacing={2}>
           {analysis.allocations.filter(item => new Decimal(item.value).gt(0)).map(item => <Box key={item.assetClass}>
-            <Stack direction="row" justifyContent="space-between" gap={2} sx={{ mb: 0.75 }}><Typography variant="body2">{ASSET_CLASS_LABELS[item.assetClass]}</Typography><Typography variant="body2">{formatCurrency(item.value)} · {item.percentOfRecordedHoldings}%</Typography></Stack>
-            <LinearProgress variant="determinate" value={item.percentOfRecordedHoldings ?? 0} sx={{ height: 8, borderRadius: 8 }} />
+            <Stack direction="row" justifyContent="space-between" gap={2} sx={{ mb: 0.75 }}><Typography variant="body2" sx={{ fontWeight: 500 }}>{ASSET_CLASS_LABELS[item.assetClass]}</Typography><Typography variant="body2" sx={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{formatCurrency(item.value)} · {item.percentOfRecordedHoldings}%</Typography></Stack>
+            <LinearProgress variant="determinate" value={item.percentOfRecordedHoldings ?? 0} sx={{ height: 5, borderRadius: '4px', bgcolor: '#eef2f6', '& .MuiLinearProgress-bar': { bgcolor: '#0f766e' } }} />
           </Box>)}
         </Stack>}
       </CardContent></Card></Grid>
@@ -141,30 +137,30 @@ export default function PortfolioWorkspace() {
       </Stack></CardContent></Card></Grid>
     </Grid>
     <Stack direction="row" justifyContent="space-between" alignItems="center" flexWrap="wrap" gap={1}>
-      <Typography variant="h5">Accounts &amp; holdings</Typography><Button component={Link} href="/investments" variant="outlined">Manage account balances</Button>
+      <Typography variant="h6" component="h2">Accounts &amp; holdings</Typography><Button component={Link} href="/investments" variant="outlined" size="small">Manage account balances</Button>
     </Stack>
     {analysis.accounts.length === 0 && <Alert severity="info">Add a real investment account first, then record its holdings here. A pension can contain equities, bonds, cash or a mixture.</Alert>}
     {analysis.accounts.map(account => <Card key={account.id}><CardContent><Stack spacing={2}>
       <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" gap={2}>
-        <Box><Typography variant="h6">{account.name}</Typography><Stack direction="row" gap={1} alignItems="center" flexWrap="wrap" sx={{ mt: 0.75 }}>
-          {account.investmentKind && <Chip label={account.investmentKind.toUpperCase()} size="small" />}
+        <Box sx={{ minWidth: 0 }}><Typography variant="h6" sx={{ overflowWrap: 'anywhere' }}>{account.name}</Typography><Stack direction="row" gap={1} alignItems="center" flexWrap="wrap" sx={{ mt: 0.75 }}>
+          {account.investmentKind && <Chip label={account.investmentKind.toUpperCase()} size="small" variant="outlined" />}
           <Typography variant="caption">{account.ownerName ?? 'Owner not recorded'} · balance {formatCurrency(account.balance)} · {account.balanceAsOf}</Typography>
         </Stack></Box>
-        <Stack direction="row" gap={1} flexWrap="wrap"><Button disabled={busy} onClick={() => { setFormError(''); setPlatformForm({ accountId: account.id, feeRate: account.platformFeeRate ?? '' }); }}>Platform fee</Button><Button disabled={busy || new Decimal(account.balance).lt(0)} variant="contained" startIcon={<AddRoundedIcon />} onClick={() => openHolding(account.id)}>Add holding</Button></Stack>
+        <Stack direction="row" gap={1} flexWrap="wrap" sx={{ flexShrink: 0 }}><Button size="small" variant="outlined" disabled={busy} onClick={() => { setFormError(''); setPlatformForm({ accountId: account.id, feeRate: account.platformFeeRate ?? '' }); }}>Platform fee</Button><Button size="small" disabled={busy || new Decimal(account.balance).lt(0)} variant="contained" startIcon={<AddRoundedIcon />} onClick={() => openHolding(account.id)}>Add holding</Button></Stack>
       </Stack>
       {account.warnings.map(warning => <Alert key={warning} severity="warning">{warning}</Alert>)}
-      <Stack direction={{ xs: 'column', sm: 'row' }} gap={1} flexWrap="wrap">
-        <Chip size="small" label={`Recorded ${formatCurrency(account.allocated)}`} />
-        <Chip size="small" color={new Decimal(account.unclassified).gt(0) ? 'warning' : 'success'} label={`Unclassified ${formatCurrency(account.unclassified)}`} />
-        {new Decimal(account.overallocated).gt(0) && <Chip size="small" color="error" label={`Excess ${formatCurrency(account.overallocated)}`} />}
-        <Chip size="small" variant="outlined" label={account.platformFeeRate === null ? 'Platform fee unknown' : `Platform ${account.platformFeeRate}% yearly`} />
+      <Stack direction="row" gap={{ xs: 1.5, sm: 3 }} flexWrap="wrap" sx={{ py: 1.5, borderTop: '1px solid', borderBottom: '1px solid', borderColor: 'divider' }}>
+        <Typography variant="body2">Recorded <Box component="span" sx={{ fontWeight: 600, color: 'text.primary', fontVariantNumeric: 'tabular-nums' }}>{formatCurrency(account.allocated)}</Box></Typography>
+        <Typography variant="body2">Unclassified <Box component="span" sx={{ fontWeight: 600, color: new Decimal(account.unclassified).gt(0) ? 'warning.dark' : 'text.primary', fontVariantNumeric: 'tabular-nums' }}>{formatCurrency(account.unclassified)}</Box></Typography>
+        {new Decimal(account.overallocated).gt(0) && <Typography variant="body2" color="error.main">Excess {formatCurrency(account.overallocated)}</Typography>}
+        <Typography variant="body2">{account.platformFeeRate === null ? 'Platform fee unknown' : `Platform ${account.platformFeeRate}% yearly`}</Typography>
       </Stack>
-      {account.holdings.length === 0 ? <Typography color="text.secondary">No holdings recorded. Check the statement for the underlying investments and their charges.</Typography> : account.holdings.map(holding => <Box key={holding.id} sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 2, p: 2 }}>
+      {account.holdings.length === 0 ? <Typography variant="body2" color="text.secondary">No holdings recorded. Check the statement for the underlying investments and their charges.</Typography> : <Stack divider={<Divider />} spacing={1.75}>{account.holdings.map(holding => <Box key={holding.id}>
         <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" gap={2}>
           <Box sx={{ minWidth: 0, overflowWrap: 'anywhere' }}><Typography fontWeight={600}>{holding.name}</Typography><Typography variant="body2">{ASSET_CLASS_LABELS[holding.assetClass]}{holding.provider ? ` · ${holding.provider}` : ''}</Typography><Typography variant="caption">Statement {holding.valuationDate} · annual holding fee {holding.feeRate === null ? 'unknown' : `${holding.feeRate}%`}</Typography></Box>
-          <Stack spacing={1} alignItems={{ xs: 'flex-start', sm: 'flex-end' }}><Typography variant="h6">{formatCurrency(holding.value)}</Typography><Stack direction="row" spacing={1}><Button size="small" disabled={busy} onClick={() => openHolding(account.id, holding)} aria-label={`Edit ${holding.name}`}>Edit</Button><Button size="small" disabled={busy} onClick={() => { setFormError(''); setRemoveId(holding.id); }} aria-label={`Remove ${holding.name}`}>Remove</Button></Stack></Stack>
+          <Stack spacing={0.5} alignItems={{ xs: 'flex-start', sm: 'flex-end' }} sx={{ flexShrink: 0 }}><Typography sx={{ fontSize: 20, fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{formatCurrency(holding.value)}</Typography><Stack direction="row" spacing={0.5}><Button size="small" disabled={busy} onClick={() => openHolding(account.id, holding)} aria-label={`Edit ${holding.name}`}>Edit</Button><Button size="small" disabled={busy} onClick={() => { setFormError(''); setRemoveId(holding.id); }} aria-label={`Remove ${holding.name}`}>Remove</Button></Stack></Stack>
         </Stack>
-      </Box>)}
+      </Box>)}</Stack>}
       {account.staleHoldingCount > 0 && <Typography variant="caption">{account.staleHoldingCount} holding snapshot{account.staleHoldingCount === 1 ? '' : 's'} more than 30 days old. Refresh from a provider statement when useful.</Typography>}
       <Typography variant="caption">Known annual account charges {formatCurrency(account.annualKnownCharges)}{account.feesComplete ? ' · percentage fee inputs complete' : ' · partial estimate'}. Platform charges apply to the positive ledger balance; holding charges apply to each recorded holding.</Typography>
     </Stack></CardContent></Card>)}

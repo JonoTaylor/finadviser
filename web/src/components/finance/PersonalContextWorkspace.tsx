@@ -4,19 +4,17 @@ import { useRef, useState, type FormEvent } from 'react';
 import useSWR from 'swr';
 import Link from 'next/link';
 import {
-  Alert, Box, Button, Card, CardContent, Checkbox, Chip, Divider,
+  Alert, Box, Button, Card, CardContent, Checkbox, Divider,
   FormControlLabel, MenuItem, Skeleton, Stack, TextField, Typography,
 } from '@mui/material';
-import PersonOutlineRoundedIcon from '@mui/icons-material/PersonOutlineRounded';
-import FactCheckRoundedIcon from '@mui/icons-material/FactCheckRounded';
 import ArrowForwardRoundedIcon from '@mui/icons-material/ArrowForwardRounded';
+import PageHeader from '@/components/ui/PageHeader';
 import { fetchJson } from '@/lib/http/client';
 import { formatCurrency } from '@/lib/utils/formatting';
 import {
   cashExclusionReason, contextSchema, financePriorities, resolveCashAccessibility,
   type ContextAccount, type ContextWorkspace, type FinancialContext,
 } from '@/lib/finance-context/schema';
-import { serifFamily, softTokens } from '@/theme/theme';
 
 const priorityLabels = { spending: 'Spend less', wealth: 'Build wealth', property: 'Manage properties', pensions: 'Plan retirement' };
 const regionLabels = { england: 'England', wales: 'Wales', scotland: 'Scotland', northern_ireland: 'Northern Ireland' };
@@ -46,10 +44,8 @@ export default function PersonalContextWorkspace() {
   });
 
   return (
-    <Box sx={{ pt: { xs: 4, md: 0 } }}>
-      <Typography variant="overline" sx={{ color: softTokens.mint.ink, letterSpacing: '0.14em' }}>Advice that starts with you</Typography>
-      <Typography variant="h4" component="h1">Your financial context</Typography>
-      <Typography variant="body2" sx={{ mt: 1, mb: 3, maxWidth: 740 }}>Choose the ledger owner who represents you, record the facts that affect your plan, and review which savings you can actually access. Unknown details stay unknown.</Typography>
+    <Box>
+      <PageHeader title="Your financial context" description="Choose the ledger owner who represents you, record the facts that affect your plan, and review which savings you can actually access. Unknown details stay unknown." />
 
       {isLoading ? <Stack gap={3}><Skeleton variant="rounded" height={240} /><Skeleton variant="rounded" height={360} /></Stack> : error ? (
         <Alert severity="warning" action={<Button size="small" onClick={() => void mutate()}>Retry</Button>}>Your saved context and account records could not be loaded. Balances and personal facts are unavailable. {error.message}</Alert>
@@ -157,7 +153,7 @@ function ContextEditor({ workspace, onSaved }: { workspace: ContextWorkspace; on
       {saved && <Alert severity="success" sx={{ mb: 3 }}>Your context has been saved. Your plan will use these confirmed details.</Alert>}
       <Card sx={{ mb: 3 }}>
         <CardContent>
-          <Stack direction="row" alignItems="center" gap={1} sx={{ mb: 2 }}><PersonOutlineRoundedIcon sx={{ color: softTokens.mint.ink }} /><Typography variant="h6" component="h2">About you</Typography></Stack>
+          <Typography variant="h6" component="h2" sx={{ mb: 2.5 }}>About you</Typography>
           <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: 'repeat(2, minmax(0, 1fr))' }, gap: 2.5 }}>
             <TextField label="Preferred name" value={context.preferredName} onChange={event => change('preferredName', event.target.value)} disabled={busy} error={Boolean(issues.preferredName)} helperText={issues.preferredName || 'Jono is the name you have given us. Edit it whenever you like.'} slotProps={{ htmlInput: { maxLength: 80 } }} />
             <TextField select label="Your ledger owner" value={context.ownerId ?? ''} onChange={event => change('ownerId', event.target.value === '' ? null : Number(event.target.value))} disabled={busy} error={Boolean(issues.ownerId)} helperText={issues.ownerId || 'Choose your own record. Shared or unattributed accounts remain separate.'}>
@@ -187,12 +183,12 @@ function ContextEditor({ workspace, onSaved }: { workspace: ContextWorkspace; on
         </CardContent>
       </Card>
 
-      <Card sx={{ mb: 3, bgcolor: softTokens.cream }}>
+      <Card sx={{ mb: 3 }}>
         <CardContent>
-          <Stack direction="row" alignItems="center" gap={1} sx={{ mb: 2 }}><FactCheckRoundedIcon sx={{ color: softTokens.mint.ink }} /><Typography variant="h6" component="h2">Know what your records cover</Typography></Stack>
-          <Stack direction={{ xs: 'column', sm: 'row' }} gap={3}>
-            {[[accounts.length, 'Asset and liability accounts', `Recorded balances as at ${formatDate(lookup.asOf)}`], [unattributed, 'Shared or unattributed', 'No individual owner is attached in the ledger'], [olderPostings + noPostings, 'Posting dates to review', `${olderPostings} older than 30 days · ${noPostings} with no postings`]].map(([value, label, detail]) => <Box key={String(label)} sx={{ flex: 1, minWidth: 0 }}><Typography variant="h3" sx={{ fontFamily: serifFamily }}>{value}</Typography><Typography variant="subtitle2" sx={{ mt: 0.5 }}>{label}</Typography><Typography variant="caption">{detail}</Typography></Box>)}
-          </Stack>
+          <Typography variant="h6" component="h2" sx={{ mb: 2 }}>Record coverage</Typography>
+          <Box sx={{ display: 'grid', gridTemplateColumns: { xs: 'repeat(2, minmax(0, 1fr))', sm: 'repeat(3, minmax(0, 1fr))' }, gap: 2.5 }}>
+            {[[accounts.length, 'Asset and liability accounts', `Recorded balances as at ${formatDate(lookup.asOf)}`], [unattributed, 'Shared or unattributed', 'No individual owner is attached in the ledger'], [olderPostings + noPostings, 'Posting dates to review', `${olderPostings} older than 30 days · ${noPostings} with no postings`]].map(([value, label, detail]) => <Box key={String(label)} sx={{ minWidth: 0 }}><Typography variant="caption" sx={{ display: 'block' }}>{label}</Typography><Typography sx={{ fontSize: '1.75rem', lineHeight: 1.25, fontWeight: 600, mt: 0.5, fontVariantNumeric: 'tabular-nums' }}>{value}</Typography><Typography variant="caption" sx={{ display: 'block', mt: 0.5 }}>{detail}</Typography></Box>)}
+          </Box>
           <Divider sx={{ my: 2 }} />
           <Typography variant="body2">A recent journal posting is evidence of recorded activity. It does not verify the bank&apos;s current balance, prove a statement is complete, or confirm that every account has been imported.</Typography>
         </CardContent>
@@ -202,33 +198,31 @@ function ContextEditor({ workspace, onSaved }: { workspace: ContextWorkspace; on
       <Typography variant="body2" sx={{ mb: 2, maxWidth: 760 }}>Confirm whether cash can be used when you need it. Automatic classifications are estimates. Pensions, market investments, property and liabilities always remain outside the accessible emergency reserve.</Typography>
       {issues.accountAccessibility && <Alert severity="error" sx={{ mb: 2 }}>{issues.accountAccessibility}</Alert>}
       {context.accountAccessibility.some(item => !accounts.some(account => account.id === item.accountId)) && <Alert severity="warning" sx={{ mb: 2 }}>A saved accessibility setting refers to an account that is no longer available. <Button size="small" disabled={busy} onClick={() => change('accountAccessibility', context.accountAccessibility.filter(item => accounts.some(account => account.id === item.accountId)))}>Remove unavailable settings</Button></Alert>}
-      {accounts.length === 0 ? <Alert severity="info">No asset or liability accounts are recorded yet. <Link href="/import">Import your statements</Link> to start building a financial picture.</Alert> : <Stack gap={2}>
+      {accounts.length === 0 ? <Alert severity="info">No asset or liability accounts are recorded yet. <Link href="/import">Import your statements</Link> to start building a financial picture.</Alert> : <Card><Box>
         {accounts.map(account => {
           const exclusion = cashExclusionReason(account);
           const resolution = resolveCashAccessibility(account, currentContext);
           const override = context.accountAccessibility.find(item => item.accountId === account.id);
           const age = postingAge(account, lookup.asOf);
           const ownerLabel = account.ownerId === null ? 'Shared / unattributed' : ownerNames.get(account.ownerId) ?? 'Owner record unavailable';
-          return <Card key={account.id} component="article" aria-label={account.name}>
-            <CardContent>
+          return <Box key={account.id} component="article" aria-label={account.name} sx={{ p: { xs: 2, sm: 2.5 }, '& + article': { borderTop: 1, borderColor: 'divider' } }}>
               <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" alignItems={{ xs: 'stretch', sm: 'flex-start' }} gap={2}>
-                <Box sx={{ flex: 1, minWidth: 0 }}><Typography variant="h6" component="h3" sx={{ overflowWrap: 'anywhere' }}>{account.name}</Typography><Typography variant="caption">{ownerLabel} · {classification(account)} · account #{account.id}</Typography></Box>
-                <Box sx={{ flexShrink: 0 }}><Typography variant="h5" sx={{ overflowWrap: 'anywhere' }}>{formatCurrency(account.balance)}</Typography><Typography variant="caption">Recorded balance{account.accountType === 'LIABILITY' ? ' · negative means owed' : ''}</Typography></Box>
+                <Box sx={{ flex: 1, minWidth: 0 }}><Typography variant="subtitle1" component="h3" sx={{ fontWeight: 600, overflowWrap: 'anywhere' }}>{account.name}</Typography><Typography variant="caption">{ownerLabel} · {classification(account)} · account #{account.id}</Typography></Box>
+                <Box sx={{ minWidth: 0, textAlign: { xs: 'left', sm: 'right' } }}><Typography sx={{ fontSize: '1.25rem', fontWeight: 600, fontVariantNumeric: 'tabular-nums', overflowWrap: 'anywhere' }}>{formatCurrency(account.balance)}</Typography><Typography variant="caption">Recorded balance{account.accountType === 'LIABILITY' ? ' · negative means owed' : ''}</Typography></Box>
               </Stack>
-              <Stack direction="row" gap={1} flexWrap="wrap" sx={{ my: 2 }}>
-                <Chip size="small" label={account.latestJournalDate ? `Last posting ${formatDate(account.latestJournalDate)}` : 'No recorded postings'} color={age !== null && age <= 30 ? 'default' : 'warning'} />
-                <Chip size="small" label={exclusion ? 'Outside cash reserve' : resolution.source === 'confirmed' ? resolution.eligible ? 'Access confirmed by you' : 'Restricted or excluded by you' : resolution.eligible ? 'Cash access inferred' : 'Cash access unconfirmed'} variant="outlined" />
-                {account.futurePostingCount > 0 && <Chip size="small" label={`${account.futurePostingCount} future ${account.futurePostingCount === 1 ? 'posting excluded' : 'postings excluded'}`} variant="outlined" />}
+              <Stack direction="row" gap={1.5} flexWrap="wrap" sx={{ my: 1.5 }}>
+                <Typography variant="caption" color={age !== null && age <= 30 ? 'text.secondary' : 'warning.dark'}>{account.latestJournalDate ? `Last posting ${formatDate(account.latestJournalDate)}` : 'No recorded postings'}</Typography>
+                <Typography variant="caption">{exclusion ? 'Outside cash reserve' : resolution.source === 'confirmed' ? resolution.eligible ? 'Access confirmed by you' : 'Restricted or excluded by you' : resolution.eligible ? 'Cash access inferred' : 'Cash access unconfirmed'}</Typography>
+                {account.futurePostingCount > 0 && <Typography variant="caption">{`${account.futurePostingCount} future ${account.futurePostingCount === 1 ? 'posting excluded' : 'postings excluded'}`}</Typography>}
               </Stack>
               {exclusion ? <Box><Typography variant="body2" color="text.secondary">{exclusion}.{override?.accessibility === 'available' ? ' Your saved “available” setting cannot include this asset in the cash reserve.' : ''}</Typography>{override && <Button size="small" disabled={busy} onClick={() => changeAccessibility(account.id, '')}>Use automatic exclusion</Button>}</Box> : <TextField select fullWidth label={`Cash accessibility: ${account.name}`} value={override?.accessibility ?? ''} onChange={event => changeAccessibility(account.id, event.target.value)} disabled={busy} helperText="Your confirmation changes planning assumptions; it does not change the ledger balance or account ownership.">
                 <MenuItem value="">Automatic estimate · not confirmed</MenuItem><MenuItem value="available">Available when I need it</MenuItem><MenuItem value="restricted">Restricted, locked or subject to notice</MenuItem><MenuItem value="excluded">Exclude from my emergency reserve</MenuItem>
               </TextField>}
               {!account.postingCount && <Typography variant="caption" sx={{ display: 'block', mt: 1 }}>No balance postings have been recorded. A displayed zero does not confirm that this account is empty.</Typography>}
-            </CardContent>
-          </Card>;
+          </Box>;
         })}
-      </Stack>}
-      <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" alignItems={{ xs: 'stretch', sm: 'center' }} gap={2} sx={{ mt: 3 }}>
+      </Box></Card>}
+      <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" alignItems={{ xs: 'stretch', sm: 'center' }} gap={2} sx={{ mt: 3, p: 2, position: 'sticky', bottom: 16, zIndex: 2, bgcolor: 'background.paper', border: 1, borderColor: 'divider', borderRadius: '8px', boxShadow: '0 4px 16px rgba(15, 23, 42, 0.06)' }}>
         <Box><Typography variant="caption">{updatedAt ? `Last saved ${new Intl.DateTimeFormat('en-GB', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Europe/London' }).format(new Date(updatedAt))} · revision ${revision}` : 'These details have not been saved yet.'}</Typography><Typography variant="caption" sx={{ display: 'block', mt: 0.5 }}>Saving records your context and account access preferences. It does not move money.</Typography></Box>
         <Button type="submit" variant="contained" disabled={busy || conflict} sx={{ flexShrink: 0 }}>{busy ? 'Saving…' : 'Save my context'}</Button>
       </Stack>

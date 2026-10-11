@@ -1,106 +1,55 @@
 'use client';
 
-import {
-  Alert, Card, CardContent, Typography, Box, IconButton, Stack, Chip,
-} from '@mui/material';
-import { alpha } from '@mui/material/styles';
+import { Alert, Card, CardContent, Typography, Box, IconButton, Stack, Chip, Button } from '@mui/material';
 import CloseRoundedIcon from '@mui/icons-material/CloseRounded';
-import LightbulbRoundedIcon from '@mui/icons-material/LightbulbRounded';
+import LightbulbOutlinedIcon from '@mui/icons-material/LightbulbOutlined';
 import WarningAmberRoundedIcon from '@mui/icons-material/WarningAmberRounded';
 import InsightsRoundedIcon from '@mui/icons-material/InsightsRounded';
 import useSWR from 'swr';
-import { softTokens } from '@/theme/theme';
+import Link from 'next/link';
 import { useState } from 'react';
 import { fetchJson } from '@/lib/http/client';
+import DashboardCardHeader from './DashboardCardHeader';
 
-const fetcher = fetchJson;
-
-interface Tip {
-  id: number;
-  content: string;
-  tipType: string;
-  createdAt: string;
-}
-
-interface TypeStyle {
-  icon: React.ReactNode;
-  fill: string;
-  ink: string;
-}
-
-const TYPE_CONFIG: Record<string, TypeStyle> = {
-  tip:     { icon: <LightbulbRoundedIcon sx={{ fontSize: 18 }} />,    fill: softTokens.lemon.main,    ink: softTokens.lemon.ink },
-  warning: { icon: <WarningAmberRoundedIcon sx={{ fontSize: 18 }} />, fill: softTokens.peach.main,    ink: softTokens.peach.ink },
-  insight: { icon: <InsightsRoundedIcon sx={{ fontSize: 18 }} />,     fill: softTokens.lavender.main, ink: softTokens.lavender.ink },
+interface Tip { id: number; content: string; tipType: string; createdAt: string }
+const TYPE_CONFIG: Record<string, { icon: React.ReactNode; color: string }> = {
+  tip: { icon: <LightbulbOutlinedIcon sx={{ fontSize: 18 }} />, color: 'text.secondary' },
+  warning: { icon: <WarningAmberRoundedIcon sx={{ fontSize: 18 }} />, color: 'warning.dark' },
+  insight: { icon: <InsightsRoundedIcon sx={{ fontSize: 18 }} />, color: 'success.dark' },
 };
 
 export default function AiInsightsCard() {
-  const { data: tips, mutate } = useSWR<Tip[]>('/api/tips', fetcher);
+  const { data: tips, mutate } = useSWR<Tip[]>('/api/tips', fetchJson);
   const [dismissError, setDismissError] = useState(false);
+  const [dismissing, setDismissing] = useState<number | null>(null);
 
   const handleDismiss = async (id: number) => {
     setDismissError(false);
+    setDismissing(id);
     try {
       await fetchJson(`/api/tips?id=${id}`, { method: 'PATCH' });
       await mutate();
     } catch { setDismissError(true); }
+    finally { setDismissing(null); }
   };
 
   if (!tips || tips.length === 0) return null;
 
-  return (
-    <Card>
-      <CardContent>
-        {dismissError && <Alert severity="error" sx={{ mb: 2 }}>This insight could not be dismissed. Please try again.</Alert>}
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1.5 }}>
-          <Box
-            sx={{
-              width: 36, height: 36, borderRadius: 2.5,
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              bgcolor: softTokens.lemon.main, color: softTokens.lemon.ink,
-            }}
-          >
-            <LightbulbRoundedIcon sx={{ fontSize: 20 }} />
-          </Box>
-          <Typography variant="h6">AI Insights</Typography>
-          <Chip label={tips.length} size="small" sx={{ ml: 'auto', fontWeight: 600 }} />
-        </Box>
-        <Stack spacing={0.75}>
-          {tips.slice(0, 5).map((tip) => {
-            const config = TYPE_CONFIG[tip.tipType] ?? TYPE_CONFIG.tip;
-            return (
-              <Box
-                key={tip.id}
-                sx={{
-                  display: 'flex',
-                  alignItems: 'flex-start',
-                  gap: 1.25,
-                  p: 1.5,
-                  borderRadius: 2.5,
-                  bgcolor: alpha(config.fill, 0.4),
-                  transition: 'background-color 0.15s',
-                  '&:hover': { bgcolor: alpha(config.fill, 0.6) },
-                }}
-              >
-                <Box sx={{ color: config.ink, mt: 0.25, flexShrink: 0 }}>
-                  {config.icon}
-                </Box>
-                <Typography variant="body2" sx={{ flex: 1, lineHeight: 1.5, color: 'text.primary' }}>
-                  {tip.content}
-                </Typography>
-                <IconButton
-                  size="small"
-                  onClick={() => handleDismiss(tip.id)}
-                  sx={{ flexShrink: 0, opacity: 0.5, '&:hover': { opacity: 1 } }}
-                  aria-label="Dismiss"
-                >
-                  <CloseRoundedIcon sx={{ fontSize: 16 }} />
-                </IconButton>
-              </Box>
-            );
-          })}
-        </Stack>
-      </CardContent>
-    </Card>
-  );
+  return <Card><CardContent>
+    <DashboardCardHeader title="Adviser insights" subtitle="Suggestions from your saved financial activity"
+      action={<Stack direction="row" alignItems="center" gap={1}><Chip label={tips.length} size="small" variant="outlined" /><Button component={Link} href="/chat" size="small">Ask adviser</Button></Stack>} />
+    {dismissError && <Alert severity="error" sx={{ mb: 2 }}>This insight could not be dismissed. Please try again.</Alert>}
+    <Stack divider={<Box sx={{ borderTop: 1, borderColor: 'divider' }} />}>
+      {tips.slice(0, 5).map(tip => {
+        const config = TYPE_CONFIG[tip.tipType] ?? TYPE_CONFIG.tip;
+        return <Stack key={tip.id} direction="row" alignItems="flex-start" gap={1.5} sx={{ py: 1.5 }}>
+          <Box sx={{ color: config.color, mt: 0.1, flexShrink: 0 }}>{config.icon}</Box>
+          <Typography variant="body2" sx={{ flex: 1, lineHeight: 1.65 }}>{tip.content}</Typography>
+          <IconButton size="small" onClick={() => handleDismiss(tip.id)} disabled={dismissing !== null} aria-label="Dismiss insight" sx={{ flexShrink: 0 }}>
+            <CloseRoundedIcon sx={{ fontSize: 16 }} />
+          </IconButton>
+        </Stack>;
+      })}
+    </Stack>
+  </CardContent></Card>;
 }

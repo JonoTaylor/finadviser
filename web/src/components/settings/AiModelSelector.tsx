@@ -17,6 +17,7 @@ import {
   CircularProgress,
   ListSubheader,
 } from '@mui/material';
+import { fetchJson } from '@/lib/http/client';
 
 interface AvailableModel {
   id: string;
@@ -32,17 +33,17 @@ interface ModelSettingResponse {
 }
 
 const fetcher = async (url: string): Promise<ModelSettingResponse> => {
-  const res = await fetch(url);
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({} as { error?: string }));
-    throw new Error(body.error || `HTTP ${res.status}`);
+  const data = await fetchJson<ModelSettingResponse>(url);
+  if (!data || typeof data.modelId !== 'string' || !['db', 'env', 'default'].includes(data.source)
+    || !Array.isArray(data.options) || data.options.some(option => typeof option.id !== 'string' || typeof option.name !== 'string')) {
+    throw new Error('Available adviser models could not be read. Please retry.');
   }
-  return res.json();
+  return data;
 };
 
 const SOURCE_LABEL: Record<ModelSettingResponse['source'], string> = {
-  db: 'Set in app',
-  env: 'From MODEL_ID env',
+  db: 'Saved selection',
+  env: 'Workspace default',
   default: 'Default',
 };
 
@@ -90,7 +91,9 @@ export default function AiModelSelector() {
     );
   }
   if (error || !data) {
-    return <Alert severity="error">{error?.message ?? 'Failed to load AI model setting'}</Alert>;
+    return <Alert severity="error" action={<Button color="inherit" size="small" onClick={() => mutate()}>Retry</Button>}>
+      Adviser models could not be loaded. {error?.message}
+    </Alert>;
   }
 
   const selected = pending ?? data.modelId;
@@ -133,7 +136,7 @@ export default function AiModelSelector() {
       }
       setPending(null);
       await mutate();
-      setSnackbar({ open: true, message: 'Reset to env / default.', severity: 'success' });
+      setSnackbar({ open: true, message: 'Using the workspace default model.', severity: 'success' });
     } catch (e) {
       setSnackbar({
         open: true,
@@ -150,7 +153,7 @@ export default function AiModelSelector() {
       <Stack spacing={2}>
         <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
           <Typography variant="body2" color="text.secondary">Current:</Typography>
-          <Typography variant="body2" sx={{ fontFamily: 'monospace' }}>{data.modelId}</Typography>
+          <Typography variant="body2" sx={{ fontFamily: 'monospace', overflowWrap: 'anywhere', minWidth: 0 }}>{data.modelId}</Typography>
           <Chip label={SOURCE_LABEL[data.source]} size="small" variant="outlined" />
         </Stack>
 
@@ -161,6 +164,9 @@ export default function AiModelSelector() {
             labelId="ai-model-select-label"
             label="AI model"
             value={selected}
+            disabled={submitting}
+            renderValue={(value) => data.options.find(option => option.id === value)?.name ?? value}
+            MenuProps={{ slotProps: { paper: { sx: { maxWidth: 'calc(100vw - 32px)' } } } }}
             onChange={(e) => setPending(e.target.value)}
           >
             {grouped.flatMap(([provider, models]) => [
@@ -169,9 +175,9 @@ export default function AiModelSelector() {
               </ListSubheader>,
               ...models.map(opt => (
                 <MenuItem key={opt.id} value={opt.id}>
-                  <Stack direction="row" alignItems="baseline" spacing={1} sx={{ width: '100%' }}>
-                    <Typography variant="body2">{opt.name}</Typography>
-                    <Typography variant="caption" color="text.secondary" sx={{ fontFamily: 'monospace', flex: 1, textAlign: 'right' }}>
+                  <Stack direction={{ xs: 'column', sm: 'row' }} alignItems="baseline" spacing={0.5} sx={{ width: '100%', minWidth: 0 }}>
+                    <Typography variant="body2" sx={{ overflowWrap: 'anywhere', whiteSpace: 'normal' }}>{opt.name}</Typography>
+                    <Typography variant="caption" color="text.secondary" sx={{ fontFamily: 'monospace', flex: 1, textAlign: { sm: 'right' }, overflowWrap: 'anywhere', whiteSpace: 'normal' }}>
                       {opt.id}
                     </Typography>
                   </Stack>
@@ -190,7 +196,7 @@ export default function AiModelSelector() {
           </Select>
         </FormControl>
 
-        <Stack direction="row" spacing={1}>
+        <Stack direction="row" gap={1} flexWrap="wrap">
           <Button
             variant="contained"
             size="small"
@@ -205,13 +211,12 @@ export default function AiModelSelector() {
             onClick={handleReset}
             disabled={data.source !== 'db' || submitting}
           >
-            Reset to env / default
+            Use workspace default
           </Button>
         </Stack>
 
         <Typography variant="caption" color="text.secondary">
-          Models come live from the Vercel AI Gateway (cached 5 min). Changes take effect immediately
-          for every AI call (chat agent, auto-categorise, PDF parsing).
+          Changes apply to your next adviser conversation and other AI features.
         </Typography>
       </Stack>
 

@@ -4,15 +4,12 @@ import { Box, Typography, Tooltip } from '@mui/material';
 import { formatCurrency, formatPercentage } from '@/lib/utils/formatting';
 import { softTokens } from '@/theme/theme';
 
-// Bar segments are coloured with the v2 pastel `.deep` tones in a
-// fixed order so the same owner gets the same colour across renders.
-// Pairs (band, ink) keep the in-bar percentage label readable against
-// each tint.
+// Keep owner colours stable and percentage labels readable on each band.
 const BANDS: readonly { fill: string; ink: string }[] = [
-  { fill: softTokens.mint.deep,     ink: softTokens.mint.ink },
-  { fill: softTokens.lavender.deep, ink: softTokens.lavender.ink },
-  { fill: softTokens.peach.deep,    ink: softTokens.peach.ink },
-  { fill: softTokens.lemon.deep,    ink: softTokens.lemon.ink },
+  { fill: softTokens.mint.deep,     ink: '#FFFFFF' },
+  { fill: softTokens.lavender.deep, ink: '#FFFFFF' },
+  { fill: softTokens.peach.deep,    ink: '#FFFFFF' },
+  { fill: softTokens.lemon.deep,    ink: '#FFFFFF' },
   { fill: softTokens.mint.main,     ink: softTokens.mint.ink },
   { fill: softTokens.lavender.main, ink: softTokens.lavender.ink },
 ];
@@ -35,7 +32,7 @@ export default function EquityBar({ owners }: { owners: OwnerEquity[] }) {
 
   return (
     <Box>
-      <Box sx={{ display: 'flex', height: 32, borderRadius: 2, overflow: 'hidden', mb: 2 }}>
+      <Box sx={{ display: 'flex', height: 32, borderRadius: '6px', overflow: 'hidden', mb: 2 }}>
         {sorted.map((owner, i) => {
           const width = Math.max(owner.equityPct, 1);
           const band = BANDS[i % BANDS.length];

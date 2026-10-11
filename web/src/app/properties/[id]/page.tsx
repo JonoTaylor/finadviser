@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, use } from 'react';
-import { Box, Typography, Grid, Button, Card, CardContent, Skeleton, Stack, Divider } from '@mui/material';
+import { Alert, Box, Typography, Grid, Button, Card, CardContent, Skeleton, Stack, Divider } from '@mui/material';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import useSWR from 'swr';
 import Link from 'next/link';
@@ -20,18 +20,24 @@ import BtlDecisionCard from '@/components/properties/BtlDecisionCard';
 import ReceiptLongIcon from '@mui/icons-material/ReceiptLong';
 import InsightsOutlinedIcon from '@mui/icons-material/InsightsOutlined';
 import { currentTaxYear } from '@/lib/tax/ukTaxYear';
+import PageHeader from '@/components/ui/PageHeader';
 
-const fetcher = (url: string) => fetch(url).then(r => r.json());
+const fetcher = async (url: string) => {
+  const response = await fetch(url);
+  if (!response.ok) throw new Error('The property record could not be loaded.');
+  return response.json();
+};
 
 export default function PropertyDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const propertyId = parseInt(id, 10);
-  const { data: property, isLoading, mutate } = useSWR(`/api/properties/${id}`, fetcher);
-  const { data: equity, mutate: mutateEquity } = useSWR(`/api/properties/${id}/equity`, fetcher);
+  const { data: property, error, isLoading, mutate } = useSWR(`/api/properties/${id}`, fetcher);
+  const { data: equity, error: equityError, mutate: mutateEquity } = useSWR(`/api/properties/${id}/equity`, fetcher);
   const [valuationOpen, setValuationOpen] = useState(false);
   const [paymentOpen, setPaymentOpen] = useState(false);
 
   if (isLoading) return <Skeleton variant="rounded" height={400} />;
+  if (error) return <Box><PageHeader title="Property details" /><Alert severity="warning" action={<Button size="small" onClick={() => void mutate()}>Retry</Button>}>The property record could not be loaded. Its details and financial figures are unavailable.</Alert></Box>;
   if (!property) return <Typography>Property not found</Typography>;
 
   const handleAddValuation = async (data: { valuation: string; valuationDate: string; source: string }) => {
@@ -62,30 +68,43 @@ export default function PropertyDetailPage({ params }: { params: Promise<{ id: s
         Back to Properties
       </Button>
 
-      <Typography variant="h4" sx={{ mb: 1 }}>{property.name}</Typography>
-      {property.address && (
-        <Typography variant="body1" color="text.secondary" sx={{ mb: 3 }}>
-          {property.address}
-        </Typography>
-      )}
+      <PageHeader title={property.name} description={property.address && <Box component="span" sx={{ overflowWrap: 'anywhere' }}>{property.address}</Box>} actions={<>
+        <Button variant="contained" size="small" onClick={() => setValuationOpen(true)}>Add Valuation</Button>
+        {property.mortgages?.length > 0 && <Button variant="outlined" size="small" onClick={() => setPaymentOpen(true)}>Record Payment</Button>}
+      </>} />
 
-      <Grid container spacing={3}>
+      <Grid container spacing={2} sx={{ mb: 3 }}>
         <Grid size={{ xs: 12, md: 8 }}>
-          <Card sx={{ mb: 3 }}>
+          <Card sx={{ height: '100%', minWidth: 0 }}>
             <CardContent>
               <Typography variant="h6" gutterBottom>Equity Breakdown</Typography>
-              {equity && equity.length > 0 ? (
+              {equityError ? <Alert severity="warning">Ownership figures could not be loaded. The recorded ownership breakdown is unavailable.</Alert> : equity && equity.length > 0 ? (
                 <>
                   <EquityBar owners={equity} />
                   <Divider sx={{ my: 2 }} />
-                  <OwnershipTable owners={equity} />
+                  <Box sx={{ overflowX: 'auto' }}><OwnershipTable owners={equity} /></Box>
                 </>
               ) : (
                 <Typography color="text.secondary">No ownership data available</Typography>
               )}
             </CardContent>
           </Card>
+        </Grid>
+        <Grid size={{ xs: 12, md: 4 }}>
+          <Card sx={{ height: '100%' }}>
+            <CardContent>
+              <Typography variant="h6" gutterBottom>Details</Typography>
+              <Box sx={{ display: 'grid', gridTemplateColumns: { xs: 'repeat(2, minmax(0, 1fr))', md: '1fr' }, gap: 2 }}>
+                {property.purchasePrice && <Box sx={{ minWidth: 0 }}><Typography variant="caption" color="text.secondary">Purchase Price</Typography><Typography sx={{ mt: 0.5, fontSize: '1.25rem', fontWeight: 600, fontVariantNumeric: 'tabular-nums', overflowWrap: 'anywhere' }}>{formatCurrency(property.purchasePrice)}</Typography></Box>}
+                {property.purchaseDate && <Box sx={{ minWidth: 0 }}><Typography variant="caption" color="text.secondary">Purchase Date</Typography><Typography sx={{ mt: 0.5 }}>{property.purchaseDate}</Typography></Box>}
+              </Box>
+            </CardContent>
+          </Card>
+        </Grid>
+      </Grid>
 
+      <Grid container spacing={3}>
+        <Grid size={{ xs: 12, md: 8 }}>
           <BtlDecisionCard propertyId={propertyId} />
 
           <TenanciesCard propertyId={propertyId} />
@@ -100,26 +119,6 @@ export default function PropertyDetailPage({ params }: { params: Promise<{ id: s
         </Grid>
 
         <Grid size={{ xs: 12, md: 4 }}>
-          <Card sx={{ mb: 3 }}>
-            <CardContent>
-              <Typography variant="h6" gutterBottom>Details</Typography>
-              <Stack spacing={1}>
-                {property.purchasePrice && (
-                  <Box>
-                    <Typography variant="caption" color="text.secondary">Purchase Price</Typography>
-                    <Typography fontWeight={600}>{formatCurrency(property.purchasePrice)}</Typography>
-                  </Box>
-                )}
-                {property.purchaseDate && (
-                  <Box>
-                    <Typography variant="caption" color="text.secondary">Purchase Date</Typography>
-                    <Typography>{property.purchaseDate}</Typography>
-                  </Box>
-                )}
-              </Stack>
-            </CardContent>
-          </Card>
-
           {property.mortgages?.map((m: { id: number; lender: string; originalAmount: string; startDate: string; termMonths: number; interestOnly?: boolean }) => (
             <MortgageCard key={m.id} mortgage={m} onChange={() => mutate()} />
           ))}
@@ -129,14 +128,6 @@ export default function PropertyDetailPage({ params }: { params: Promise<{ id: s
           )}
 
           <Stack direction="row" spacing={1} sx={{ mt: 2 }} flexWrap="wrap" useFlexGap>
-            <Button variant="outlined" size="small" onClick={() => setValuationOpen(true)}>
-              Add Valuation
-            </Button>
-            {property.mortgages?.length > 0 && (
-              <Button variant="outlined" size="small" onClick={() => setPaymentOpen(true)}>
-                Record Payment
-              </Button>
-            )}
             {property.mortgages?.length > 0 && (
               <Button
                 variant="outlined"

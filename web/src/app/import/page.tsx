@@ -3,8 +3,11 @@
 import { useState, useCallback } from 'react';
 import {
   Box, Typography, Stepper, Step, StepLabel, Card, CardContent,
-  Button, Stack, Alert,
+  Button, Stack, Alert, Accordion, AccordionSummary, AccordionDetails,
 } from '@mui/material';
+import ExpandMoreRoundedIcon from '@mui/icons-material/ExpandMoreRounded';
+import PageHeader from '@/components/ui/PageHeader';
+import { fetchJson } from '@/lib/http/client';
 import useSWR from 'swr';
 import FileUploadStep from '@/components/import/FileUploadStep';
 import ConfigStep from '@/components/import/ConfigStep';
@@ -14,7 +17,20 @@ import BackfillMetadataCard from '@/components/import/BackfillMetadataCard';
 import { consumeNdjsonImport } from '@/lib/import/stream-client';
 import type { ProgressEvent } from '@/lib/import/stream';
 
-const fetcher = (url: string) => fetch(url).then(r => r.json());
+type ImportAccount = Parameters<typeof ConfigStep>[0]['accounts'][number];
+type BankConfigs = Parameters<typeof ConfigStep>[0]['bankConfigs'];
+const accountsFetcher = async (url: string): Promise<ImportAccount[]> => {
+  const data = await fetchJson<unknown>(url);
+  if (!Array.isArray(data)) throw new Error('The account list returned an unreadable response.');
+  return data as ImportAccount[];
+};
+const configsFetcher = async (url: string): Promise<BankConfigs> => {
+  const data = await fetchJson<unknown>(url);
+  if (!data || typeof data !== 'object' || Array.isArray(data) || Object.values(data).some(config => !config || typeof config.name !== 'string' || typeof config.description !== 'string')) {
+    throw new Error('Bank formats returned an unreadable response.');
+  }
+  return data as BankConfigs;
+};
 
 const CSV_STEPS = ['Upload File', 'Configure', 'Preview & Import'];
 const PDF_STEPS = ['Upload File', 'Preview & Import'];
@@ -39,8 +55,8 @@ export default function ImportPage() {
   const [result, setResult] = useState<{ importedCount: number; duplicateCount: number; totalCount: number } | null>(null);
   const [error, setError] = useState('');
 
-  const { data: bankConfigs } = useSWR('/api/import/bank-configs', fetcher);
-  const { data: accounts, mutate: mutateAccounts } = useSWR('/api/accounts', fetcher);
+  const { data: bankConfigs, error: configsError, isLoading: configsLoading, mutate: mutateConfigs } = useSWR('/api/import/bank-configs', configsFetcher, { shouldRetryOnError: false });
+  const { data: accounts, error: accountsError, isLoading: accountsLoading, mutate: mutateAccounts } = useSWR('/api/accounts', accountsFetcher, { shouldRetryOnError: false });
 
   const steps = fileType === 'pdf' ? PDF_STEPS : CSV_STEPS;
 
@@ -153,21 +169,17 @@ export default function ImportPage() {
   const isPreviewStep = fileType === 'pdf' ? activeStep === 1 : activeStep === 2;
 
   return (
-    <Box>
-      <Box sx={{ mb: 4 }}>
-        <Typography variant="h4">Import Transactions</Typography>
-        <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-          Upload CSV files or PDF bank statements to import transactions
-        </Typography>
-      </Box>
+    <Box sx={{ minWidth: 0 }}>
+      <PageHeader title="Import transactions" description="Bring your CSV exports and PDF statements into one financial record." actions={activeStep === 0 ? <Button variant="outlined" size="small" onClick={() => document.getElementById('file-upload')?.click()} disabled={previewing || importing}>Choose file</Button> : undefined} />
 
-      <Stepper activeStep={activeStep} sx={{ mb: 4 }}>
+      <Stepper activeStep={activeStep} alternativeLabel sx={{ mb: 3, '& .MuiStepLabel-label': { fontSize: '0.75rem' }, '& .MuiStepIcon-root': { fontSize: 22 } }}>
         {steps.map(label => (
           <Step key={label}><StepLabel>{label}</StepLabel></Step>
         ))}
       </Stepper>
 
       {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
+      {(accountsError || configsError) && <Alert severity="warning" sx={{ mb: 2 }}>Account choices or bank formats could not be loaded. CSV configuration and metadata enrichment need these lists.<Button size="small" onClick={() => { void mutateAccounts(); void mutateConfigs(); }} sx={{ display: 'block', mt: 0.75 }}>Try again</Button></Alert>}
 
       {(previewing || importing) && <ImportProgress event={progress} />}
 
@@ -185,9 +197,9 @@ export default function ImportPage() {
         </Card>
       ) : (
         <>
-          {activeStep === 0 && <FileUploadStep onFileSelect={handleFileSelect} />}
+          {activeStep === 0 && <Box sx={{ '& .MuiCardContent-root > .MuiBox-root': { p: { xs: 3, sm: 5 }, borderRadius: '6px', borderWidth: 1 }, '& .MuiCardContent-root > .MuiBox-root > .MuiBox-root': { width: 44, height: 44, borderRadius: '6px' }, '& .MuiCardContent-root > .MuiBox-root > .MuiBox-root svg': { fontSize: 24 } }}><FileUploadStep onFileSelect={handleFileSelect} /></Box>}
 
-          {activeStep === 1 && fileType === 'csv' && (
+          {activeStep === 1 && fileType === 'csv' && !(accountsError || configsError) && (accountsLoading || configsLoading ? <Card><CardContent><Typography variant="body2" color="text.secondary">Loading account choices and bank formats…</Typography></CardContent></Card> : (
             <ConfigStep
               bankConfig={bankConfig}
               accountName={accountName}
@@ -200,12 +212,12 @@ export default function ImportPage() {
               onBack={() => setActiveStep(0)}
               busy={previewing}
             />
-          )}
+          ))}
 
           {isPreviewStep && preview && (
-            <Box>
-              <PreviewTable transactions={preview} />
-              <Stack direction="row" spacing={2} sx={{ mt: 2 }}>
+            <Box sx={{ minWidth: 0 }}>
+              <Box role="region" aria-label="Import preview records" tabIndex={0} sx={{ overflowX: 'auto', maxWidth: '100%', '& .MuiCard-root': { minWidth: 580 } }}><PreviewTable transactions={preview} /></Box>
+              <Stack direction="row" spacing={2} flexWrap="wrap" useFlexGap sx={{ mt: 2 }}>
                 <Button onClick={() => { setActiveStep(0); setPreview(null); }} disabled={importing}>Back</Button>
                 <Button variant="contained" onClick={handleImport} disabled={importing}>
                   {importing ? 'Importing…' : 'Confirm Import'}
@@ -220,10 +232,12 @@ export default function ImportPage() {
           columns instead of importing fresh ones. Lives below the main
           importer because it's an occasional one-off rather than the
           common path. */}
-      <BackfillMetadataCard
-        accounts={accounts ?? []}
-        bankConfigs={bankConfigs ?? {}}
-      />
+      <Accordion disableGutters elevation={0} sx={{ mt: 3, border: 1, borderColor: 'divider', borderRadius: '8px', '&:before': { display: 'none' }, overflow: 'hidden' }} slotProps={{ transition: { unmountOnExit: true } }}>
+        <AccordionSummary expandIcon={<ExpandMoreRoundedIcon />}><Box><Typography variant="subtitle2" sx={{ color: 'text.primary', fontWeight: 600 }}>Enrich previously imported transactions</Typography><Typography variant="caption">Add missing merchant and transaction details from a fresh CSV export.</Typography></Box></AccordionSummary>
+        <AccordionDetails sx={{ p: 0, '& > .MuiCard-root': { mt: 0, border: 0, borderRadius: 0 }, '& .MuiFormControl-root': { minWidth: { xs: '0 !important', sm: '200px !important' }, maxWidth: '100%', flex: { sm: '1 1 200px' } }, '& .MuiCardContent-root > .MuiStack-root': { flexWrap: 'wrap', rowGap: 2 } }}>
+          {accountsError || configsError ? <Alert severity="info" sx={{ m: 2 }}>Metadata enrichment is unavailable until your account choices and bank formats can be loaded.</Alert> : accountsLoading || configsLoading ? <Typography variant="body2" sx={{ p: 2 }}>Loading account choices and bank formats…</Typography> : <BackfillMetadataCard accounts={accounts ?? []} bankConfigs={bankConfigs ?? {}} />}
+        </AccordionDetails>
+      </Accordion>
     </Box>
   );
 }

@@ -14,10 +14,15 @@ import {
   Snackbar,
   CircularProgress,
   Tooltip,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
 } from '@mui/material';
 import DeleteIcon from '@mui/icons-material/Delete';
 import AddIcon from '@mui/icons-material/Add';
 import { AI_MEMORY_MAX_CONTENT_LENGTH } from '@/lib/ai/memory-constants';
+import { fetchJson } from '@/lib/http/client';
 
 interface AiMemory {
   id: number;
@@ -27,9 +32,9 @@ interface AiMemory {
 }
 
 const fetcher = async (url: string): Promise<AiMemory[]> => {
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  return res.json();
+  const data = await fetchJson<AiMemory[]>(url);
+  if (!Array.isArray(data)) throw new Error('Saved adviser details could not be read. Please retry.');
+  return data;
 };
 
 // Single source of truth shared with the API + repo so the client
@@ -45,6 +50,9 @@ export default function AiMemoryManager() {
   const { data, error, isLoading, mutate } = useSWR<AiMemory[]>('/api/ai/memories', fetcher);
   const [draft, setDraft] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [deleteConfirm, setDeleteConfirm] = useState<AiMemory | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState('');
   const [snack, setSnack] = useState<{ open: boolean; message: string; severity: 'success' | 'error' }>({
     open: false, message: '', severity: 'success',
   });
@@ -74,16 +82,21 @@ export default function AiMemoryManager() {
   };
 
   const handleDelete = async (m: AiMemory) => {
-    if (!confirm(`Delete this memory?\n\n"${m.content}"`)) return;
+    if (deleting) return;
+    setDeleting(true);
+    setDeleteError('');
     try {
       const res = await fetch(`/api/ai/memories/${m.id}`, { method: 'DELETE' });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
         throw new Error(body.error ?? `HTTP ${res.status}`);
       }
+      setDeleteConfirm(null);
       await mutate();
     } catch (e) {
-      setSnack({ open: true, message: e instanceof Error ? e.message : 'Failed to delete', severity: 'error' });
+      setDeleteError(e instanceof Error ? e.message : 'Deletion could not be confirmed. Please retry.');
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -93,15 +106,15 @@ export default function AiMemoryManager() {
     <>
       <Stack spacing={2}>
         <Typography variant="body2" color="text.secondary">
-          Persistent facts the AI remembers across conversations. These are injected into the
-          system prompt on every chat turn. The AI can also save new memories itself with the
-          <code> remember</code> tool when it learns something durable about you.
+          Details saved by you or your adviser help personalise future conversations.
+          Review or remove them whenever they change.
         </Typography>
 
-        <Stack direction="row" spacing={1} alignItems="flex-start">
+        <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} alignItems="flex-start">
           <TextField
             fullWidth
             size="small"
+            label="Detail for your adviser"
             placeholder='e.g. "Mortgage payment goes out on the 28th from Monzo"'
             value={draft}
             onChange={e => setDraft(e.target.value)}
@@ -127,11 +140,13 @@ export default function AiMemoryManager() {
             <Typography variant="body2" color="text.secondary">Loading memories…</Typography>
           </Stack>
         )}
-        {error && <Alert severity="error">{error.message ?? 'Failed to load memories'}</Alert>}
+        {error && <Alert severity="error" action={<Button color="inherit" size="small" onClick={() => mutate()}>Retry</Button>}>
+          Adviser details could not be loaded. {error.message}
+        </Alert>}
 
         {!isLoading && !error && list.length === 0 && (
           <Typography variant="body2" color="text.secondary">
-            No memories yet. The AI will start saving things it learns as it works with you.
+            No saved details yet. Add something you want your adviser to remember.
           </Typography>
         )}
 
@@ -155,13 +170,13 @@ export default function AiMemoryManager() {
                     sx={{ height: 22, fontSize: '0.7rem', textTransform: 'uppercase' }}
                   />
                 </Tooltip>
-                <Box flex={1}>
-                  <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap' }}>{m.content}</Typography>
+                <Box flex={1} sx={{ minWidth: 0 }}>
+                  <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{m.content}</Typography>
                   <Typography variant="caption" color="text.secondary">
                     {new Date(m.createdAt).toLocaleDateString('en-GB', { year: 'numeric', month: 'short', day: 'numeric' })}
                   </Typography>
                 </Box>
-                <IconButton size="small" onClick={() => handleDelete(m)} aria-label="Delete memory">
+                <IconButton size="small" disabled={deleting} onClick={() => { setDeleteError(''); setDeleteConfirm(m); }} aria-label="Delete memory">
                   <DeleteIcon fontSize="small" />
                 </IconButton>
               </Box>
@@ -169,6 +184,19 @@ export default function AiMemoryManager() {
           </Stack>
         )}
       </Stack>
+
+      <Dialog open={deleteConfirm !== null} onClose={() => !deleting && setDeleteConfirm(null)} maxWidth="sm" fullWidth>
+        <DialogTitle>Remove adviser detail</DialogTitle>
+        <DialogContent>
+          {deleteError && <Alert severity="error" sx={{ mb: 2 }}>{deleteError}</Alert>}
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>This detail will no longer be used in future adviser conversations.</Typography>
+          <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{deleteConfirm?.content}</Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button disabled={deleting} onClick={() => setDeleteConfirm(null)}>Cancel</Button>
+          <Button disabled={deleting} color="error" variant="contained" onClick={() => deleteConfirm && handleDelete(deleteConfirm)}>{deleting ? 'Removing…' : 'Remove detail'}</Button>
+        </DialogActions>
+      </Dialog>
 
       <Snackbar
         open={snack.open}

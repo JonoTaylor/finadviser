@@ -19,7 +19,8 @@ import { fetchJson } from '@/lib/http/client';
 import { londonTodayIso } from '@/lib/dates/today';
 import { formatCurrency } from '@/lib/utils/formatting';
 import { savingsGoalBodySchema, savingsGoalPatchSchema } from '@/lib/validation/financial-plans';
-import { serifFamily, softTokens } from '@/theme/theme';
+import { softTokens } from '@/theme/theme';
+import PageHeader from '@/components/ui/PageHeader';
 
 export interface SavingsGoal {
   id: number;
@@ -79,7 +80,7 @@ function ContributionSummary({ plan, compact = false }: { plan: GoalPlan; compac
   if (plan.timing === 'scheduled') return (
     <Box>
       <Typography variant="caption">Monthly planning amount</Typography>
-      <Typography variant={compact ? 'h6' : 'h5'} sx={{ mt: 0.5, overflowWrap: 'anywhere' }}>{formatCurrency(plan.monthlyContribution!)}</Typography>
+      <Typography variant={compact ? 'h6' : 'h5'} sx={{ mt: 0.5, fontVariantNumeric: 'tabular-nums', overflowWrap: 'anywhere' }}>{formatCurrency(plan.monthlyContribution!)}</Typography>
       <Typography variant="caption" sx={{ display: 'block', mt: 0.5 }}>{plan.contributions} equal {plan.contributions === 1 ? 'contribution' : 'contributions'}, starting now.</Typography>
     </Box>
   );
@@ -115,25 +116,19 @@ export default function SavingsGoalsWorkspace() {
   };
 
   return (
-    <Box sx={{ pt: { xs: 4, md: 0 } }}>
-      <Stack direction={{ xs: 'column', sm: 'row' }} alignItems={{ xs: 'stretch', sm: 'center' }} justifyContent="space-between" gap={2} sx={{ mb: 3 }}>
-        <Box>
-          <Typography variant="overline" sx={{ color: softTokens.mint.ink, letterSpacing: '0.14em' }}>Give your money a purpose</Typography>
-          <Typography variant="h4" component="h1">Savings goals</Typography>
-          <Typography variant="body2" sx={{ mt: 1, maxWidth: 640 }}>Build your emergency fund, save for a home, or plan your next big purchase. Set the target, record what you have saved, and see the next step.</Typography>
-        </Box>
-        <Button variant="contained" startIcon={<AddRoundedIcon />} onClick={() => setEditor({ goal: null })} disabled={Boolean(error || isLoading)} sx={{ flexShrink: 0, alignSelf: { xs: 'flex-start', sm: 'center' } }}>Add savings goal</Button>
-      </Stack>
+    <Box sx={{ maxWidth: 1440, mx: 'auto' }}>
+      <PageHeader title="Savings goals" description="Track your targets, recorded savings and monthly contribution plans."
+        actions={<Button variant="contained" startIcon={<AddRoundedIcon />} onClick={() => setEditor({ goal: null })} disabled={Boolean(error || isLoading)}>Add savings goal</Button>} />
 
       {isLoading ? <Skeleton variant="rounded" height={180} sx={{ mb: 3 }} /> : error ? (
         <Alert severity="warning" action={<Button size="small" onClick={() => void mutate()}>Retry</Button>} sx={{ mb: 3 }}>Savings goals could not be loaded. Your saved targets and balances are unavailable; retry when your connection is restored.</Alert>
       ) : (
-        <Card sx={{ mb: 3, bgcolor: softTokens.cream }}>
+        <Card sx={{ mb: 3 }}>
           <CardContent>
             <Stack direction={{ xs: 'column', md: 'row' }} gap={{ xs: 2.5, md: 5 }}>
-              <Box sx={{ flex: 1, minWidth: 0 }}><Typography variant="caption">Recorded across active goals</Typography><Typography variant="h3" sx={{ fontFamily: serifFamily, mt: 0.5, overflowWrap: 'anywhere' }}>{formatCurrency(recorded)}</Typography><Typography variant="caption">{activeGoals.length} active {activeGoals.length === 1 ? 'goal' : 'goals'}</Typography></Box>
-              <Box sx={{ flex: 1, minWidth: 0 }}><Typography variant="caption">Still to save</Typography><Typography variant="h4" sx={{ mt: 1, overflowWrap: 'anywhere' }}>{formatCurrency(remaining)}</Typography><Typography variant="caption">Remaining across active targets</Typography></Box>
-              <Box sx={{ flex: 1, minWidth: 0 }}><Typography variant="caption">Monthly plan for dated goals</Typography><Typography variant="h4" sx={{ mt: 1, overflowWrap: 'anywhere' }}>{datedPlans.length ? formatCurrency(monthly) : '—'}</Typography><Typography variant="caption">{datedPlans.length ? `${datedPlans.length} scheduled ${datedPlans.length === 1 ? 'goal' : 'goals'} · starting now` : 'No future dated goals to calculate'}{unscheduled.length > 0 ? ` · ${unscheduled.length} ${unscheduled.length === 1 ? 'goal needs' : 'goals need'} a date review` : ''}</Typography></Box>
+              <Box sx={{ flex: 1, minWidth: 0 }}><Typography variant="subtitle2">Recorded across active goals</Typography><Typography sx={{ fontWeight: 650, fontSize: '1.8rem', letterSpacing: '-0.035em', fontVariantNumeric: 'tabular-nums', my: 1, overflowWrap: 'anywhere' }}>{formatCurrency(recorded)}</Typography><Typography variant="caption">{activeGoals.length} active {activeGoals.length === 1 ? 'goal' : 'goals'}</Typography></Box>
+              <Box sx={{ flex: 1, minWidth: 0 }}><Typography variant="subtitle2">Still to save</Typography><Typography sx={{ fontWeight: 650, fontSize: '1.8rem', letterSpacing: '-0.035em', fontVariantNumeric: 'tabular-nums', my: 1, overflowWrap: 'anywhere' }}>{formatCurrency(remaining)}</Typography><Typography variant="caption">Remaining across active targets</Typography></Box>
+              <Box sx={{ flex: 1, minWidth: 0 }}><Typography variant="subtitle2">Monthly plan for dated goals</Typography><Typography sx={{ fontWeight: 650, fontSize: '1.8rem', letterSpacing: '-0.035em', fontVariantNumeric: 'tabular-nums', my: 1, overflowWrap: 'anywhere' }}>{datedPlans.length ? formatCurrency(monthly) : '—'}</Typography><Typography variant="caption">{datedPlans.length ? `${datedPlans.length} scheduled ${datedPlans.length === 1 ? 'goal' : 'goals'} · starting now` : 'No future dated goals to calculate'}{unscheduled.length > 0 ? ` · ${unscheduled.length} ${unscheduled.length === 1 ? 'goal needs' : 'goals need'} a date review` : ''}</Typography></Box>
             </Stack>
             <Divider sx={{ my: 2 }} />
             <Typography variant="caption">Recorded amounts are your own allocations, not automatic account balances or additional net worth. Allocate the same savings to one goal only. Monthly amounts are a plan, not money already saved.</Typography>
@@ -143,18 +138,18 @@ export default function SavingsGoalsWorkspace() {
 
       {!error && !isLoading && (
         <>
-          <Tabs value={filter} onChange={(_, value) => setFilter(value)} variant="scrollable" scrollButtons="auto" allowScrollButtonsMobile aria-label="Savings goal status" sx={{ mb: 3, minHeight: 42 }}>
+          <Tabs value={filter} onChange={(_, value) => setFilter(value)} variant="scrollable" scrollButtons="auto" allowScrollButtonsMobile aria-label="Savings goal status" sx={{ mb: 3, minHeight: 42, borderBottom: 1, borderColor: 'divider' }}>
             {(['active', 'completed', 'cancelled', 'all'] as const).map(status => <Tab key={status} value={status} label={`${status === 'all' ? 'All goals' : status[0].toUpperCase() + status.slice(1)} (${status === 'all' ? goals.length : goals.filter(goal => goal.status === status).length})`} sx={{ textTransform: 'none', minHeight: 42, px: 2 }} />)}
           </Tabs>
           {visibleGoals.length === 0 ? (
             <Card><CardContent sx={{ py: 5, textAlign: 'center' }}>
-              <Box sx={{ bgcolor: softTokens.mint.main, color: softTokens.mint.ink, width: 64, height: 64, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 4, mx: 'auto', mb: 2 }}><SavingsRoundedIcon fontSize="large" /></Box>
-              <Typography variant="h6">{goals.length === 0 ? 'What would you like to save for?' : `No ${filter} goals`}</Typography>
-              <Typography variant="body2" sx={{ mt: 1, mb: 3, maxWidth: 500, mx: 'auto' }}>{goals.length === 0 ? 'Start with a safety cushion, a property deposit, or something you are looking forward to. A target makes your next contribution easier to plan.' : 'Choose another status to review saved goals, or create your next target.'}</Typography>
+              <Box sx={{ bgcolor: softTokens.cream, color: 'text.secondary', width: 44, height: 44, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '8px', mx: 'auto', mb: 2 }}><SavingsRoundedIcon /></Box>
+              <Typography variant="h6">{goals.length === 0 ? 'Create your first savings goal' : `No ${filter} goals`}</Typography>
+              <Typography variant="body2" sx={{ mt: 1, mb: 3, maxWidth: 500, mx: 'auto' }}>{goals.length === 0 ? 'Add a target and an optional date to calculate your monthly saving plan.' : 'Choose another status to review saved goals, or create your next target.'}</Typography>
               <Button variant="contained" startIcon={<AddRoundedIcon />} onClick={() => setEditor({ goal: null })}>Create a savings goal</Button>
             </CardContent></Card>
           ) : (
-            <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', lg: 'repeat(2, minmax(0, 1fr))' }, gap: 3 }}>
+            <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', lg: 'repeat(2, minmax(0, 1fr))' }, gap: 2 }}>
               {visibleGoals.map(goal => {
                 const plan = savingsGoalPlan(goal, today);
                 return (
@@ -164,10 +159,10 @@ export default function SavingsGoalsWorkspace() {
                         <Box sx={{ minWidth: 0 }}><Typography variant="h6" component="h2" sx={{ overflowWrap: 'anywhere' }}>{goal.name}</Typography><Typography variant="caption">{goal.targetDate ? `Target: ${displayDate(goal.targetDate)}` : 'No target date'}</Typography></Box>
                         <Chip label={goal.status[0].toUpperCase() + goal.status.slice(1)} size="small" color={goal.status === 'completed' ? 'success' : goal.status === 'active' ? 'info' : 'default'} sx={{ flexShrink: 0 }} />
                       </Stack>
-                      <Stack direction="row" justifyContent="space-between" gap={1} sx={{ mb: 1 }}><Typography variant="body2" sx={{ minWidth: 0, overflowWrap: 'anywhere' }}><Box component="span" sx={{ fontWeight: 700 }}>{formatCurrency(goal.currentAmount)}</Box> recorded</Typography><Typography variant="body2" sx={{ flexShrink: 0 }}>{Math.floor(plan.progress)}%</Typography></Stack>
+                      <Stack direction="row" justifyContent="space-between" gap={1} sx={{ mb: 1 }}><Typography variant="body2" sx={{ minWidth: 0, fontVariantNumeric: 'tabular-nums', overflowWrap: 'anywhere' }}><Box component="span" sx={{ fontWeight: 700 }}>{formatCurrency(goal.currentAmount)}</Box> recorded</Typography><Typography variant="body2" sx={{ flexShrink: 0, fontVariantNumeric: 'tabular-nums' }}>{Math.floor(plan.progress)}%</Typography></Stack>
                       <LinearProgress variant="determinate" value={plan.progress} aria-label={`${goal.name} saving progress`} sx={{ bgcolor: alpha(softTokens.mint.deep, 0.2), '& .MuiLinearProgress-bar': { bgcolor: softTokens.mint.ink } }} />
                       <Stack direction="row" justifyContent="space-between" gap={2} sx={{ mt: 1, mb: 3 }}><Typography variant="caption" sx={{ minWidth: 0, overflowWrap: 'anywhere' }}>Target {formatCurrency(goal.targetAmount)}</Typography><Typography variant="caption" sx={{ minWidth: 0, overflowWrap: 'anywhere' }}>{formatCurrency(plan.remaining)} remaining</Typography></Stack>
-                      <Box sx={{ bgcolor: softTokens.cream, borderRadius: 3, p: 2, mb: 2 }}><ContributionSummary plan={plan} /></Box>
+                      <Box sx={{ bgcolor: softTokens.cream, borderRadius: '8px', p: 2, mb: 2 }}><ContributionSummary plan={plan} /></Box>
                       <Button variant="outlined" size="small" startIcon={<EditRoundedIcon />} onClick={() => setEditor({ goal })} aria-label={`Edit ${goal.name}`}>Edit goal &amp; progress</Button>
                     </CardContent>
                   </Card>
@@ -245,7 +240,7 @@ function GoalEditor({ goal, today, onClose, onSaved }: {
             </Stack>
             <TextField label="Target date (optional)" type="date" fullWidth value={form.targetDate} onChange={event => change('targetDate', event.target.value)} disabled={saving} error={Boolean(errors.targetDate)} helperText={errors.targetDate || 'Leave empty if you have not set a deadline.'} slotProps={{ inputLabel: { shrink: true } }} />
             {goal && <TextField select label="Goal status" value={form.status} onChange={event => change('status', event.target.value)} fullWidth disabled={saving} helperText="Completed and cancelled goals stay available in your history."><MenuItem value="active">Active</MenuItem><MenuItem value="completed">Completed</MenuItem><MenuItem value="cancelled">Cancelled</MenuItem></TextField>}
-            {preview && <Box sx={{ bgcolor: softTokens.cream, p: 2, borderRadius: 3 }}><Typography variant="caption" sx={{ display: 'block', mb: 1 }}>Your plan preview</Typography><ContributionSummary plan={preview} compact /></Box>}
+            {preview && <Box sx={{ bgcolor: softTokens.cream, p: 2, borderRadius: '8px' }}><Typography variant="caption" sx={{ display: 'block', mb: 1 }}>Contribution plan preview</Typography><ContributionSummary plan={preview} compact /></Box>}
             <Typography variant="caption">Saving a goal records your target and progress. It does not move money or change your account balance.</Typography>
           </Stack>
         </DialogContent>

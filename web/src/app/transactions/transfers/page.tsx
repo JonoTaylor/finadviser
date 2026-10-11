@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import {
   Box, Typography, Card, CardContent, Stack, Chip, Button,
   CircularProgress, Snackbar, Alert, Divider,
@@ -10,8 +10,8 @@ import CheckRoundedIcon from '@mui/icons-material/CheckRounded';
 import CloseRoundedIcon from '@mui/icons-material/CloseRounded';
 import useSWR from 'swr';
 import { formatCurrency } from '@/lib/utils/formatting';
-
-const fetcher = (url: string) => fetch(url).then(r => r.json());
+import { fetchJson } from '@/lib/http/client';
+import PageHeader from '@/components/ui/PageHeader';
 
 interface Candidate {
   groupId: string;
@@ -20,17 +20,25 @@ interface Candidate {
   journalB: { id: number; date: string; description: string; account: string; amount: string };
 }
 
+async function fetchCandidates(url: string): Promise<{ candidates: Candidate[] }> {
+  const data = await fetchJson<{ candidates: Candidate[] }>(url);
+  if (!Array.isArray(data.candidates)) throw new Error('Transfer candidates could not be read. Please retry.');
+  return data;
+}
+
 function kindLabel(kind: string | null): string {
   if (!kind) return 'Transfer';
   return kind.split('_').map(w => w[0]?.toUpperCase() + w.slice(1)).join(' ');
 }
 
 export default function TransferReviewPage() {
-  const { data, isLoading, mutate } = useSWR<{ candidates: Candidate[]; error?: string }>(
+  const { data, error, isLoading, mutate } = useSWR<{ candidates: Candidate[] }>(
     '/api/journal/transfers/review',
-    fetcher,
+    fetchCandidates,
+    { shouldRetryOnError: false },
   );
   const [busy, setBusy] = useState<string | null>(null);
+  const pendingRef = useRef(false);
   const [snackbar, setSnackbar] = useState<{ open: boolean; message: string; severity: 'success' | 'error' | 'info' }>({
     open: false,
     message: '',
@@ -38,6 +46,8 @@ export default function TransferReviewPage() {
   });
 
   async function act(groupId: string, action: 'confirm' | 'reject') {
+    if (pendingRef.current) return;
+    pendingRef.current = true;
     setBusy(groupId);
     try {
       const res = await fetch('/api/journal/transfers/review', {
@@ -63,6 +73,7 @@ export default function TransferReviewPage() {
         severity: 'error',
       });
     } finally {
+      pendingRef.current = false;
       setBusy(null);
     }
   }
@@ -71,19 +82,16 @@ export default function TransferReviewPage() {
 
   return (
     <Box>
-      <Box sx={{ mb: 4 }}>
-        <Typography variant="h4">Transfer review queue</Typography>
-        <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-          Auto-pair found these candidate transfer pairs but wasn&apos;t confident enough to
-          merge automatically. Confirm to collapse the pair into one balanced journal,
-          or dismiss to leave them as separate transactions.
-        </Typography>
-      </Box>
+      <PageHeader title="Transfer review" description="Review possible transfers between accounts. Confirm a pair to merge it into one balanced journal, or dismiss it to keep both transactions." />
 
       {isLoading ? (
         <Box sx={{ display: 'flex', justifyContent: 'center', py: 8 }}>
           <CircularProgress size={32} />
         </Box>
+      ) : error ? (
+        <Alert severity="warning" action={<Button size="small" onClick={() => void mutate()}>Retry</Button>}>
+          Transfer candidates could not be loaded. Please retry to see your review queue.
+        </Alert>
       ) : candidates.length === 0 ? (
         <Card>
           <CardContent>
@@ -100,7 +108,7 @@ export default function TransferReviewPage() {
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
                   <SwapHorizRoundedIcon color="action" />
                   <Chip label={kindLabel(c.kind)} size="small" variant="outlined" />
-                  <Typography variant="caption" color="text.secondary" sx={{ ml: 'auto' }}>
+                  <Typography variant="caption" color="text.secondary" sx={{ ml: 'auto', overflowWrap: 'anywhere' }}>
                     {c.groupId.slice(0, 8)}
                   </Typography>
                 </Box>
@@ -111,11 +119,11 @@ export default function TransferReviewPage() {
                   <LegRow leg={c.journalB} />
                 </Stack>
 
-                <Box sx={{ display: 'flex', gap: 1, justifyContent: 'flex-end', mt: 2 }}>
+                <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', justifyContent: 'flex-end', mt: 2 }}>
                   <Button
                     size="small"
                     onClick={() => act(c.groupId, 'reject')}
-                    disabled={busy === c.groupId}
+                    disabled={busy !== null}
                     startIcon={<CloseRoundedIcon />}
                   >
                     Dismiss
@@ -124,7 +132,7 @@ export default function TransferReviewPage() {
                     size="small"
                     variant="contained"
                     onClick={() => act(c.groupId, 'confirm')}
-                    disabled={busy === c.groupId}
+                    disabled={busy !== null}
                     startIcon={<CheckRoundedIcon />}
                   >
                     Confirm transfer
@@ -158,11 +166,11 @@ export default function TransferReviewPage() {
 function LegRow({ leg }: { leg: Candidate['journalA'] }) {
   const num = parseFloat(leg.amount);
   return (
-    <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-      <Box sx={{ minWidth: 90, color: 'text.secondary', fontSize: '0.85em' }}>
+    <Box sx={{ display: 'grid', gridTemplateColumns: { xs: 'minmax(0, 1fr) auto', sm: '100px minmax(0, 1fr) auto' }, alignItems: 'center', gap: { xs: 1, sm: 2 } }}>
+      <Box sx={{ gridColumn: { xs: '1 / -1', sm: 'auto' }, color: 'text.secondary', fontSize: '0.8125rem' }}>
         {leg.date}
       </Box>
-      <Box sx={{ flex: 1 }}>
+      <Box sx={{ minWidth: 0, overflowWrap: 'anywhere' }}>
         <Typography variant="body2" sx={{ fontWeight: 500 }}>
           {leg.description}
         </Typography>
@@ -175,7 +183,7 @@ function LegRow({ leg }: { leg: Candidate['journalA'] }) {
           color: num >= 0 ? 'success.main' : 'error.main',
           fontWeight: 600,
           fontFeatureSettings: '"tnum"',
-          minWidth: 90,
+          fontSize: '0.875rem',
           textAlign: 'right',
         }}
       >

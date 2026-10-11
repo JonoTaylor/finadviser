@@ -4,9 +4,9 @@ import { useState } from 'react';
 import useSWR from 'swr';
 import {
   Box, Typography, Card, CardContent, Button, Stack, Table, TableHead,
-  TableRow, TableCell, TableBody, Chip, IconButton, Dialog, DialogTitle,
+  TableRow, TableCell, TableBody, TableContainer, Chip, IconButton, Dialog, DialogTitle,
   DialogContent, DialogActions, TextField, MenuItem, Snackbar, Alert,
-  Skeleton,
+  Grid, Skeleton, Tooltip,
 } from '@mui/material';
 import AddRoundedIcon from '@mui/icons-material/AddRounded';
 import EditRoundedIcon from '@mui/icons-material/EditRounded';
@@ -15,6 +15,8 @@ import { londonTodayIso } from '@/lib/dates/today';
 import { fetchJson } from '@/lib/http/client';
 import Link from 'next/link';
 import Decimal from 'decimal.js';
+import PageHeader from '@/components/ui/PageHeader';
+import MetricCard from '@/components/ui/MetricCard';
 
 interface Investment {
   id: number;
@@ -43,7 +45,7 @@ const fetcher = fetchJson;
 
 export default function InvestmentsPage() {
   const { data: investments, error, mutate, isLoading } = useSWR<Investment[]>('/api/investments', fetcher, { shouldRetryOnError: false });
-  const { data: owners, error: ownersError } = useSWR<OwnerLite[]>('/api/owners', fetcher, { shouldRetryOnError: false });
+  const { data: owners, error: ownersError, isLoading: ownersLoading } = useSWR<OwnerLite[]>('/api/owners', fetcher, { shouldRetryOnError: false });
 
   const [addOpen, setAddOpen] = useState(false);
   const [updateTarget, setUpdateTarget] = useState<Investment | null>(null);
@@ -54,72 +56,59 @@ export default function InvestmentsPage() {
   const list = investments ?? [];
 
   return (
-    <Box>
-      <Box sx={{ mb: 3 }}>
-        <Stack direction="row" justifyContent="space-between" alignItems="flex-start">
-          <Box>
-            <Typography variant="h4">Investments</Typography>
-            <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-              Track your pension, ISA and savings balances in one place. Review the holdings,
-              risk and fees behind each account as well as its value.
-            </Typography>
-          </Box>
-          <Button variant="contained" startIcon={<AddRoundedIcon />} onClick={() => setAddOpen(true)} disabled={Boolean(error || ownersError)}>
+    <Box sx={{ maxWidth: 1440, mx: 'auto' }}>
+      <PageHeader title="Investment accounts" description="Recorded pension, ISA and savings balances across your household."
+        actions={<Button variant="contained" startIcon={<AddRoundedIcon />} onClick={() => setAddOpen(true)} disabled={Boolean(error || ownersError || isLoading || ownersLoading)}>
             Add investment
-          </Button>
-        </Stack>
-      </Box>
+          </Button>} />
 
-      <Stack direction="row" gap={1} flexWrap="wrap" sx={{ mb: 3 }}><Button component={Link} href="/portfolio" variant="contained">Holdings, allocation &amp; fees</Button><Button component={Link} href="/plan" variant="outlined">Review my wealth plan</Button><Button component={Link} href="/pensions" variant="outlined">Model my retirement</Button></Stack>
-      {error && <Alert severity="warning" sx={{ mb: 3 }}>Your investment balances could not be loaded. No zero balances have been substituted.</Alert>}
+      <Stack direction="row" gap={1} flexWrap="wrap" sx={{ mb: 3 }}><Button component={Link} href="/portfolio" variant="outlined">Holdings &amp; fees</Button><Button component={Link} href="/plan" variant="outlined">Financial plan</Button><Button component={Link} href="/pensions" variant="outlined">Retirement planner</Button></Stack>
+      {error && <Alert severity="warning" action={<Button color="inherit" size="small" onClick={() => void mutate()}>Retry</Button>} sx={{ mb: 3 }}>Your investment balances could not be loaded. No zero balances have been substituted.</Alert>}
       {ownersError && <Alert severity="warning" sx={{ mb: 3 }}>Account owners could not be loaded. Reconnect your accounts before adding an investment.</Alert>}
-      {investments && <Card sx={{ mb: 3 }}><CardContent><Stack direction={{ xs: 'column', sm: 'row' }} gap={4}>{[
-        { label: 'Total tracked investments', amount: list.reduce((sum, item) => sum.plus(item.balance), new Decimal(0)) },
+      {investments && <Box sx={{ mb: 3 }}><Grid container spacing={2}>{[
+        { label: 'Total tracked account balances', amount: list.reduce((sum, item) => sum.plus(item.balance), new Decimal(0)), detail: `${list.length} recorded accounts · household` },
         { label: 'Pensions', amount: list.filter(item => item.investmentKind === 'pension').reduce((sum, item) => sum.plus(item.balance), new Decimal(0)) },
         { label: 'Cash savings', amount: list.filter(item => item.investmentKind === 'savings').reduce((sum, item) => sum.plus(item.balance), new Decimal(0)) },
-      ].map(item => <Box key={item.label}><Typography variant="caption">{item.label}</Typography><Typography variant="h5" sx={{ mt: 1 }}>{formatCurrency(item.amount)}</Typography></Box>)}</Stack><Typography variant="caption" sx={{ display: 'block', mt: 2 }}>Whole household · as of {list[0]?.balanceAsOf ?? londonTodayIso()} · recorded balances, not live market prices. Pension balances are not accessible emergency cash.</Typography></CardContent></Card>}
+      ].map(item => <Grid key={item.label} size={{ xs: 12, sm: 4 }}><MetricCard label={item.label} value={formatCurrency(item.amount)} detail={item.detail ?? (item.label === 'Pensions' ? 'Excluded from emergency cash' : 'Confirm access in My context')} /></Grid>)}</Grid><Typography variant="caption" sx={{ display: 'block', mt: 1.5 }}>Whole household · as of {list[0]?.balanceAsOf ?? londonTodayIso()} · recorded balances, not live market prices. Pension balances are not accessible emergency cash.</Typography></Box>}
 
       <Card>
         <CardContent>
+          <Stack direction="row" justifyContent="space-between" alignItems="center" gap={1} sx={{ mb: 2 }}><Typography variant="h6">Tracked accounts</Typography>{investments && <Chip size="small" label={`${list.length} accounts`} />}</Stack>
           {isLoading ? (
             <Skeleton variant="rectangular" height={120} />
           ) : error ? <Typography variant="body2">Reconnect your accounts and retry to see your investments.</Typography> : list.length === 0 ? (
-            <Typography variant="body2" color="text.secondary">
-              No investments tracked yet. Click <strong>Add investment</strong> to track a pension,
-              ISA, or savings pot. The AI assistant can do this for you in chat too — try
-              &ldquo;Add my Vanguard pension at £150,000, owned by me&rdquo;.
-            </Typography>
+            <Box sx={{ py: 3, textAlign: 'center' }}><Typography variant="h6">No investment accounts recorded</Typography><Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>Add a pension, ISA or savings account and enter its recorded balance.</Typography></Box>
           ) : (
-            <Table size="small">
+            <TableContainer tabIndex={0} role="region" aria-label="Investment accounts table" sx={{ maxWidth: '100%' }}><Table size="small" aria-label="Tracked investment account balances" sx={{ minWidth: 650 }}>
               <TableHead>
                 <TableRow>
                   <TableCell>Name</TableCell>
                   <TableCell>Type</TableCell>
                   <TableCell>Owner</TableCell>
                   <TableCell align="right">Balance</TableCell>
-                  <TableCell align="right" />
+                  <TableCell align="right">Actions</TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
                 {list.map(inv => (
                   <TableRow key={inv.id}>
-                    <TableCell>{inv.name}</TableCell>
+                    <TableCell><Typography variant="body2" fontWeight={600}>{inv.name}</Typography><Typography variant="caption">Recorded as of {inv.balanceAsOf}</Typography></TableCell>
                     <TableCell>
                       {inv.investmentKind ? (
                         <Chip size="small" label={KIND_LABEL[inv.investmentKind] ?? inv.investmentKind} variant="outlined" />
-                      ) : '—'}
+                      ) : 'Not recorded'}
                     </TableCell>
-                    <TableCell>{inv.ownerName ?? '—'}</TableCell>
-                    <TableCell align="right">{formatCurrency(inv.balance)}</TableCell>
+                    <TableCell>{inv.ownerName ?? 'Not recorded'}</TableCell>
+                    <TableCell align="right" sx={{ fontWeight: 600, whiteSpace: 'nowrap' }}>{formatCurrency(inv.balance)}</TableCell>
                     <TableCell align="right">
-                      <IconButton size="small" onClick={() => setUpdateTarget(inv)} aria-label={`Update balance of ${inv.name}`}>
+                      <Tooltip title="Update recorded balance"><IconButton size="small" onClick={() => setUpdateTarget(inv)} aria-label={`Update balance of ${inv.name}`}>
                         <EditRoundedIcon fontSize="small" />
-                      </IconButton>
+                      </IconButton></Tooltip>
                     </TableCell>
                   </TableRow>
                 ))}
               </TableBody>
-            </Table>
+            </Table></TableContainer>
           )}
         </CardContent>
       </Card>
@@ -186,17 +175,7 @@ function AddInvestmentDialog({
   const [initialBalance, setInitialBalance] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
-  // owners loads asynchronously via SWR. The first render sees
-  // an empty array; the second (after owners arrives) needs to
-  // fill in the default ownerId so the user isn't forced to pick
-  // every time. "Adjust state during render" idiom rather than
-  // useEffect to avoid an extra render flash.
-  const firstOwnerId = owners[0]?.id;
-  if (ownerId === '' && firstOwnerId !== undefined) {
-    setOwnerId(firstOwnerId);
-  }
-
-  const reset = () => { setName(''); setKind('pension'); setOwnerId(firstOwnerId ?? ''); setInitialBalance(''); };
+  const reset = () => { setName(''); setKind('pension'); setOwnerId(''); setInitialBalance(''); };
 
   const handleSubmit = async () => {
     if (!name.trim() || ownerId === '') return;
@@ -234,8 +213,8 @@ function AddInvestmentDialog({
   };
 
   return (
-    <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
-      <DialogTitle>Add investment</DialogTitle>
+    <Dialog open={open} onClose={() => { if (!submitting) onClose(); }} disableEscapeKeyDown={submitting} maxWidth="sm" fullWidth aria-labelledby="add-investment-title">
+      <DialogTitle id="add-investment-title">Add investment</DialogTitle>
       <DialogContent>
         <Stack spacing={2} sx={{ mt: 1 }}>
           <TextField
@@ -245,14 +224,16 @@ function AddInvestmentDialog({
             onChange={e => setName(e.target.value)}
             required
             fullWidth
+            disabled={submitting}
           />
-          <Stack direction="row" spacing={2}>
+          <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
             <TextField
               select
               label="Type"
               value={kind}
               onChange={e => setKind(e.target.value)}
               fullWidth
+              disabled={submitting}
             >
               {KINDS.map(k => <MenuItem key={k.value} value={k.value}>{k.label}</MenuItem>)}
             </TextField>
@@ -260,10 +241,13 @@ function AddInvestmentDialog({
               select
               label="Owner"
               value={ownerId}
-              onChange={e => setOwnerId(Number(e.target.value))}
+              onChange={e => setOwnerId(e.target.value === '' ? '' : Number(e.target.value))}
               fullWidth
               required
+              disabled={submitting}
+              helperText="Choose the person who owns this account."
             >
+              <MenuItem value="">Choose an owner</MenuItem>
               {owners.map(o => <MenuItem key={o.id} value={o.id}>{o.name}</MenuItem>)}
             </TextField>
           </Stack>
@@ -274,6 +258,7 @@ function AddInvestmentDialog({
             onChange={e => setInitialBalance(e.target.value)}
             helperText="Optional — you can also update it later"
             fullWidth
+            disabled={submitting}
           />
         </Stack>
       </DialogContent>
@@ -337,8 +322,8 @@ function UpdateBalanceDialog({
   };
 
   return (
-    <Dialog open={target !== null} onClose={onClose} maxWidth="xs" fullWidth>
-      <DialogTitle>Update balance — {target?.name}</DialogTitle>
+    <Dialog open={target !== null} onClose={() => { if (!submitting) onClose(); }} disableEscapeKeyDown={submitting} maxWidth="xs" fullWidth aria-labelledby="update-investment-balance-title">
+      <DialogTitle id="update-investment-balance-title">Update balance — {target?.name}</DialogTitle>
       <DialogContent>
         <Stack spacing={2} sx={{ mt: 1 }}>
           <TextField
@@ -348,6 +333,7 @@ function UpdateBalanceDialog({
             onChange={e => setNewBalance(e.target.value)}
             required
             fullWidth
+            disabled={submitting}
             helperText={target ? `Current: ${formatCurrency(target.balance)}` : ''}
           />
           <TextField
@@ -357,6 +343,7 @@ function UpdateBalanceDialog({
             onChange={e => setAsOfDate(e.target.value)}
             slotProps={{ inputLabel: { shrink: true } }}
             fullWidth
+            disabled={submitting}
           />
         </Stack>
       </DialogContent>

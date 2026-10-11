@@ -1,0 +1,146 @@
+{
+  "planId": "example-2025-26-v1",
+  "description": "MADE-UP example showing every item type. Names, figures and sources are fictional. Copy it, change them, keep real plans outside the repository.",
+  "taxYear": "2025-26",
+  "owner": "Alex Example",
+  "accounts": {
+    "ownerBank": null,
+    "mortgageBank": "Example Current Account",
+    "lettingIncome": "Uncategorized Income"
+  },
+  "dedupe": { "windowDays": 5 },
+  "properties": [
+    {
+      "name": "1 Example Road",
+      "tenancies": [
+        {
+          "id": "example-tenancy-1",
+          "include": true,
+          "confidence": "high",
+          "startDate": "2024-09-01",
+          "fields": {
+            "tenantName": { "value": "Pat Tenant", "update": false },
+            "endDate": { "value": "2026-03-01", "update": true },
+            "rentAmount": { "value": "1000.00", "update": false },
+            "rentFrequency": { "value": "monthly", "update": false },
+            "depositAmount": { "value": "1000.00", "update": false },
+            "notes": { "value": "Example tenancy agreement ref 123.", "update": false }
+          },
+          "note": "Source: the (fictional) signed agreement. If a tenancy with this start date already exists only end_date is updated; every other difference is just reported."
+        },
+        {
+          "id": "example-tenancy-2",
+          "include": false,
+          "confidence": "low",
+          "startDate": null,
+          "fields": {
+            "tenantName": { "value": "UNKNOWN", "update": false }
+          },
+          "note": "Placeholder for a follow-on tenancy whose terms are not known yet. Listed in the diff, never applied."
+        }
+      ],
+      "expenses": [
+        {
+          "id": "example-insurance",
+          "include": true,
+          "confidence": "high",
+          "date": "2025-07-02",
+          "amount": "300.00",
+          "description": "Landlord insurance 1 Example Road",
+          "paidFrom": "ownerBank",
+          "category": "Property insurance",
+          "tagExisting": true,
+          "note": "Source: the (fictional) insurer's receipt. tagExisting: if the payment already came in untagged from a bank feed, tag it to the property instead of creating a second entry."
+        },
+        {
+          "id": "example-boiler-service",
+          "include": false,
+          "confidence": "low",
+          "date": "2026-01-15",
+          "amount": null,
+          "description": "Boiler service (amount not known yet)",
+          "paidFrom": "ownerBank",
+          "category": "Repairs & maintenance",
+          "note": "Listed only: set the amount and include to true once the invoice is found."
+        }
+      ],
+      "mortgageInterest": [
+        {
+          "id": "example-mortgage-2025-05",
+          "include": true,
+          "confidence": "medium",
+          "date": "2025-05-31",
+          "amount": "400.00",
+          "lender": "Example Building Society",
+          "paidFrom": "mortgageBank",
+          "note": "Source: fictional lender email quoting GBP 400 a month. Booked to the system 'Mortgage Interest' account. Replace with the lender's annual statement figure when available."
+        }
+      ]
+    },
+    {
+      "name": "2 Sample Street",
+      "lettingType": {
+        "id": "sample-letting-type",
+        "include": true,
+        "confidence": "medium",
+        "value": "rent_a_room",
+        "note": "A room let in the owner's own home. Confirm the owner has not elected out of rent-a-room."
+      },
+      "income": [
+        {
+          "id": "sample-booking-2025-08-10",
+          "include": true,
+          "confidence": "high",
+          "date": "2025-08-10",
+          "amount": "250.00",
+          "description": "Short-let booking gross receipts",
+          "receivedInto": "ownerBank",
+          "incomeAccount": "lettingIncome",
+          "category": "Income",
+          "alternateAmounts": ["240.00"],
+          "note": "Source: fictional booking confirmation. Booked at gross; the platform fee is a separate expense. If the net payout (240.00) is already in the ledger the loader skips this item rather than double-count the cash."
+        }
+      ],
+      "expenses": [
+        {
+          "id": "sample-booking-fee-2025-08-10",
+          "include": true,
+          "confidence": "high",
+          "date": "2025-08-10",
+          "amount": "10.00",
+          "description": "Platform fee for the August booking",
+          "paidFrom": "ownerBank",
+          "category": "Letting agent fees",
+          "note": "Source: same booking confirmation; deducted from the payout."
+        }
+      ]
+    }
+  ],
+  "ownerTaxProfile": {
+    "items": [
+      {
+        "id": "example-employment-income",
+        "include": true,
+        "confidence": "high",
+        "field": "employmentIncome",
+        "value": "30000.00",
+        "note": "Source: fictional payslips. P60 to confirm."
+      },
+      {
+        "id": "example-dividends",
+        "include": false,
+        "confidence": "low",
+        "field": "dividends",
+        "value": "2000.00",
+        "note": "Evidence only: one payment seen; the full-year figure is unknown, so it is not loaded."
+      }
+    ],
+    "notes": {
+      "id": "example-profile-notes",
+      "include": true,
+      "confidence": "medium",
+      "value": "Open question: full-year dividends.",
+      "note": "Kept inside a delimited block so the user's own notes are never overwritten."
+    }
+  }
+}

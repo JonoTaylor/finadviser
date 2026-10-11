@@ -3,14 +3,16 @@ import { buildFinancialPlan } from '@/lib/planning/engine';
 import type { PlanningInput } from '@/lib/planning/types';
 import { projectRetirement, type RetirementInput } from '@/lib/retirement/projection';
 
-const { loadPlanningInput, getGoals, listEntries, categorizeBatch } = vi.hoisted(() => ({
+const { loadPlanningInput, getGoals, listEntries, categorizeBatch, loadFinanceReviewWorkspace } = vi.hoisted(() => ({
   loadPlanningInput: vi.fn(),
   getGoals: vi.fn(),
   listEntries: vi.fn(),
   categorizeBatch: vi.fn(),
+  loadFinanceReviewWorkspace: vi.fn(),
 }));
 
 vi.mock('@/lib/planning/load', () => ({ loadPlanningInput }));
+vi.mock('@/lib/finance-reviews/load', () => ({ loadFinanceReviewWorkspace }));
 vi.mock('@/lib/repos', () => ({
   accountRepo: {}, journalRepo: { listEntries }, categoryRepo: {}, propertyRepo: {}, tipRepo: {}, budgetRepo: {},
   savingsGoalRepo: { getAll: getGoals }, aiMemoryRepo: {}, ownerTaxRepo: {},
@@ -56,6 +58,7 @@ beforeEach(() => {
   loadPlanningInput.mockResolvedValue(loaded());
   getGoals.mockResolvedValue([]);
   listEntries.mockResolvedValue([]);
+  loadFinanceReviewWorkspace.mockRejectedValue(new Error('Review fixtures are unavailable'));
 });
 
 describe('adviser financial plan', () => {

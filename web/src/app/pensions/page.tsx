@@ -1,3 +1,5 @@
+'use client';
+
 import { Box, Button, Chip, Stack, Typography } from '@mui/material';
 import Link from 'next/link';
 import RetirementPlanner from '@/components/planning/RetirementPlanner';

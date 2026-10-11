@@ -1385,3 +1385,45 @@ CREATE TABLE IF NOT EXISTS btl_decision_products (
 
 CREATE INDEX IF NOT EXISTS idx_btl_decision_products_property
     ON btl_decision_products(property_id) WHERE archived_at IS NULL;
+
+
+-- Owner tax computation: how a property is let, and per-owner tax-year
+-- inputs. Every statement is idempotent (IF NOT EXISTS / duplicate_object
+-- guard) because migrate.mjs re-runs this whole file on every deploy.
+--
+-- letting_type: 'standard' lets pool into one UK property business;
+-- 'rent_a_room' is space let in the owner's own home (Rent-a-Room relief).
+-- DEFAULT 'standard' leaves every existing property behaving as before.
+-- TEXT + CHECK rather than an enum so adding a value never needs
+-- ALTER TYPE ... ADD VALUE (which can't run inside this transaction).
+ALTER TABLE properties
+    ADD COLUMN IF NOT EXISTS letting_type TEXT NOT NULL DEFAULT 'standard';
+
+DO $$ BEGIN
+    ALTER TABLE properties
+        ADD CONSTRAINT properties_letting_type_check
+        CHECK (letting_type IN ('standard', 'rent_a_room'));
+EXCEPTION WHEN duplicate_object THEN null;
+END $$;
+
+-- One row per owner per tax year (label like '2025-26'). Holds the figures
+-- the ledger can't supply: PAYE income and tax paid, other income, and the
+-- property losses / S.24 finance costs brought forward from earlier years.
+CREATE TABLE IF NOT EXISTS owner_tax_profiles (
+    id SERIAL PRIMARY KEY,
+    owner_id INTEGER NOT NULL REFERENCES owners(id) ON DELETE CASCADE,
+    tax_year TEXT NOT NULL,
+    employment_income NUMERIC(14,2) NOT NULL DEFAULT 0,
+    paye_tax_paid NUMERIC(14,2) NOT NULL DEFAULT 0,
+    self_employment_income NUMERIC(14,2) NOT NULL DEFAULT 0,
+    savings_interest NUMERIC(14,2) NOT NULL DEFAULT 0,
+    dividends NUMERIC(14,2) NOT NULL DEFAULT 0,
+    other_income NUMERIC(14,2) NOT NULL DEFAULT 0,
+    property_losses_brought_forward NUMERIC(14,2) NOT NULL DEFAULT 0,
+    finance_costs_brought_forward NUMERIC(14,2) NOT NULL DEFAULT 0,
+    notes TEXT,
+    created_at TIMESTAMP NOT NULL DEFAULT now(),
+    updated_at TIMESTAMP NOT NULL DEFAULT now(),
+    CONSTRAINT owner_tax_profiles_owner_year_key UNIQUE (owner_id, tax_year),
+    CONSTRAINT owner_tax_profiles_tax_year_check CHECK (tax_year ~ '^[0-9]{4}-[0-9]{2}$')
+);

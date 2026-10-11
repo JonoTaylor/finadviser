@@ -1,6 +1,6 @@
 import Decimal from 'decimal.js';
 import { format, subMonths } from 'date-fns';
-import { accountRepo, journalRepo, categoryRepo, propertyRepo, tipRepo, budgetRepo, savingsGoalRepo, aiMemoryRepo } from '@/lib/repos';
+import { accountRepo, journalRepo, categoryRepo, propertyRepo, tipRepo, budgetRepo, savingsGoalRepo, aiMemoryRepo, ownerTaxRepo } from '@/lib/repos';
 import { calculateEquity } from '@/lib/properties/equity-calculator';
 import { setInvestmentBalance } from '@/lib/properties/personal-net-worth';
 import { recordMortgagePayments } from '@/lib/properties/mortgage-tracker';
@@ -8,6 +8,7 @@ import { parseMortgagePayments } from '@/lib/properties/mortgage-payment-parser'
 import { formatCurrency } from '@/lib/utils/formatting';
 import { matchRule } from '@/lib/import/categorizer';
 import { londonTodayIso } from '@/lib/dates/today';
+import { currentTaxYear } from '@/lib/tax/ukTaxYear';
 import {
   autoLinkPropertyExpenses,
   tagJournalAsPropertyExpense,
@@ -443,6 +444,20 @@ export const TOOL_DEFINITIONS: Tool[] = [
     },
   },
   {
+    name: 'get_owner_tax_computation',
+    description:
+      'Estimate one owner\'s UK income tax for a tax year with their rental income worked through in full: property profit at their ownership share (actual expenses vs the £1,000 property allowance, whichever is cheaper), rent-a-room relief for properties let in the owner\'s own home (all of an owner\'s rent-a-room lettings share ONE limit; the exempt, alternative or normal method is chosen by the lowest final tax), the Section 24 mortgage-interest tax reducer, tax by band, the Self Assessment balance after PAYE, payments on account, "tax attributable to rental income", and Making Tax Digital status. Uses the owner\'s saved tax profile (salary, PAYE paid, dividends, losses brought forward) for that year. Use for "how much tax will Emily pay on her rental income for 2025-26?". It is an estimate: always say it is not tax advice and should be checked with an accountant, and mention any warnings it returns (for example a missing tax profile or provisional rates). Identify the owner by owner_name (case-insensitive, unambiguous fragment) or owner_id.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        owner_name: { type: 'string', description: 'Owner name or an unambiguous fragment (e.g. "Emily"). Use list_owners if unsure.' },
+        owner_id: { type: 'number', description: 'Owner id. Alternative to owner_name.' },
+        tax_year: { type: 'string', description: 'UK tax year label such as "2025-26" (6 April to 5 April). Defaults to the current tax year.' },
+      },
+      required: [],
+    },
+  },
+  {
     name: 'list_property_expense_categories',
     description:
       'List the seeded "Property expenses" subtree (parent + children like "Repairs & maintenance", "Letting agent fees", etc) with their ids. Use this BEFORE tag_property_expense / tag_property_expenses_bulk so you pick a category that\'s actually a property-expense one — tagging a journal under a non-property category would not show up on the property\'s tax-year report.',
@@ -576,6 +591,7 @@ export const TOOL_LABELS: Record<string, string> = {
   update_investment_balance: 'Updating investment balance',
   tag_account_owner: 'Tagging account owner',
   list_owners: 'Listing owners',
+  get_owner_tax_computation: 'Computing owner tax',
   list_property_expense_categories: 'Loading property-expense categories',
   tag_property_expense: 'Tagging property expense',
   tag_property_expenses_bulk: 'Tagging property expenses',
@@ -683,6 +699,8 @@ export async function executeTool(
       return executeTagAccountOwner(input);
     case 'list_owners':
       return executeListOwners();
+    case 'get_owner_tax_computation':
+      return executeGetOwnerTaxComputation(input);
     case 'list_property_expense_categories':
       return executeListPropertyExpenseCategories();
     case 'tag_property_expense':
@@ -1581,6 +1599,120 @@ async function executeListInvestments() {
 async function executeListOwners() {
   const owners = await propertyRepo.listOwners();
   return owners.map(o => ({ id: o.id, name: o.name }));
+}
+
+async function executeGetOwnerTaxComputation(input: Record<string, unknown>) {
+  const ownerIdInput = input.owner_id;
+  const ownerNameInput = input.owner_name;
+  const taxYearInput = input.tax_year;
+
+  const owners = await propertyRepo.listOwners();
+  let owner: typeof owners[number] | undefined;
+  if (typeof ownerIdInput === 'number') {
+    owner = owners.find(o => o.id === ownerIdInput);
+    if (!owner) {
+      return { error: `Owner ${ownerIdInput} not found. Available: ${owners.map(o => `${o.name} (id ${o.id})`).join(', ') || '(none)'}` };
+    }
+  } else if (typeof ownerNameInput === 'string' && ownerNameInput.trim()) {
+    // Exact (case-insensitive) match wins; otherwise a fragment must hit
+    // exactly one owner. Picking the wrong owner would report someone
+    // else's tax, so refuse to guess.
+    const needle = ownerNameInput.trim().toLowerCase();
+    const exact = owners.filter(o => o.name.toLowerCase() === needle);
+    const matches = exact.length > 0 ? exact : owners.filter(o => o.name.toLowerCase().includes(needle));
+    if (matches.length === 0) {
+      return { error: `No owner matched "${ownerNameInput}". Available: ${owners.map(o => o.name).join(', ') || '(none)'}` };
+    }
+    if (matches.length > 1) {
+      return { error: `Owner "${ownerNameInput}" is ambiguous - matched ${matches.length}: ${matches.map(o => o.name).join(', ')}. Use a more specific name or owner_id.` };
+    }
+    owner = matches[0];
+  } else {
+    return { error: 'Pass owner_name or owner_id.' };
+  }
+
+  const year = typeof taxYearInput === 'string' && taxYearInput.trim()
+    ? taxYearInput.trim()
+    : currentTaxYear().label;
+
+  try {
+    const c = await ownerTaxRepo.getTaxComputation({ ownerId: owner.id, year });
+    const sa = c.selfAssessment;
+    return {
+      owner: c.owner,
+      taxYear: c.taxYear,
+      estimate: c.disclaimer,
+      warnings: c.warnings,
+      ratesAssumed: c.rates.assumed,
+      ratesProvisional: c.rates.provisional,
+      taxProfileSaved: c.profileSaved,
+      properties: c.properties.map(p => ({
+        name: p.propertyName,
+        lettingType: p.lettingType,
+        sharePct: p.allocationPct,
+        grossIncome: formatCurrency(p.grossIncome),
+        expenses: formatCurrency(p.totalExpenses),
+        mortgageInterest: formatCurrency(p.mortgageInterest),
+      })),
+      propertyIncome: {
+        methodUsed: c.property.method === 'allowance' ? 'property allowance' : 'actual expenses',
+        why: c.property.methodReason,
+        taxableProfit: formatCurrency(c.property.taxableProfit),
+        lossesCarriedForward: formatCurrency(c.property.lossesCarriedForward),
+        // All rent-a-room lettings are pooled under ONE limit; null when there are none.
+        rentARoom: c.property.rentARoomPool
+          ? {
+              treatment: c.property.rentARoomPool.treatment,
+              why: c.property.rentARoomPool.reason,
+              pooledReceipts: formatCurrency(c.property.rentARoomPool.receipts),
+              limit: formatCurrency(c.property.rentARoomPool.limit),
+              shared: c.property.rentARoomPool.shared,
+              effectOnPropertyBusiness: formatCurrency(c.property.rentARoomPool.taxable),
+              lettings: c.property.rentARoom.map(r => ({
+                property: r.name,
+                receipts: formatCurrency(r.receipts),
+                expenses: formatCurrency(r.expenses),
+                mortgageInterest: formatCurrency(r.financeCosts),
+              })),
+            }
+          : null,
+        optionsCompared: c.property.methods
+          .filter(m => m.available)
+          .map(m => ({
+            option: m.label,
+            used: m.chosen,
+            incomeTax: formatCurrency(m.liability ?? '0'),
+          })),
+      },
+      financeCostRelief: {
+        reducer: formatCurrency(c.financeCosts.reducer),
+        ratePct: c.financeCosts.reliefRatePct,
+        limitedBy: c.financeCosts.limitedBy,
+        carriedForward: formatCurrency(c.financeCosts.carriedForward),
+      },
+      incomeTax: {
+        totalIncome: formatCurrency(c.income.total),
+        personalAllowance: formatCurrency(c.incomeTax.personalAllowance.effective),
+        taxBeforeReductions: formatCurrency(c.incomeTax.taxBeforeReductions),
+        liability: formatCurrency(c.incomeTax.liability),
+      },
+      taxOnRentalIncome: formatCurrency(c.taxOnRentalIncome.amount),
+      selfAssessment: {
+        payeAlreadyPaid: formatCurrency(sa.payeTaxPaid),
+        balanceDue: formatCurrency(sa.balanceDue),
+        isRefund: sa.isRefund,
+        deadline: sa.deadline,
+        paymentsOnAccountRequired: sa.paymentsOnAccount.required,
+        paymentsOnAccountReason: sa.paymentsOnAccount.reason,
+        paymentsOnAccount: sa.paymentsOnAccount.instalments.map(i => ({ dueDate: i.dueDate, amount: formatCurrency(i.amount) })),
+        dueOnDeadline: formatCurrency(sa.paymentsOnAccount.dueOnDeadline),
+      },
+      makingTaxDigital: c.mtd.summary,
+      breakdown: c.breakdown.map(l => `[${l.section}] ${l.text}`),
+    };
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : 'Failed to compute owner tax' };
+  }
 }
 
 async function executeAddInvestmentAccount(input: Record<string, unknown>) {

@@ -46,3 +46,7 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 .env*.local
+
+# data-plan loader: real plans hold personal financial data and must never be
+# committed (scripts/data-plan.example.json is the made-up template)
+*.plan.json

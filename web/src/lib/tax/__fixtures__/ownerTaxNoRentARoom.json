@@ -1,0 +1,868 @@
+{
+  "emilyLike": {
+    "taxYear": "2025-26",
+    "rates": {
+      "taxYear": "2025-26",
+      "assumed": false,
+      "provisional": false,
+      "provisionalNotes": [],
+      "sources": [
+        "https://www.gov.uk/income-tax-rates",
+        "https://www.gov.uk/income-tax-rates/previous-tax-years",
+        "https://www.gov.uk/government/publications/rates-and-allowances-income-tax/income-tax-rates-and-allowances-current-and-past",
+        "https://www.gov.uk/apply-tax-free-interest-on-savings/how-much-is-tax-free",
+        "https://www.gov.uk/guidance/tax-free-allowances-on-property-and-trading-income",
+        "https://www.gov.uk/rent-room-in-your-home/the-rent-a-room-scheme",
+        "https://www.gov.uk/guidance/changes-to-tax-relief-for-residential-landlords-how-its-worked-out-including-case-studies",
+        "https://www.gov.uk/tax-on-dividends",
+        "https://www.gov.uk/government/publications/budget-2025-overview-of-tax-legislation-and-rates-ootlar/annex-a-rates-and-allowances",
+        "https://www.gov.uk/government/publications/rent-a-room-for-traders-hs223-self-assessment-helpsheet/hs223-rent-a-room-scheme-2026"
+      ]
+    },
+    "income": {
+      "nonSavings": "12570.00",
+      "propertyProfit": "8200.00",
+      "savings": "0.00",
+      "dividends": "0.00",
+      "total": "20770.00"
+    },
+    "property": {
+      "method": "expenses",
+      "methodReason": "Actual expenses used: income tax £1,160.00 against £1,800.00 with the property allowance, which would also give up the S.24 finance-cost reducer.",
+      "methods": [
+        {
+          "method": "expenses",
+          "label": "Actual expenses",
+          "available": true,
+          "propertyProfit": "8200.00",
+          "financeCostReducer": "480.00",
+          "liability": "1160.00",
+          "note": "Expenses deducted; finance costs earn the S.24 reducer."
+        },
+        {
+          "method": "allowance",
+          "label": "Property allowance",
+          "available": true,
+          "propertyProfit": "9000.00",
+          "financeCostReducer": "0.00",
+          "liability": "1800.00",
+          "note": "Allowance replaces expenses; no S.24 reducer and no finance-cost carry-forward."
+        }
+      ],
+      "standardGrossIncome": "10000.00",
+      "standardExpenses": "1800.00",
+      "profitByExpenses": "8200.00",
+      "profitByAllowance": "9000.00",
+      "allowanceRelief": "partial",
+      "rentARoom": [],
+      "currentYearResult": "8200.00",
+      "lossesBroughtForward": "0.00",
+      "lossesUsed": "0.00",
+      "taxableProfit": "8200.00",
+      "lossesCarriedForward": "0.00",
+      "hasLosses": false
+    },
+    "financeCosts": {
+      "claimedThisYear": "2400.00",
+      "broughtForward": "0.00",
+      "available": "2400.00",
+      "relieved": "2400.00",
+      "limitedBy": "finance_costs",
+      "reliefRatePct": "20",
+      "reducer": "480.00",
+      "carriedForward": "0.00",
+      "hasFinanceCosts": true,
+      "hasCarriedForward": false
+    },
+    "incomeTax": {
+      "personalAllowance": {
+        "standard": "12570.00",
+        "taperReduction": "0.00",
+        "effective": "12570.00",
+        "tapered": false
+      },
+      "rows": [
+        {
+          "layer": "property",
+          "layerLabel": "Property profit",
+          "kind": "basic",
+          "kindLabel": "basic rate",
+          "income": "8200.00",
+          "ratePct": "20",
+          "tax": "1640.00"
+        }
+      ],
+      "taxBeforeReductions": "1640.00",
+      "financeCostReducer": "480.00",
+      "liability": "1160.00"
+    },
+    "taxOnRentalIncome": {
+      "amount": "1160.00",
+      "liabilityWithProperty": "1160.00",
+      "liabilityWithoutProperty": "0.00"
+    },
+    "selfAssessment": {
+      "payeTaxPaid": "0.00",
+      "balanceDue": "1160.00",
+      "amountDue": "1160.00",
+      "refundDue": "0.00",
+      "isRefund": false,
+      "deadline": "2027-01-31",
+      "paymentsOnAccount": {
+        "required": true,
+        "reason": "Balance £1,160.00 is at least £1,000.00 and only 0% of the tax was collected at source (limit 80%).",
+        "collectedAtSourcePct": "0.00",
+        "instalments": [
+          {
+            "dueDate": "2027-01-31",
+            "amount": "580.00"
+          },
+          {
+            "dueDate": "2027-07-31",
+            "amount": "580.00"
+          }
+        ],
+        "dueOnDeadline": "1740.00"
+      }
+    },
+    "mtd": {
+      "taxYear": "2025-26",
+      "qualifyingIncome": "10000.00",
+      "propertyReceipts": "10000.00",
+      "selfEmploymentReceipts": "0.00",
+      "threshold": "30000.00",
+      "mandatoryFrom": "2027-04-06",
+      "headroom": "20000.00",
+      "scope": "below_threshold",
+      "thresholdAssumed": false,
+      "summary": "Qualifying income of £10,000.00 is within the £30,000.00 threshold for 2025-26 income (£20,000.00 to spare), so MTD ITSA is not triggered by this year (the 2027-04-06 phase)."
+    },
+    "warnings": [],
+    "disclaimer": "Estimate only, not tax advice. Check the figures with your accountant before filing or paying.",
+    "breakdown": [
+      {
+        "section": "Inputs",
+        "text": "Tax year 2025-26 (6 April 2025 to 5 April 2026), 2025-26 rates for England, Wales and Northern Ireland.",
+        "amount": null
+      },
+      {
+        "section": "Inputs",
+        "text": "Employment income £12,570.00, self-employment £0.00, other income £0.00.",
+        "amount": "12570.00"
+      },
+      {
+        "section": "Inputs",
+        "text": "Savings interest £0.00, dividends £0.00.",
+        "amount": null
+      },
+      {
+        "section": "Inputs",
+        "text": "Tax already paid through PAYE £0.00.",
+        "amount": "0.00"
+      },
+      {
+        "section": "Inputs",
+        "text": "249 Francis Road (standard letting), your share: receipts £10,000.00, expenses £1,800.00, mortgage interest £2,400.00.",
+        "amount": null
+      },
+      {
+        "section": "Property income",
+        "text": "Standard lettings (249 Francis Road) on actual expenses: receipts £10,000.00 less expenses £1,800.00 = profit of £8,200.00.",
+        "amount": "8200.00"
+      },
+      {
+        "section": "Property income",
+        "text": "Taxable UK property profit £8,200.00.",
+        "amount": "8200.00"
+      },
+      {
+        "section": "Property income",
+        "text": "Finance costs £2,400.00 go into the S.24 reducer (they are not deducted from profit).",
+        "amount": "2400.00"
+      },
+      {
+        "section": "Property method",
+        "text": "Actual expenses used: income tax £1,160.00 against £1,800.00 with the property allowance, which would also give up the S.24 finance-cost reducer.",
+        "amount": null
+      },
+      {
+        "section": "Property method",
+        "text": "Actual expenses: property profit £8,200.00, S.24 reducer £480.00, income tax £1,160.00.",
+        "amount": "1160.00"
+      },
+      {
+        "section": "Property method",
+        "text": "Property allowance: property profit £9,000.00, S.24 reducer £0.00, income tax £1,800.00.",
+        "amount": "1800.00"
+      },
+      {
+        "section": "Income tax",
+        "text": "Total income £20,770.00: employment & other £12,570.00, property profit £8,200.00, savings £0.00, dividends £0.00.",
+        "amount": "20770.00"
+      },
+      {
+        "section": "Income tax",
+        "text": "Personal allowance £12,570.00 (no taper, income is not over £100,000.00).",
+        "amount": "12570.00"
+      },
+      {
+        "section": "Income tax",
+        "text": "Personal allowance used £12,570.00; taxable income after allowance £8,200.00.",
+        "amount": "8200.00"
+      },
+      {
+        "section": "Income tax",
+        "text": "Property profit: £8,200.00 basic rate at 20% = £1,640.00.",
+        "amount": "1640.00"
+      },
+      {
+        "section": "Income tax",
+        "text": "Income tax before reductions £1,640.00.",
+        "amount": "1640.00"
+      },
+      {
+        "section": "Income tax",
+        "text": "S.24 finance-cost reducer: finance costs £2,400.00 (£2,400.00 this year + £0.00 brought forward), property profit £8,200.00, adjusted total income above allowance £8,200.00; finance costs are the lowest figure, so all of them are relieved. £2,400.00 x 20% = £480.00 off the tax bill.",
+        "amount": "480.00"
+      },
+      {
+        "section": "Income tax",
+        "text": "Income tax liability for the year £1,160.00.",
+        "amount": "1160.00"
+      },
+      {
+        "section": "Tax on rental income",
+        "text": "Income tax with rental income £1,160.00 less income tax without it £0.00 = £1,160.00 attributable to rental income.",
+        "amount": "1160.00"
+      },
+      {
+        "section": "Self Assessment",
+        "text": "Income tax £1,160.00 less PAYE already paid £0.00 = balance of £1,160.00 through Self Assessment, due by 2027-01-31.",
+        "amount": "1160.00"
+      },
+      {
+        "section": "Self Assessment",
+        "text": "Payments on account: Balance £1,160.00 is at least £1,000.00 and only 0% of the tax was collected at source (limit 80%).",
+        "amount": null
+      },
+      {
+        "section": "Self Assessment",
+        "text": "Payment on account 1 of 2 (towards 2026-27), due 2027-01-31: £580.00.",
+        "amount": "580.00"
+      },
+      {
+        "section": "Self Assessment",
+        "text": "Payment on account 2 of 2 (towards 2026-27), due 2027-07-31: £580.00.",
+        "amount": "580.00"
+      },
+      {
+        "section": "Self Assessment",
+        "text": "Due on 2027-01-31: balance £1,160.00 plus first payment on account £580.00 = £1,740.00.",
+        "amount": "1740.00"
+      },
+      {
+        "section": "MTD ITSA",
+        "text": "Qualifying income of £10,000.00 is within the £30,000.00 threshold for 2025-26 income (£20,000.00 to spare), so MTD ITSA is not triggered by this year (the 2027-04-06 phase).",
+        "amount": "10000.00"
+      }
+    ]
+  },
+  "allowanceChosen": {
+    "taxYear": "2025-26",
+    "rates": {
+      "taxYear": "2025-26",
+      "assumed": false,
+      "provisional": false,
+      "provisionalNotes": [],
+      "sources": [
+        "https://www.gov.uk/income-tax-rates",
+        "https://www.gov.uk/income-tax-rates/previous-tax-years",
+        "https://www.gov.uk/government/publications/rates-and-allowances-income-tax/income-tax-rates-and-allowances-current-and-past",
+        "https://www.gov.uk/apply-tax-free-interest-on-savings/how-much-is-tax-free",
+        "https://www.gov.uk/guidance/tax-free-allowances-on-property-and-trading-income",
+        "https://www.gov.uk/rent-room-in-your-home/the-rent-a-room-scheme",
+        "https://www.gov.uk/guidance/changes-to-tax-relief-for-residential-landlords-how-its-worked-out-including-case-studies",
+        "https://www.gov.uk/tax-on-dividends",
+        "https://www.gov.uk/government/publications/budget-2025-overview-of-tax-legislation-and-rates-ootlar/annex-a-rates-and-allowances",
+        "https://www.gov.uk/government/publications/rent-a-room-for-traders-hs223-self-assessment-helpsheet/hs223-rent-a-room-scheme-2026"
+      ]
+    },
+    "income": {
+      "nonSavings": "45000.00",
+      "propertyProfit": "2900.00",
+      "savings": "800.00",
+      "dividends": "1500.00",
+      "total": "50200.00"
+    },
+    "property": {
+      "method": "allowance",
+      "methodReason": "Property allowance used: income tax £7,153.50 against £7,443.50 with actual expenses.",
+      "methods": [
+        {
+          "method": "expenses",
+          "label": "Actual expenses",
+          "available": true,
+          "propertyProfit": "3450.00",
+          "financeCostReducer": "0.00",
+          "liability": "7443.50",
+          "note": "Expenses deducted; finance costs earn the S.24 reducer."
+        },
+        {
+          "method": "allowance",
+          "label": "Property allowance",
+          "available": true,
+          "propertyProfit": "2900.00",
+          "financeCostReducer": "0.00",
+          "liability": "7153.50",
+          "note": "Allowance replaces expenses; no S.24 reducer and no finance-cost carry-forward."
+        }
+      ],
+      "standardGrossIncome": "3900.00",
+      "standardExpenses": "450.00",
+      "profitByExpenses": "3450.00",
+      "profitByAllowance": "2900.00",
+      "allowanceRelief": "partial",
+      "rentARoom": [],
+      "currentYearResult": "2900.00",
+      "lossesBroughtForward": "0.00",
+      "lossesUsed": "0.00",
+      "taxableProfit": "2900.00",
+      "lossesCarriedForward": "0.00",
+      "hasLosses": false
+    },
+    "financeCosts": {
+      "claimedThisYear": "0.00",
+      "broughtForward": "0.00",
+      "available": "0.00",
+      "relieved": "0.00",
+      "limitedBy": "none",
+      "reliefRatePct": "20",
+      "reducer": "0.00",
+      "carriedForward": "0.00",
+      "hasFinanceCosts": false,
+      "hasCarriedForward": false
+    },
+    "incomeTax": {
+      "personalAllowance": {
+        "standard": "12570.00",
+        "taperReduction": "0.00",
+        "effective": "12570.00",
+        "tapered": false
+      },
+      "rows": [
+        {
+          "layer": "non_savings",
+          "layerLabel": "Employment & other income",
+          "kind": "basic",
+          "kindLabel": "basic rate",
+          "income": "32430.00",
+          "ratePct": "20",
+          "tax": "6486.00"
+        },
+        {
+          "layer": "property",
+          "layerLabel": "Property profit",
+          "kind": "basic",
+          "kindLabel": "basic rate",
+          "income": "2900.00",
+          "ratePct": "20",
+          "tax": "580.00"
+        },
+        {
+          "layer": "savings",
+          "layerLabel": "Savings interest",
+          "kind": "personal_savings_allowance",
+          "kindLabel": "personal savings allowance",
+          "income": "800.00",
+          "ratePct": "0",
+          "tax": "0.00"
+        },
+        {
+          "layer": "dividends",
+          "layerLabel": "Dividends",
+          "kind": "dividend_allowance",
+          "kindLabel": "dividend allowance",
+          "income": "500.00",
+          "ratePct": "0",
+          "tax": "0.00"
+        },
+        {
+          "layer": "dividends",
+          "layerLabel": "Dividends",
+          "kind": "basic",
+          "kindLabel": "basic rate",
+          "income": "1000.00",
+          "ratePct": "8.75",
+          "tax": "87.50"
+        }
+      ],
+      "taxBeforeReductions": "7153.50",
+      "financeCostReducer": "0.00",
+      "liability": "7153.50"
+    },
+    "taxOnRentalIncome": {
+      "amount": "580.00",
+      "liabilityWithProperty": "7153.50",
+      "liabilityWithoutProperty": "6573.50"
+    },
+    "selfAssessment": {
+      "payeTaxPaid": "6486.00",
+      "balanceDue": "667.50",
+      "amountDue": "667.50",
+      "refundDue": "0.00",
+      "isRefund": false,
+      "deadline": "2027-01-31",
+      "paymentsOnAccount": {
+        "required": false,
+        "reason": "Not required: the balance £667.50 is under £1,000.00.",
+        "collectedAtSourcePct": "90.67",
+        "instalments": [],
+        "dueOnDeadline": "667.50"
+      }
+    },
+    "mtd": {
+      "taxYear": "2025-26",
+      "qualifyingIncome": "3900.00",
+      "propertyReceipts": "3900.00",
+      "selfEmploymentReceipts": "0.00",
+      "threshold": "30000.00",
+      "mandatoryFrom": "2027-04-06",
+      "headroom": "26100.00",
+      "scope": "below_threshold",
+      "thresholdAssumed": false,
+      "summary": "Qualifying income of £3,900.00 is within the £30,000.00 threshold for 2025-26 income (£26,100.00 to spare), so MTD ITSA is not triggered by this year (the 2027-04-06 phase)."
+    },
+    "warnings": [],
+    "disclaimer": "Estimate only, not tax advice. Check the figures with your accountant before filing or paying.",
+    "breakdown": [
+      {
+        "section": "Inputs",
+        "text": "Tax year 2025-26 (6 April 2025 to 5 April 2026), 2025-26 rates for England, Wales and Northern Ireland.",
+        "amount": null
+      },
+      {
+        "section": "Inputs",
+        "text": "Employment income £45,000.00, self-employment £0.00, other income £0.00.",
+        "amount": "45000.00"
+      },
+      {
+        "section": "Inputs",
+        "text": "Savings interest £800.00, dividends £1,500.00.",
+        "amount": null
+      },
+      {
+        "section": "Inputs",
+        "text": "Tax already paid through PAYE £6,486.00.",
+        "amount": "6486.00"
+      },
+      {
+        "section": "Inputs",
+        "text": "Flat A (standard letting), your share: receipts £3,000.00, expenses £400.00, mortgage interest £0.00.",
+        "amount": null
+      },
+      {
+        "section": "Inputs",
+        "text": "Flat B (standard letting), your share: receipts £900.00, expenses £50.00, mortgage interest £0.00.",
+        "amount": null
+      },
+      {
+        "section": "Property income",
+        "text": "Standard lettings (Flat A, Flat B) with the property allowance: receipts £3,900.00 less the £1,000.00 allowance (partial relief) = profit of £2,900.00. No expenses or finance-cost relief are claimed.",
+        "amount": "2900.00"
+      },
+      {
+        "section": "Property income",
+        "text": "Taxable UK property profit £2,900.00.",
+        "amount": "2900.00"
+      },
+      {
+        "section": "Property method",
+        "text": "Property allowance used: income tax £7,153.50 against £7,443.50 with actual expenses.",
+        "amount": null
+      },
+      {
+        "section": "Property method",
+        "text": "Actual expenses: property profit £3,450.00, S.24 reducer £0.00, income tax £7,443.50.",
+        "amount": "7443.50"
+      },
+      {
+        "section": "Property method",
+        "text": "Property allowance: property profit £2,900.00, S.24 reducer £0.00, income tax £7,153.50.",
+        "amount": "7153.50"
+      },
+      {
+        "section": "Income tax",
+        "text": "Total income £50,200.00: employment & other £45,000.00, property profit £2,900.00, savings £800.00, dividends £1,500.00.",
+        "amount": "50200.00"
+      },
+      {
+        "section": "Income tax",
+        "text": "Personal allowance £12,570.00 (no taper, income is not over £100,000.00).",
+        "amount": "12570.00"
+      },
+      {
+        "section": "Income tax",
+        "text": "Personal allowance used £12,570.00; taxable income after allowance £37,630.00.",
+        "amount": "37630.00"
+      },
+      {
+        "section": "Income tax",
+        "text": "Employment & other income: £32,430.00 basic rate at 20% = £6,486.00.",
+        "amount": "6486.00"
+      },
+      {
+        "section": "Income tax",
+        "text": "Property profit: £2,900.00 basic rate at 20% = £580.00.",
+        "amount": "580.00"
+      },
+      {
+        "section": "Income tax",
+        "text": "Savings interest: £800.00 covered by personal savings allowance, 0% = £0.00.",
+        "amount": "0.00"
+      },
+      {
+        "section": "Income tax",
+        "text": "Dividends: £500.00 covered by dividend allowance, 0% = £0.00.",
+        "amount": "0.00"
+      },
+      {
+        "section": "Income tax",
+        "text": "Dividends: £1,000.00 basic rate at 8.75% = £87.50.",
+        "amount": "87.50"
+      },
+      {
+        "section": "Income tax",
+        "text": "Income tax before reductions £7,153.50.",
+        "amount": "7153.50"
+      },
+      {
+        "section": "Income tax",
+        "text": "Income tax liability for the year £7,153.50.",
+        "amount": "7153.50"
+      },
+      {
+        "section": "Tax on rental income",
+        "text": "Income tax with rental income £7,153.50 less income tax without it £6,573.50 = £580.00 attributable to rental income.",
+        "amount": "580.00"
+      },
+      {
+        "section": "Self Assessment",
+        "text": "Income tax £7,153.50 less PAYE already paid £6,486.00 = balance of £667.50 through Self Assessment, due by 2027-01-31.",
+        "amount": "667.50"
+      },
+      {
+        "section": "Self Assessment",
+        "text": "Payments on account: Not required: the balance £667.50 is under £1,000.00.",
+        "amount": null
+      },
+      {
+        "section": "MTD ITSA",
+        "text": "Qualifying income of £3,900.00 is within the £30,000.00 threshold for 2025-26 income (£26,100.00 to spare), so MTD ITSA is not triggered by this year (the 2027-04-06 phase).",
+        "amount": "3900.00"
+      }
+    ]
+  },
+  "carryForwards": {
+    "taxYear": "2027-28",
+    "rates": {
+      "taxYear": "2027-28",
+      "assumed": false,
+      "provisional": true,
+      "provisionalNotes": [
+        "Property income rates of 22/42/47% and finance-cost relief at 22% are from the Autumn Budget 2025 (Finance Act 2026 ss. 5-7 per GOV.UK extracts; not independently opened).",
+        "Main 20/40/45% rates, allowances and the unchanged personal allowance / basic-rate limit are carried forward from the announced freeze to April 2031."
+      ],
+      "sources": [
+        "https://www.gov.uk/income-tax-rates",
+        "https://www.gov.uk/income-tax-rates/previous-tax-years",
+        "https://www.gov.uk/government/publications/rates-and-allowances-income-tax/income-tax-rates-and-allowances-current-and-past",
+        "https://www.gov.uk/apply-tax-free-interest-on-savings/how-much-is-tax-free",
+        "https://www.gov.uk/guidance/tax-free-allowances-on-property-and-trading-income",
+        "https://www.gov.uk/rent-room-in-your-home/the-rent-a-room-scheme",
+        "https://www.gov.uk/guidance/changes-to-tax-relief-for-residential-landlords-how-its-worked-out-including-case-studies",
+        "https://www.gov.uk/government/publications/changes-to-tax-rates-for-property-savings-and-dividend-income/change-to-tax-rates-for-property-savings-and-dividend-income-technical-note",
+        "https://www.gov.uk/government/publications/budget-2025-overview-of-tax-legislation-and-rates-ootlar/budget-2025-overview-of-tax-legislation-and-rates-ootlar",
+        "https://www.gov.uk/government/publications/maintaining-income-tax-and-equivalent-national-insurance-contributions-thresholds-until-5-april-2031",
+        "https://www.legislation.gov.uk/ukpga/2026/11/section/7"
+      ]
+    },
+    "income": {
+      "nonSavings": "30000.00",
+      "propertyProfit": "3300.00",
+      "savings": "0.00",
+      "dividends": "0.00",
+      "total": "33300.00"
+    },
+    "property": {
+      "method": "expenses",
+      "methodReason": "Actual expenses used. Finance costs brought forward are being relieved this year, which rules out the partial-relief property allowance.",
+      "methods": [
+        {
+          "method": "expenses",
+          "label": "Actual expenses",
+          "available": true,
+          "propertyProfit": "3300.00",
+          "financeCostReducer": "726.00",
+          "liability": "3486.00",
+          "note": "Expenses deducted; finance costs earn the S.24 reducer."
+        },
+        {
+          "method": "allowance",
+          "label": "Property allowance",
+          "available": false,
+          "propertyProfit": null,
+          "financeCostReducer": null,
+          "liability": null,
+          "note": "Finance costs brought forward are being relieved this year, which rules out the partial-relief property allowance."
+        }
+      ],
+      "standardGrossIncome": "11000.00",
+      "standardExpenses": "6500.00",
+      "profitByExpenses": "4500.00",
+      "profitByAllowance": "10000.00",
+      "allowanceRelief": "partial",
+      "rentARoom": [],
+      "currentYearResult": "4500.00",
+      "lossesBroughtForward": "1200.00",
+      "lossesUsed": "1200.00",
+      "taxableProfit": "3300.00",
+      "lossesCarriedForward": "0.00",
+      "hasLosses": true
+    },
+    "financeCosts": {
+      "claimedThisYear": "3500.00",
+      "broughtForward": "700.00",
+      "available": "4200.00",
+      "relieved": "3300.00",
+      "limitedBy": "property_profits",
+      "reliefRatePct": "22",
+      "reducer": "726.00",
+      "carriedForward": "900.00",
+      "hasFinanceCosts": true,
+      "hasCarriedForward": true
+    },
+    "incomeTax": {
+      "personalAllowance": {
+        "standard": "12570.00",
+        "taperReduction": "0.00",
+        "effective": "12570.00",
+        "tapered": false
+      },
+      "rows": [
+        {
+          "layer": "non_savings",
+          "layerLabel": "Employment & other income",
+          "kind": "basic",
+          "kindLabel": "basic rate",
+          "income": "17430.00",
+          "ratePct": "20",
+          "tax": "3486.00"
+        },
+        {
+          "layer": "property",
+          "layerLabel": "Property profit",
+          "kind": "basic",
+          "kindLabel": "basic rate",
+          "income": "3300.00",
+          "ratePct": "22",
+          "tax": "726.00"
+        }
+      ],
+      "taxBeforeReductions": "4212.00",
+      "financeCostReducer": "726.00",
+      "liability": "3486.00"
+    },
+    "taxOnRentalIncome": {
+      "amount": "0.00",
+      "liabilityWithProperty": "3486.00",
+      "liabilityWithoutProperty": "3486.00"
+    },
+    "selfAssessment": {
+      "payeTaxPaid": "0.00",
+      "balanceDue": "3486.00",
+      "amountDue": "3486.00",
+      "refundDue": "0.00",
+      "isRefund": false,
+      "deadline": "2029-01-31",
+      "paymentsOnAccount": {
+        "required": true,
+        "reason": "Balance £3,486.00 is at least £1,000.00 and only 0% of the tax was collected at source (limit 80%).",
+        "collectedAtSourcePct": "0.00",
+        "instalments": [
+          {
+            "dueDate": "2029-01-31",
+            "amount": "1743.00"
+          },
+          {
+            "dueDate": "2029-07-31",
+            "amount": "1743.00"
+          }
+        ],
+        "dueOnDeadline": "5229.00"
+      }
+    },
+    "mtd": {
+      "taxYear": "2027-28",
+      "qualifyingIncome": "11000.00",
+      "propertyReceipts": "11000.00",
+      "selfEmploymentReceipts": "0.00",
+      "threshold": "20000.00",
+      "mandatoryFrom": "2028-04-06",
+      "headroom": "9000.00",
+      "scope": "below_threshold",
+      "thresholdAssumed": true,
+      "summary": "No MTD ITSA phase has been announced for 2027-28 income. For reference, qualifying income of £11,000.00 is within the lowest announced threshold of £20,000.00."
+    },
+    "warnings": [
+      "2027-28 rates are provisional: Property income rates of 22/42/47% and finance-cost relief at 22% are from the Autumn Budget 2025 (Finance Act 2026 ss. 5-7 per GOV.UK extracts; not independently opened). Main 20/40/45% rates, allowances and the unchanged personal allowance / basic-rate limit are carried forward from the announced freeze to April 2031."
+    ],
+    "disclaimer": "Estimate only, not tax advice. Check the figures with your accountant before filing or paying.",
+    "breakdown": [
+      {
+        "section": "Inputs",
+        "text": "Tax year 2027-28 (6 April 2027 to 5 April 2028), 2027-28 rates for England, Wales and Northern Ireland, provisional.",
+        "amount": null
+      },
+      {
+        "section": "Inputs",
+        "text": "Employment income £30,000.00, self-employment £0.00, other income £0.00.",
+        "amount": "30000.00"
+      },
+      {
+        "section": "Inputs",
+        "text": "Savings interest £0.00, dividends £0.00.",
+        "amount": null
+      },
+      {
+        "section": "Inputs",
+        "text": "Tax already paid through PAYE £0.00.",
+        "amount": "0.00"
+      },
+      {
+        "section": "Inputs",
+        "text": "Flat A (standard letting), your share: receipts £9,000.00, expenses £4,000.00, mortgage interest £3,000.00.",
+        "amount": null
+      },
+      {
+        "section": "Inputs",
+        "text": "Flat B (standard letting), your share: receipts £2,000.00, expenses £2,500.00, mortgage interest £500.00.",
+        "amount": null
+      },
+      {
+        "section": "Property income",
+        "text": "Standard lettings (Flat A, Flat B) on actual expenses: receipts £11,000.00 less expenses £6,500.00 = profit of £4,500.00.",
+        "amount": "4500.00"
+      },
+      {
+        "section": "Property income",
+        "text": "Losses brought forward £1,200.00: £1,200.00 set against this year's profit of £4,500.00, leaving £0.00 to carry forward.",
+        "amount": "1200.00"
+      },
+      {
+        "section": "Property income",
+        "text": "Taxable UK property profit £3,300.00.",
+        "amount": "3300.00"
+      },
+      {
+        "section": "Property income",
+        "text": "Finance costs £3,500.00 go into the S.24 reducer (they are not deducted from profit).",
+        "amount": "3500.00"
+      },
+      {
+        "section": "Property method",
+        "text": "Actual expenses used. Finance costs brought forward are being relieved this year, which rules out the partial-relief property allowance.",
+        "amount": null
+      },
+      {
+        "section": "Property method",
+        "text": "Actual expenses: property profit £3,300.00, S.24 reducer £726.00, income tax £3,486.00.",
+        "amount": "3486.00"
+      },
+      {
+        "section": "Property method",
+        "text": "Property allowance: not available. Finance costs brought forward are being relieved this year, which rules out the partial-relief property allowance.",
+        "amount": null
+      },
+      {
+        "section": "Income tax",
+        "text": "Total income £33,300.00: employment & other £30,000.00, property profit £3,300.00, savings £0.00, dividends £0.00.",
+        "amount": "33300.00"
+      },
+      {
+        "section": "Income tax",
+        "text": "Personal allowance £12,570.00 (no taper, income is not over £100,000.00).",
+        "amount": "12570.00"
+      },
+      {
+        "section": "Income tax",
+        "text": "Personal allowance used £12,570.00; taxable income after allowance £20,730.00.",
+        "amount": "20730.00"
+      },
+      {
+        "section": "Income tax",
+        "text": "Employment & other income: £17,430.00 basic rate at 20% = £3,486.00.",
+        "amount": "3486.00"
+      },
+      {
+        "section": "Income tax",
+        "text": "Property profit: £3,300.00 basic rate at 22% = £726.00.",
+        "amount": "726.00"
+      },
+      {
+        "section": "Income tax",
+        "text": "Income tax before reductions £4,212.00.",
+        "amount": "4212.00"
+      },
+      {
+        "section": "Income tax",
+        "text": "S.24 finance-cost reducer: finance costs £4,200.00 (£3,500.00 this year + £700.00 brought forward), property profit £3,300.00, adjusted total income above allowance £20,730.00; property profit is the lowest figure, so relief is capped there. £3,300.00 x 22% = £726.00 off the tax bill.",
+        "amount": "726.00"
+      },
+      {
+        "section": "Income tax",
+        "text": "Finance costs carried forward to next year: £900.00.",
+        "amount": "900.00"
+      },
+      {
+        "section": "Income tax",
+        "text": "Income tax liability for the year £3,486.00.",
+        "amount": "3486.00"
+      },
+      {
+        "section": "Tax on rental income",
+        "text": "Income tax with rental income £3,486.00 less income tax without it £3,486.00 = £0.00 attributable to rental income.",
+        "amount": "0.00"
+      },
+      {
+        "section": "Self Assessment",
+        "text": "Income tax £3,486.00 less PAYE already paid £0.00 = balance of £3,486.00 through Self Assessment, due by 2029-01-31.",
+        "amount": "3486.00"
+      },
+      {
+        "section": "Self Assessment",
+        "text": "Payments on account: Balance £3,486.00 is at least £1,000.00 and only 0% of the tax was collected at source (limit 80%).",
+        "amount": null
+      },
+      {
+        "section": "Self Assessment",
+        "text": "Payment on account 1 of 2 (towards 2028-29), due 2029-01-31: £1,743.00.",
+        "amount": "1743.00"
+      },
+      {
+        "section": "Self Assessment",
+        "text": "Payment on account 2 of 2 (towards 2028-29), due 2029-07-31: £1,743.00.",
+        "amount": "1743.00"
+      },
+      {
+        "section": "Self Assessment",
+        "text": "Due on 2029-01-31: balance £3,486.00 plus first payment on account £1,743.00 = £5,229.00.",
+        "amount": "5229.00"
+      },
+      {
+        "section": "MTD ITSA",
+        "text": "No MTD ITSA phase has been announced for 2027-28 income. For reference, qualifying income of £11,000.00 is within the lowest announced threshold of £20,000.00.",
+        "amount": "11000.00"
+      }
+    ]
+  }
+}

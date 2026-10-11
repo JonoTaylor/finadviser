@@ -12,7 +12,9 @@
     "lint": "eslint",
     "test": "vitest run",
     "test:watch": "vitest",
-    "db:migrate": "node scripts/migrate.mjs"
+    "db:migrate": "node scripts/migrate.mjs",
+    "data-plan:check": "tsx scripts/apply-data-plan.ts",
+    "data-plan:apply": "tsx scripts/apply-data-plan.ts --apply"
   },
   "dependencies": {
     "@ai-sdk/gateway": "^2.0.0",
@@ -42,6 +44,7 @@
   "devDependencies": {
     "@types/node": "^20",
     "@types/papaparse": "^5.5.2",
+    "@types/pg": "8.23.1",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "@types/ws": "^8.5.13",
@@ -49,6 +52,9 @@
     "drizzle-kit": "^0.31.8",
     "eslint": "^9",
     "eslint-config-next": "16.1.6",
+    "https-proxy-agent": "7.0.6",
+    "pg": "8.23.0",
+    "tsx": "4.23.15",
     "typescript": "^5",
     "vite-tsconfig-paths": "^6.1.1",
     "vitest": "^4.1.5"

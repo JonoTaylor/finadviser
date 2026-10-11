@@ -13,6 +13,16 @@
  * - Annual steps by 12 months.
  * - A period's full rent is included if its due date falls within both the
  *   tenancy active range and the requested range.
+ * - A due date that equals the tenancy's end_date is NOT generated. end_date
+ *   is the handover day, not the start of a new rent period: a tenancy
+ *   ending on a rent day has its last full period end the day before.
+ *   Consecutive tenancies are naturally recorded as old.end = new.start, and
+ *   without this rule that day would be charged twice (the old tenancy's
+ *   one-day stub period plus the new tenancy's first period).
+ *   Exception: a tenancy whose start_date equals its end_date is a one-day
+ *   tenancy and keeps its single due.
+ * - A due before end_date is still included in full when its period would run
+ *   past end_date; only the period end is capped at end_date.
  */
 
 import Decimal from 'decimal.js';
@@ -95,7 +105,10 @@ function periodEndFor(due: Date, frequency: RentFrequency, anchorDay: number): D
  * tenancy's start_date; subsequent occurrences step by frequency.
  *
  * A period is included only when its due date falls inside the requested
- * range AND inside the tenancy's active range.
+ * range AND inside the tenancy's active range. The active range for dues is
+ * start_date up to, but not including, end_date (see the header comment),
+ * except for a one-day tenancy (start_date = end_date), which keeps its
+ * single due.
  */
 export function expandTenancy(
   tenancy: TenancyForSchedule,
@@ -110,6 +123,9 @@ export function expandTenancy(
   const rangeEndDate = parseIso(rangeEnd);
   const rangeStartDate = parseIso(rangeStart);
   const anchorDay = start.getUTCDate();
+  // end_date is the handover day: a due landing on it is not a new period,
+  // unless the whole tenancy is that one day.
+  const isOneDay = end !== null && end.getTime() === start.getTime();
 
   const out: ScheduleLine[] = [];
   let due = new Date(start.getTime());
@@ -118,6 +134,7 @@ export function expandTenancy(
   for (let i = 0; i < 5000; i += 1) {
     if (due > rangeEndDate) break;
     if (end && due > end) break;
+    if (end && !isOneDay && due.getTime() === end.getTime()) break;
 
     if (due >= rangeStartDate) {
       const periodEndDate = periodEndFor(due, tenancy.rentFrequency, anchorDay);

@@ -186,12 +186,19 @@ export const transactionFingerprints = pgTable('transaction_fingerprints', {
   unique('fingerprints_fp_account_key').on(table.fingerprint, table.accountId),
 ]);
 
+// How HMRC treats the income from a property: 'standard' lets pool into one
+// UK property business; 'rent_a_room' is space let in the owner's own home
+// and qualifies for Rent-a-Room relief. TEXT + CHECK (see migration.sql)
+// rather than a Postgres enum so a new value never needs ALTER TYPE.
+export type LettingType = 'standard' | 'rent_a_room';
+
 export const properties = pgTable('properties', {
   id: serial('id').primaryKey(),
   name: text('name').notNull().unique(),
   address: text('address'),
   purchaseDate: text('purchase_date'),
   purchasePrice: numeric('purchase_price', { precision: 14, scale: 2 }),
+  lettingType: text('letting_type').notNull().default('standard').$type<LettingType>(),
   createdAt: timestamp('created_at').notNull().defaultNow(),
 });
 
@@ -471,3 +478,26 @@ export const btlDecisionProducts = pgTable('btl_decision_products', {
   createdAt: timestamp('created_at').notNull().defaultNow(),
   archivedAt: timestamp('archived_at'),
 });
+
+// Per-owner, per-tax-year inputs the rental-income tax computation can't
+// derive from the ledger: PAYE income, other income, and carried-forward
+// property losses / S.24 finance costs. One row per (owner, tax year).
+// tax_year is the label ('2025-26'); money is NUMERIC(14,2).
+export const ownerTaxProfiles = pgTable('owner_tax_profiles', {
+  id: serial('id').primaryKey(),
+  ownerId: integer('owner_id').notNull().references(() => owners.id, { onDelete: 'cascade' }),
+  taxYear: text('tax_year').notNull(),
+  employmentIncome: numeric('employment_income', { precision: 14, scale: 2 }).notNull().default('0'),
+  payeTaxPaid: numeric('paye_tax_paid', { precision: 14, scale: 2 }).notNull().default('0'),
+  selfEmploymentIncome: numeric('self_employment_income', { precision: 14, scale: 2 }).notNull().default('0'),
+  savingsInterest: numeric('savings_interest', { precision: 14, scale: 2 }).notNull().default('0'),
+  dividends: numeric('dividends', { precision: 14, scale: 2 }).notNull().default('0'),
+  otherIncome: numeric('other_income', { precision: 14, scale: 2 }).notNull().default('0'),
+  propertyLossesBroughtForward: numeric('property_losses_brought_forward', { precision: 14, scale: 2 }).notNull().default('0'),
+  financeCostsBroughtForward: numeric('finance_costs_brought_forward', { precision: 14, scale: 2 }).notNull().default('0'),
+  notes: text('notes'),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+}, (table) => [
+  unique('owner_tax_profiles_owner_year_key').on(table.ownerId, table.taxYear),
+]);

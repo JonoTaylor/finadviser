@@ -12,6 +12,13 @@ export { appSettingsRepo } from './app-settings.repo';
 export { rentalReportRepo } from './rental-report.repo';
 export { tenancyRepo } from './tenancy.repo';
 export { ownerReportRepo } from './owner-report.repo';
+export { ownerTaxRepo } from './owner-tax.repo';
+export type {
+  OwnerTaxProfile,
+  OwnerTaxProfileInput,
+  OwnerTaxComputationResult,
+  OwnerTaxComputationProperty,
+} from './owner-tax.repo';
 export { aiMemoryRepo } from './ai-memory.repo';
 export type { AiMemory, AiMemorySource } from './ai-memory.repo';
 // Re-export the client-safe constant so existing call-sites don't have

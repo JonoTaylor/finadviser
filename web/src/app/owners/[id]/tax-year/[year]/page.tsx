@@ -24,6 +24,7 @@ import Link from 'next/link';
 import useSWR from 'swr';
 import { formatCurrency } from '@/lib/utils/formatting';
 import MtdQuarterlyCard from '@/components/owners/MtdQuarterlyCard';
+import TaxComputationCard from '@/components/owners/TaxComputationCard';
 
 interface Totals {
   grossIncome: string;
@@ -116,6 +117,8 @@ export default function OwnerTaxYearReportPage({
           </Typography>
         </CardContent>
       </Card>
+
+      <TaxComputationCard ownerId={id} year={report.taxYear.label} />
 
       <MtdQuarterlyCard ownerId={id} year={report.taxYear.label} />
 

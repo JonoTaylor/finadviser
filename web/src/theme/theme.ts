@@ -63,8 +63,8 @@ const theme = createTheme({
     MuiPaper: { styleOverrides: { root: { backgroundImage: 'none' }, outlined: { borderColor: designTokens.border } } },
     MuiCard: { styleOverrides: { root: { backgroundImage: 'none', backgroundColor: designTokens.surface, borderRadius: 12, border: '1px solid ' + designTokens.border, boxShadow: softTokens.shadowPillow } } },
     MuiCardContent: { styleOverrides: { root: { padding: 20, '&:last-child': { paddingBottom: 20 }, '@media (max-width:600px)': { padding: 16, '&:last-child': { paddingBottom: 16 } } } } },
-    MuiButton: { defaultProps: { disableElevation: true }, styleOverrides: {
-      root: { textTransform: 'none', borderRadius: 7, fontWeight: 600, minHeight: 38, padding: '8px 14px', lineHeight: 1.4, whiteSpace: 'nowrap' },
+    MuiButton: { defaultProps: { disableElevation: true, disableRipple: true }, styleOverrides: {
+      root: { textTransform: 'none', borderRadius: 7, fontWeight: 600, minHeight: 38, padding: '8px 14px', lineHeight: 1.4, whiteSpace: 'nowrap', '&.Mui-focusVisible': { outline: '2px solid #0F766E', outlineOffset: 2 } },
       sizeSmall: { minHeight: 32, padding: '5px 10px', fontSize: '0.75rem' }, sizeLarge: { minHeight: 44, padding: '10px 18px' },
       outlined: { borderColor: '#CBD5E1', color: '#334155', '&:hover': { borderColor: '#94A3B8', backgroundColor: '#F8FAFC' } },
       text: { '&:hover': { backgroundColor: alpha(designTokens.accent, 0.05) } },

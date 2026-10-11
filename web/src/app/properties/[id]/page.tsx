@@ -21,6 +21,7 @@ import ReceiptLongIcon from '@mui/icons-material/ReceiptLong';
 import InsightsOutlinedIcon from '@mui/icons-material/InsightsOutlined';
 import { currentTaxYear } from '@/lib/tax/ukTaxYear';
 import PageHeader from '@/components/ui/PageHeader';
+import { fetchJson } from '@/lib/http/client';
 
 const fetcher = async (url: string) => {
   const response = await fetch(url);
@@ -41,25 +42,21 @@ export default function PropertyDetailPage({ params }: { params: Promise<{ id: s
   if (!property) return <Typography>Property not found</Typography>;
 
   const handleAddValuation = async (data: { valuation: string; valuationDate: string; source: string }) => {
-    await fetch(`/api/properties/${id}/valuations`, {
+    await fetchJson(`/api/properties/${id}/valuations`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data),
     });
-    setValuationOpen(false);
-    mutate();
-    mutateEquity();
+    void Promise.allSettled([mutate(), mutateEquity()]);
   };
 
   const handleRecordPayment = async (data: Record<string, unknown>) => {
-    await fetch(`/api/properties/${id}/mortgages/payment`, {
+    await fetchJson(`/api/properties/${id}/mortgages/payment`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data),
     });
-    setPaymentOpen(false);
-    mutate();
-    mutateEquity();
+    void Promise.allSettled([mutate(), mutateEquity()]);
   };
 
   return (

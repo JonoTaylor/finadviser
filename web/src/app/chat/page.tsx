@@ -62,7 +62,7 @@ const markdownSx = {
   '& ul, & ol': { pl: 2.5, mb: 1.5, '& li': { mb: 0.5, lineHeight: 1.6 } },
   '& hr': { border: 'none', borderTop: '1px solid', borderColor: 'divider', my: 2 },
   '& table': {
-    width: '100%', borderCollapse: 'collapse', mb: 1.5, fontSize: '0.875rem',
+    width: '100%', minWidth: 480, borderCollapse: 'collapse', mb: 1.5, fontSize: '0.875rem', overflowWrap: 'normal',
     '& th': { textAlign: 'left', fontWeight: 600, p: '8px 12px', borderBottom: '2px solid', borderColor: 'divider' },
     '& td': { p: '6px 12px', borderBottom: '1px solid', borderColor: 'divider' },
     '& tr:last-child td': { borderBottom: 'none' },

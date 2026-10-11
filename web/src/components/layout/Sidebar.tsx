@@ -26,6 +26,7 @@ import ExploreRoundedIcon from '@mui/icons-material/ExploreRounded';
 import FlagRoundedIcon from '@mui/icons-material/FlagRounded';
 import SavingsRoundedIcon from '@mui/icons-material/SavingsRounded';
 import PersonOutlineRoundedIcon from '@mui/icons-material/PersonOutlineRounded';
+import CreditCardRoundedIcon from '@mui/icons-material/CreditCardRounded';
 import useMediaQuery from '@mui/material/useMediaQuery';
 import { useTheme } from '@mui/material/styles';
 import { softTokens, serifFamily } from '@/theme/theme';
@@ -39,6 +40,7 @@ const navItems = [
   { label: 'My context', href: '/profile',        icon: <PersonOutlineRoundedIcon /> },
   { label: 'Spending',     href: '/spending',      icon: <ShowChartRoundedIcon /> },
   { label: 'Savings goals', href: '/goals',        icon: <FlagRoundedIcon /> },
+  { label: 'Debt planner', href: '/debts',         icon: <CreditCardRoundedIcon /> },
   { label: 'Transactions', href: '/transactions',  icon: <ReceiptLongRoundedIcon /> },
   { label: 'Import',       href: '/import',        icon: <FileUploadRoundedIcon /> },
   { label: 'Properties',   href: '/properties',    icon: <HomeWorkRoundedIcon /> },

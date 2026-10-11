@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { Dialog, DialogTitle, DialogContent, DialogActions, Button, TextField, Stack } from '@mui/material';
+import { Alert, Dialog, DialogTitle, DialogContent, DialogActions, Button, TextField, Stack } from '@mui/material';
 
 export default function AddPropertyDialog({
   open,
@@ -10,30 +10,41 @@ export default function AddPropertyDialog({
 }: {
   open: boolean;
   onClose: () => void;
-  onSave: (data: { name: string; address: string; purchaseDate: string; purchasePrice: string }) => void;
+  onSave: (data: { name: string; address: string; purchaseDate: string; purchasePrice: string }) => Promise<void>;
 }) {
   const [form, setForm] = useState({ name: '', address: '', purchaseDate: '', purchasePrice: '' });
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const handleSave = () => {
-    if (!form.name) return;
-    onSave(form);
-    setForm({ name: '', address: '', purchaseDate: '', purchasePrice: '' });
+  const handleSave = async () => {
+    if (!form.name.trim() || saving) return;
+    setSaving(true);
+    setError(null);
+    try {
+      await onSave({ ...form, name: form.name.trim() });
+      setForm({ name: '', address: '', purchaseDate: '', purchasePrice: '' });
+    } catch (error) {
+      setError(error instanceof Error ? error.message : 'The property could not be saved. Please try again.');
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
-    <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
+    <Dialog open={open} onClose={() => { if (!saving) onClose(); }} maxWidth="sm" fullWidth>
       <DialogTitle>Add Property</DialogTitle>
       <DialogContent>
         <Stack spacing={2} sx={{ mt: 1 }}>
-          <TextField label="Name" required value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} />
-          <TextField label="Address" value={form.address} onChange={e => setForm({ ...form, address: e.target.value })} />
-          <TextField label="Purchase Date" type="date" slotProps={{ inputLabel: { shrink: true } }} value={form.purchaseDate} onChange={e => setForm({ ...form, purchaseDate: e.target.value })} />
-          <TextField label="Purchase Price" type="number" value={form.purchasePrice} onChange={e => setForm({ ...form, purchasePrice: e.target.value })} />
+          {error && <Alert severity="error">{error}</Alert>}
+          <TextField label="Name" required disabled={saving} value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} />
+          <TextField label="Address" disabled={saving} value={form.address} onChange={e => setForm({ ...form, address: e.target.value })} />
+          <TextField label="Purchase Date" type="date" disabled={saving} slotProps={{ inputLabel: { shrink: true } }} value={form.purchaseDate} onChange={e => setForm({ ...form, purchaseDate: e.target.value })} />
+          <TextField label="Purchase Price" type="number" disabled={saving} value={form.purchasePrice} onChange={e => setForm({ ...form, purchasePrice: e.target.value })} />
         </Stack>
       </DialogContent>
       <DialogActions>
-        <Button onClick={onClose}>Cancel</Button>
-        <Button variant="contained" onClick={handleSave} disabled={!form.name}>Add</Button>
+        <Button onClick={onClose} disabled={saving}>Cancel</Button>
+        <Button variant="contained" onClick={() => void handleSave()} disabled={!form.name.trim() || saving}>{saving ? 'Saving…' : 'Add'}</Button>
       </DialogActions>
     </Dialog>
   );

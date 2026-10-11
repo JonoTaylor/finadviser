@@ -104,6 +104,25 @@ describe('real-ledger planning adapter', () => {
     expect(result.source.cashAccessibility).toBe('inferred');
   });
 
+  it('uses saved cash confirmations and never makes a pension accessible', async () => {
+    get.mockImplementation(async key => key === 'finance.context.v1' ? JSON.stringify({
+      version: 1, revision: 1, updatedAt: '2026-10-11T12:00:00.000Z', data: {
+        ownerId: 2, accountAccessibility: [
+          { accountId: 1, accessibility: 'available' }, { accountId: 2, accessibility: 'restricted' },
+          { accountId: 3, accessibility: 'available' },
+        ],
+      },
+    }) : null);
+    rows([
+      account({ id: 1, name: 'Cash reserve' }),
+      account({ id: 2, name: 'Savings', is_investment: true, investment_kind: 'savings' }),
+      account({ id: 3, name: 'Pension', is_investment: true, investment_kind: 'pension' }),
+    ]);
+    const result = await loadPlanningInput();
+    expect(result.input.accounts.map(account => [account.id, account.isLiquidCash])).toEqual([[1, true], [2, false], [3, false]]);
+    expect(result.source).toMatchObject({ cashAccessibility: 'confirmed', selectedOwnerId: 2, personalContextSaved: true });
+  });
+
   it('requests only income/expense legs and explicit mortgage principal; transfers and equity adjustments cannot become income', async () => {
     rows();
     await loadPlanningInput(new Date('2026-10-11T00:00:00Z'));

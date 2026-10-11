@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import Link from 'next/link';
 import useSWR from 'swr';
 import {
   Card,
@@ -12,6 +13,7 @@ import {
   ToggleButtonGroup,
   Skeleton,
   Tooltip,
+  Button,
 } from '@mui/material';
 import AccountBalanceWalletRoundedIcon from '@mui/icons-material/AccountBalanceWalletRounded';
 import CreditCardRoundedIcon from '@mui/icons-material/CreditCardRounded';
@@ -43,6 +45,7 @@ interface YourShare {
 interface Response {
   owners: OwnerLite[];
   yourShare: YourShare | null;
+  requiresOwnerSelection?: boolean;
 }
 
 const fetcher = async (url: string): Promise<Response> => {
@@ -90,8 +93,9 @@ export default function YourShareCard() {
             <Typography variant="subtitle2">Your share</Typography>
           </Box>
           <Typography variant="body2" color="text.secondary">
-            {error ? 'Personal net worth is unavailable. Reconnect your accounts and try again.' : 'Add an owner to see a personal net-worth view.'}
+            {error ? 'Personal net worth is unavailable. Reconnect your accounts and try again.' : 'Choose your ledger owner in My context to see your personal net worth.'}
           </Typography>
+          {!error && <Button component={Link} href="/profile" sx={{ mt: 2 }} variant="outlined">Choose my owner</Button>}
         </CardContent>
       </Card>
     );

@@ -1,15 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { calculatePersonalNetWorth } from '@/lib/properties/personal-net-worth';
 import { propertyRepo } from '@/lib/repos';
+import { loadFinancialContext } from '@/lib/finance-context';
+import { workspaceErrorResponse } from '@/lib/finance-workspace/api';
 
 /**
  * GET /api/dashboard/your-share?ownerId=N
  *
  * Returns the owner-scoped net-worth view used by the dashboard's
- * "Your share" card. If ownerId is omitted, defaults to the first
- * owner alphabetically (so the page has something to render before
- * the user picks). The card surfaces the list of owners so the user
- * can switch.
+ * "Your share" card. If ownerId is omitted, use the explicitly saved
+ * personal owner. No alphabetical household member becomes the user.
  */
 export async function GET(request: NextRequest) {
   try {
@@ -19,17 +19,24 @@ export async function GET(request: NextRequest) {
     }
 
     const param = request.nextUrl.searchParams.get('ownerId');
-    let ownerId = owners[0].id;
+    let ownerId: number | null = null;
     if (param !== null) {
-      const parsed = parseInt(param, 10);
-      if (Number.isNaN(parsed)) {
+      const parsed = Number(param);
+      if (!/^\d+$/.test(param) || !Number.isSafeInteger(parsed) || parsed <= 0) {
         return NextResponse.json({ error: 'Invalid ownerId' }, { status: 400 });
       }
       if (!owners.some(o => o.id === parsed)) {
         return NextResponse.json({ error: 'Owner not found' }, { status: 404 });
       }
       ownerId = parsed;
+    } else {
+      ownerId = (await loadFinancialContext()).data.ownerId;
+      if (ownerId !== null && !owners.some(owner => owner.id === ownerId)) {
+        return NextResponse.json({ error: 'Your saved owner is unavailable. Review My context before using a personal total.' }, { status: 422 });
+      }
     }
+
+    if (ownerId === null) return NextResponse.json({ owners: owners.map(owner => ({ id: owner.id, name: owner.name })), yourShare: null, requiresOwnerSelection: true }, { headers: { 'Cache-Control': 'no-store' } });
 
     const yourShare = await calculatePersonalNetWorth(ownerId);
     return NextResponse.json({
@@ -37,7 +44,6 @@ export async function GET(request: NextRequest) {
       yourShare,
     });
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Failed to load your share';
-    return NextResponse.json({ error: message }, { status: 500 });
+    return workspaceErrorResponse(error);
   }
 }

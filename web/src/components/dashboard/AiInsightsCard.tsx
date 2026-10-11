@@ -1,7 +1,7 @@
 'use client';
 
 import {
-  Card, CardContent, Typography, Box, IconButton, Stack, Chip,
+  Alert, Card, CardContent, Typography, Box, IconButton, Stack, Chip,
 } from '@mui/material';
 import { alpha } from '@mui/material/styles';
 import CloseRoundedIcon from '@mui/icons-material/CloseRounded';
@@ -10,8 +10,10 @@ import WarningAmberRoundedIcon from '@mui/icons-material/WarningAmberRounded';
 import InsightsRoundedIcon from '@mui/icons-material/InsightsRounded';
 import useSWR from 'swr';
 import { softTokens } from '@/theme/theme';
+import { useState } from 'react';
+import { fetchJson } from '@/lib/http/client';
 
-const fetcher = (url: string) => fetch(url).then(r => r.json());
+const fetcher = fetchJson;
 
 interface Tip {
   id: number;
@@ -34,10 +36,14 @@ const TYPE_CONFIG: Record<string, TypeStyle> = {
 
 export default function AiInsightsCard() {
   const { data: tips, mutate } = useSWR<Tip[]>('/api/tips', fetcher);
+  const [dismissError, setDismissError] = useState(false);
 
   const handleDismiss = async (id: number) => {
-    await fetch(`/api/tips?id=${id}`, { method: 'PATCH' });
-    mutate();
+    setDismissError(false);
+    try {
+      await fetchJson(`/api/tips?id=${id}`, { method: 'PATCH' });
+      await mutate();
+    } catch { setDismissError(true); }
   };
 
   if (!tips || tips.length === 0) return null;
@@ -45,6 +51,7 @@ export default function AiInsightsCard() {
   return (
     <Card>
       <CardContent>
+        {dismissError && <Alert severity="error" sx={{ mb: 2 }}>This insight could not be dismissed. Please try again.</Alert>}
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1.5 }}>
           <Box
             sx={{

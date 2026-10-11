@@ -6,8 +6,8 @@ import CalendarMonthRoundedIcon from '@mui/icons-material/CalendarMonthRounded';
 import TrendingUpRoundedIcon from '@mui/icons-material/TrendingUpRounded';
 import TrendingDownRoundedIcon from '@mui/icons-material/TrendingDownRounded';
 import { formatCurrency } from '@/lib/utils/formatting';
-import { format, subMonths } from 'date-fns';
-import Decimal from 'decimal.js';
+import { londonTodayIso } from '@/lib/dates/today';
+import { monthlyCashFlow, previousMonth } from '@/lib/dashboard/monthly-cash-flow';
 import { softTokens, serifFamily } from '@/theme/theme';
 
 interface SpendingRow {
@@ -34,9 +34,8 @@ interface Balance {
  * view now includes INCOME rows alongside EXPENSE; we derive both
  * figures from it.
  *
- * Income posts to INCOME accounts as credits (negative book-entry sums)
- * and expenses post to EXPENSE accounts as debits (positive). We display
- * both as positive magnitudes — sign is implied by the bucket.
+ * Income credits change sign for display. Expense refunds and income
+ * reversals retain their effect on the month's net totals.
  */
 export default function MonthlySummaryCard({
   spending,
@@ -52,13 +51,9 @@ export default function MonthlySummaryCard({
 
   // Pin "now" at mount so the month boundary can't shift between SSR
   // and hydration.
-  const [now] = useState(() => new Date());
-  const currentMonth = format(now, 'yyyy-MM');
-  const prevMonth = format(subMonths(now, 1), 'yyyy-MM');
-
-  const monthExpenses = sumByMonthAndType(spending, currentMonth, 'EXPENSE');
-  const prevMonthExpenses = sumByMonthAndType(spending, prevMonth, 'EXPENSE');
-  const monthIncome = sumByMonthAndType(spending, currentMonth, 'INCOME');
+  const [currentMonth] = useState(() => londonTodayIso().slice(0, 7));
+  const { expenses: monthExpenses, income: monthIncome } = monthlyCashFlow(spending, currentMonth);
+  const { expenses: prevMonthExpenses } = monthlyCashFlow(spending, previousMonth(currentMonth));
 
   const net = monthIncome.minus(monthExpenses);
   const netIsPositive = net.gte(0);
@@ -120,16 +115,6 @@ export default function MonthlySummaryCard({
       </CardContent>
     </Card>
   );
-}
-
-function sumByMonthAndType(
-  spending: SpendingRow[],
-  month: string,
-  accountType: 'INCOME' | 'EXPENSE',
-): Decimal {
-  return spending
-    .filter(s => s.month === month && s.account_type === accountType)
-    .reduce((sum, s) => sum.plus(new Decimal(s.total).abs()), new Decimal(0));
 }
 
 function Row({ label, value, color }: { label: string; value: string; color: string }) {

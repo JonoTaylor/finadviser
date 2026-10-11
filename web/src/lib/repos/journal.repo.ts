@@ -1,5 +1,6 @@
 import { eq, sql, and, gte, lte, desc } from 'drizzle-orm';
 import { getDb, schema } from '@/lib/db';
+import { londonTodayIso } from '@/lib/dates/today';
 
 const { journalEntries, bookEntries, categories, accounts } = schema;
 
@@ -231,9 +232,24 @@ export const journalRepo = {
       .where(eq(journalEntries.id, journalId));
   },
 
-  async getMonthlySpending() {
+  async getMonthlySpending(asOf = londonTodayIso()) {
     const db = getDb();
-    const rows = await db.execute(sql`SELECT * FROM v_monthly_spending`);
+    // Match the signed monthly view, while excluding future postings that
+    // the view's month-only rows cannot filter once aggregated.
+    const rows = await db.execute(sql`
+      SELECT to_char(je.date::date, 'YYYY-MM') AS month,
+             c.name AS category_name, a.account_type,
+             SUM(be.amount::numeric) AS total
+      FROM book_entries be
+      JOIN journal_entries je ON je.id = be.journal_entry_id
+      JOIN accounts a ON a.id = be.account_id
+      LEFT JOIN categories c ON c.id = je.category_id
+      WHERE a.account_type IN ('EXPENSE', 'INCOME')
+        AND COALESCE(je.is_transfer, FALSE) = FALSE
+        AND je.date <= ${asOf}
+      GROUP BY to_char(je.date::date, 'YYYY-MM'), c.name, a.account_type
+      ORDER BY month DESC
+    `);
     return rows.rows as Array<{
       month: string;
       category_name: string | null;

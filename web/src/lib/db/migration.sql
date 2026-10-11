@@ -448,7 +448,7 @@ SELECT v.name, true
 -- transport sees one statement and Postgres handles the writes
 -- sequentially without any CTE snapshot interplay.
 --
--- Reads current balance, computes delta, inserts a journal entry and
+-- Reads the balance through the requested date, computes delta, inserts a journal entry and
 -- two offsetting book_entries (subject + adjustment account), then
 -- returns a single row of (journal_id, delta, previous_balance).
 -- Atomic at the function level: either all three rows land or none
@@ -482,9 +482,11 @@ BEGIN
     -- lock, so anything those other paths landed will be picked up.
     PERFORM 1 FROM accounts WHERE id = p_account_id FOR UPDATE;
 
-    SELECT COALESCE(SUM(amount::numeric), 0) INTO v_bal
-      FROM book_entries
-     WHERE account_id = p_account_id;
+    SELECT COALESCE(SUM(be.amount::numeric), 0) INTO v_bal
+      FROM book_entries be
+      JOIN journal_entries je ON je.id = be.journal_entry_id
+     WHERE be.account_id = p_account_id
+       AND je.date <= p_as_of_date;
 
     v_delta := p_target_balance - v_bal;
 

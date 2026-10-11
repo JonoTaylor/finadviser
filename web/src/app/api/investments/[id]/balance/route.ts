@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { setInvestmentBalance } from '@/lib/properties/personal-net-worth';
 import { londonTodayIso } from '@/lib/dates/today';
-
-const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+import { ClientError } from '@/lib/errors';
+import { investmentBalanceBodySchema } from '@/lib/validation/investment-balance';
+import { financialPlanValidationError } from '@/lib/validation/financial-plans';
 
 /**
  * POST /api/investments/[id]/balance
@@ -19,33 +20,29 @@ export async function POST(
 ) {
   try {
     const { id } = await params;
-    const accountId = parseInt(id, 10);
-    if (Number.isNaN(accountId)) {
+    const accountId = Number(id);
+    if (!/^\d+$/.test(id) || !Number.isInteger(accountId) || accountId <= 0 || accountId > 2147483647) {
       return NextResponse.json({ error: 'Invalid account id' }, { status: 400 });
     }
-    const body = (await request.json().catch(() => ({}))) || {};
-    const newBalance = body.newBalance;
-    if (typeof newBalance !== 'string' || newBalance.trim().length === 0) {
-      return NextResponse.json({ error: 'newBalance is required (decimal string)' }, { status: 400 });
+    let body: unknown;
+    try {
+      body = await request.json();
+    } catch {
+      return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
     }
-    if (!/^-?\d+(\.\d+)?$/.test(newBalance.trim())) {
-      return NextResponse.json({ error: 'newBalance must be a decimal number string' }, { status: 400 });
+    const parsed = investmentBalanceBodySchema.safeParse(body);
+    if (!parsed.success) {
+      return NextResponse.json({ error: financialPlanValidationError(parsed.error) }, { status: 400 });
     }
-
-    let asOfDate = londonTodayIso();
-    if (body.asOfDate !== undefined) {
-      if (typeof body.asOfDate !== 'string' || !ISO_DATE.test(body.asOfDate)) {
-        return NextResponse.json({ error: 'asOfDate must be YYYY-MM-DD' }, { status: 400 });
-      }
-      asOfDate = body.asOfDate;
-    }
+    const { newBalance, description } = parsed.data;
+    const asOfDate = parsed.data.asOfDate ?? londonTodayIso();
 
     try {
       const result = await setInvestmentBalance({
         accountId,
-        newBalance: newBalance.trim(),
+        newBalance,
         asOfDate,
-        description: typeof body.description === 'string' ? body.description : undefined,
+        description,
       });
       return NextResponse.json({ accountId, ...result, asOfDate });
     } catch (error) {
@@ -65,6 +62,9 @@ export async function POST(
       throw error;
     }
   } catch (error) {
+    if (error instanceof ClientError) {
+      return NextResponse.json({ error: error.message }, { status: error.status });
+    }
     const message = error instanceof Error ? error.message : 'Failed to update balance';
     return NextResponse.json({ error: message }, { status: 500 });
   }

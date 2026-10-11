@@ -14,6 +14,7 @@ import {
   Tooltip,
 } from '@mui/material';
 import AccountBalanceWalletRoundedIcon from '@mui/icons-material/AccountBalanceWalletRounded';
+import CreditCardRoundedIcon from '@mui/icons-material/CreditCardRounded';
 import HomeWorkRoundedIcon from '@mui/icons-material/HomeWorkRounded';
 import TrendingUpRoundedIcon from '@mui/icons-material/TrendingUpRounded';
 import SavingsRoundedIcon from '@mui/icons-material/SavingsRounded';
@@ -27,9 +28,13 @@ interface PerInvestment { accountId: number; name: string; investmentKind: strin
 interface YourShare {
   ownerId: number;
   ownerName: string;
+  balanceAsOf: string;
   propertyEquity: string;
   investments: string;
   personalCash: string;
+  personalLiabilities: string;
+  sharedLiabilitiesUnattributed: string;
+  perLiability: Array<{ accountId: number; name: string; balance: string }>;
   total: string;
   sharedCashUnattributed: string;
   perProperty: PerProperty[];
@@ -62,7 +67,7 @@ export default function YourShareCard() {
   const url = ownerId === null ? '/api/dashboard/your-share' : `/api/dashboard/your-share?ownerId=${ownerId}`;
   const { data, error, isLoading } = useSWR<Response>(url, fetcher);
 
-  if (isLoading || !data) {
+  if (isLoading) {
     return (
       <Card sx={{ height: '100%' }}>
         <CardContent>
@@ -74,7 +79,7 @@ export default function YourShareCard() {
     );
   }
 
-  if (error || !data.yourShare) {
+  if (error || !data?.yourShare) {
     return (
       <Card sx={{ height: '100%' }}>
         <CardContent>
@@ -85,7 +90,7 @@ export default function YourShareCard() {
             <Typography variant="subtitle2">Your share</Typography>
           </Box>
           <Typography variant="body2" color="text.secondary">
-            Add an owner to see a personal net-worth view.
+            {error ? 'Personal net worth is unavailable. Reconnect your accounts and try again.' : 'Add an owner to see a personal net-worth view.'}
           </Typography>
         </CardContent>
       </Card>
@@ -108,7 +113,7 @@ export default function YourShareCard() {
             <Box>
               <Typography variant="subtitle2">Your share</Typography>
               <Typography variant="caption" color="text.secondary" sx={{ display: 'block', lineHeight: 1.2 }}>
-                Viewing as {yourShare.ownerName}
+                Viewing as {yourShare.ownerName} · {yourShare.balanceAsOf}
               </Typography>
             </Box>
           </Box>
@@ -169,7 +174,19 @@ export default function YourShareCard() {
               ? `+ ${formatCurrency(yourShare.sharedCashUnattributed)} shared (not counted)`
               : null}
           />
+          <Row
+            icon={<CreditCardRoundedIcon sx={{ fontSize: 16, color: softTokens.peach.ink }} />}
+            label="Personal debts"
+            value={yourShare.personalLiabilities}
+            detail={yourShare.perLiability.length > 0 ? `${yourShare.perLiability.length} accounts · excludes mortgages already in equity` : 'No owner-attributed debts recorded'}
+          />
         </Stack>
+
+        {parseFloat(yourShare.sharedLiabilitiesUnattributed) !== 0 && (
+          <Typography variant="caption" sx={{ display: 'block', mt: 1 }}>
+            {formatCurrency(yourShare.sharedLiabilitiesUnattributed)} of shared debt is not attributed to this owner.
+          </Typography>
+        )}
 
         {parseFloat(yourShare.sharedCashUnattributed) !== 0 && (
           <Tooltip

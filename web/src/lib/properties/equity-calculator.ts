@@ -10,12 +10,12 @@ export interface OwnerEquityData {
   equityAmount: Decimal;
 }
 
-export async function calculateEquity(propertyId: number): Promise<OwnerEquityData[]> {
+export async function calculateEquity(propertyId: number, asOf?: string): Promise<OwnerEquityData[]> {
   const ownership = await propertyRepo.getOwnership(propertyId);
   if (!ownership || ownership.length === 0) return [];
 
   // Get latest valuation
-  const valuation = await propertyRepo.getLatestValuation(propertyId);
+  const valuation = await propertyRepo.getLatestValuation(propertyId, asOf);
   const marketValue = valuation ? new Decimal(valuation.valuation) : new Decimal(0);
 
   // Get mortgage balance
@@ -26,7 +26,7 @@ export async function calculateEquity(propertyId: number): Promise<OwnerEquityDa
     const accId = m.liabilityAccountId;
     if (seenAccounts.has(accId)) continue;
     seenAccounts.add(accId);
-    const balance = await accountRepo.getBalance(accId);
+    const balance = await accountRepo.getBalance(accId, asOf);
     totalMortgageBalance = totalMortgageBalance.plus(new Decimal(balance).abs());
   }
 
@@ -37,7 +37,7 @@ export async function calculateEquity(propertyId: number): Promise<OwnerEquityDa
   let totalCapital = new Decimal(0);
 
   for (const own of ownership) {
-    const capitalBalance = new Decimal(await accountRepo.getBalance(own.capital_account_id as number));
+    const capitalBalance = new Decimal(await accountRepo.getBalance(own.capital_account_id as number, asOf));
     totalCapital = totalCapital.plus(capitalBalance);
     ownerData.push({
       ownerId: own.owner_id as number,

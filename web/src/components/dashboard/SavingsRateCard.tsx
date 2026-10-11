@@ -1,9 +1,11 @@
 'use client';
 
+import { useState } from 'react';
 import { Card, CardContent, Typography, Box } from '@mui/material';
 import { alpha } from '@mui/material/styles';
 import SavingsRoundedIcon from '@mui/icons-material/SavingsRounded';
-import Decimal from 'decimal.js';
+import { londonTodayIso } from '@/lib/dates/today';
+import { monthlyCashFlow } from '@/lib/dashboard/monthly-cash-flow';
 import { softTokens, serifFamily } from '@/theme/theme';
 
 interface SpendingRow {
@@ -22,27 +24,21 @@ interface Balance {
 
 export default function SavingsRateCard({
   spending,
-  balances,
+  balances: _balances,
 }: {
   spending: SpendingRow[];
   balances: Balance[];
 }) {
-  const incomeTotal = balances
-    .filter(b => b.account_type === 'INCOME')
-    .reduce((sum, b) => sum.plus(new Decimal(b.balance).abs()), new Decimal(0));
-
-  const expenseTotal = spending
-    .reduce((sum, s) => sum.plus(new Decimal(s.total).abs()), new Decimal(0));
-
-  const savingsRate = incomeTotal.gt(0)
-    ? incomeTotal.minus(expenseTotal).div(incomeTotal).mul(100).toNumber()
-    : 0;
-
-  const clampedRate = Math.max(0, Math.min(100, savingsRate));
-  const target = 20;
+  // Lifetime account balances cannot be compared with monthly spending.
+  void _balances;
+  const [month] = useState(() => londonTodayIso().slice(0, 7));
+  const { savingsRate } = monthlyCashFlow(spending, month);
+  const clampedRate = Math.max(0, Math.min(100, savingsRate ?? 0));
 
   // Map rate -> mint (good) / lemon (getting there) / peach (off track)
-  const palette = savingsRate < 10
+  const palette = savingsRate === null
+    ? softTokens.lavender
+    : savingsRate < 10
     ? softTokens.peach
     : savingsRate < 20 ? softTokens.lemon : softTokens.mint;
 
@@ -100,19 +96,21 @@ export default function SavingsRateCard({
                   color: palette.ink,
                 }}
               >
-                {savingsRate.toFixed(0)}%
+                {savingsRate === null ? '—' : `${savingsRate.toFixed(0)}%`}
               </Typography>
             </Box>
           </Box>
 
           <Box>
             <Typography variant="body2" color="text.secondary" sx={{ mb: 0.5 }}>
-              Target: {target}%
+              This month
             </Typography>
             <Typography variant="caption" color="text.secondary">
-              {savingsRate >= target
-                ? 'You\'re on track!'
-                : `${(target - savingsRate).toFixed(0)}% to go`}
+              {savingsRate === null
+                ? 'Record positive income to calculate your rate'
+                : savingsRate < 0
+                  ? 'Recorded expenses exceed income'
+                  : 'Income left after recorded expenses'}
             </Typography>
           </Box>
         </Box>

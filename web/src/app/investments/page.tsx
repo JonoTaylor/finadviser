@@ -12,6 +12,9 @@ import AddRoundedIcon from '@mui/icons-material/AddRounded';
 import EditRoundedIcon from '@mui/icons-material/EditRounded';
 import { formatCurrency } from '@/lib/utils/formatting';
 import { londonTodayIso } from '@/lib/dates/today';
+import { fetchJson } from '@/lib/http/client';
+import Link from 'next/link';
+import Decimal from 'decimal.js';
 
 interface Investment {
   id: number;
@@ -20,6 +23,7 @@ interface Investment {
   ownerId: number | null;
   ownerName: string | null;
   balance: string;
+  balanceAsOf: string;
 }
 
 interface OwnerLite { id: number; name: string }
@@ -35,11 +39,11 @@ const KINDS = [
 
 const KIND_LABEL: Record<string, string> = Object.fromEntries(KINDS.map(k => [k.value, k.label]));
 
-const fetcher = (url: string) => fetch(url).then(r => r.json());
+const fetcher = fetchJson;
 
 export default function InvestmentsPage() {
-  const { data: investments, mutate, isLoading } = useSWR<Investment[]>('/api/investments', fetcher);
-  const { data: owners } = useSWR<OwnerLite[]>('/api/owners', fetcher);
+  const { data: investments, error, mutate, isLoading } = useSWR<Investment[]>('/api/investments', fetcher, { shouldRetryOnError: false });
+  const { data: owners, error: ownersError } = useSWR<OwnerLite[]>('/api/owners', fetcher, { shouldRetryOnError: false });
 
   const [addOpen, setAddOpen] = useState(false);
   const [updateTarget, setUpdateTarget] = useState<Investment | null>(null);
@@ -56,22 +60,30 @@ export default function InvestmentsPage() {
           <Box>
             <Typography variant="h4">Investments</Typography>
             <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-              Pensions, ISAs, savings — anything where the value isn&rsquo;t a transaction stream
-              but a periodically-updated balance. Used by the dashboard&rsquo;s &ldquo;Your share&rdquo; card to
-              compute owner-scoped net worth.
+              Track your pension, ISA and savings balances in one place. Review the holdings,
+              risk and fees behind each account as well as its value.
             </Typography>
           </Box>
-          <Button variant="contained" startIcon={<AddRoundedIcon />} onClick={() => setAddOpen(true)}>
+          <Button variant="contained" startIcon={<AddRoundedIcon />} onClick={() => setAddOpen(true)} disabled={Boolean(error || ownersError)}>
             Add investment
           </Button>
         </Stack>
       </Box>
 
+      <Stack direction="row" gap={1} flexWrap="wrap" sx={{ mb: 3 }}><Button component={Link} href="/plan" variant="outlined">Review my wealth plan</Button><Button component={Link} href="/pensions" variant="outlined">Model my retirement</Button></Stack>
+      {error && <Alert severity="warning" sx={{ mb: 3 }}>Your investment balances could not be loaded. No zero balances have been substituted.</Alert>}
+      {ownersError && <Alert severity="warning" sx={{ mb: 3 }}>Account owners could not be loaded. Reconnect your accounts before adding an investment.</Alert>}
+      {investments && <Card sx={{ mb: 3 }}><CardContent><Stack direction={{ xs: 'column', sm: 'row' }} gap={4}>{[
+        { label: 'Total tracked investments', amount: list.reduce((sum, item) => sum.plus(item.balance), new Decimal(0)) },
+        { label: 'Pensions', amount: list.filter(item => item.investmentKind === 'pension').reduce((sum, item) => sum.plus(item.balance), new Decimal(0)) },
+        { label: 'Cash savings', amount: list.filter(item => item.investmentKind === 'savings').reduce((sum, item) => sum.plus(item.balance), new Decimal(0)) },
+      ].map(item => <Box key={item.label}><Typography variant="caption">{item.label}</Typography><Typography variant="h5" sx={{ mt: 1 }}>{formatCurrency(item.amount)}</Typography></Box>)}</Stack><Typography variant="caption" sx={{ display: 'block', mt: 2 }}>Whole household · as of {list[0]?.balanceAsOf ?? londonTodayIso()} · recorded balances, not live market prices. Pension balances are not accessible emergency cash.</Typography></CardContent></Card>}
+
       <Card>
         <CardContent>
           {isLoading ? (
             <Skeleton variant="rectangular" height={120} />
-          ) : list.length === 0 ? (
+          ) : error ? <Typography variant="body2">Reconnect your accounts and retry to see your investments.</Typography> : list.length === 0 ? (
             <Typography variant="body2" color="text.secondary">
               No investments tracked yet. Click <strong>Add investment</strong> to track a pension,
               ISA, or savings pot. The AI assistant can do this for you in chat too — try

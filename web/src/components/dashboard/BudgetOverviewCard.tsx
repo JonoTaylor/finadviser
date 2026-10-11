@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { Card, CardContent, Typography, Box, Button, Stack } from '@mui/material';
+import { Alert, Card, CardContent, Typography, Box, Button, Stack, Skeleton } from '@mui/material';
 import { alpha } from '@mui/material/styles';
 import AccountBalanceWalletRoundedIcon from '@mui/icons-material/AccountBalanceWalletRounded';
 import ChatRoundedIcon from '@mui/icons-material/ChatRounded';
@@ -9,8 +9,10 @@ import useSWR from 'swr';
 import { format } from 'date-fns';
 import Link from 'next/link';
 import { softTokens } from '@/theme/theme';
+import { fetchJson } from '@/lib/http/client';
+import { londonTodayIso } from '@/lib/dates/today';
 
-const fetcher = (url: string) => fetch(url).then(r => r.json());
+const fetcher = fetchJson;
 
 interface BudgetStatus {
   budget_id: number;
@@ -31,8 +33,11 @@ export default function BudgetOverviewCard() {
   // disagree between SSR and hydration if a month boundary lands
   // between server-render and client-mount.
   const [now] = useState(() => new Date());
-  const month = format(now, 'yyyy-MM');
-  const { data: budgets } = useSWR<BudgetStatus[]>(`/api/budgets/status?month=${month}`, fetcher);
+  const month = londonTodayIso(now).slice(0, 7);
+  const { data: budgets, error, isLoading } = useSWR<BudgetStatus[]>(`/api/budgets/status?month=${month}`, fetcher, { shouldRetryOnError: false });
+
+  if (error) return <Card><CardContent><Typography variant="h6" sx={{ mb: 1 }}>Budget overview</Typography><Alert severity="warning">Your budgets could not be loaded. Please try again when your accounts are connected.</Alert></CardContent></Card>;
+  if (isLoading) return <Skeleton variant="rounded" height={220} />;
 
   if (!budgets || budgets.length === 0) {
     return (
@@ -84,7 +89,7 @@ export default function BudgetOverviewCard() {
           </Box>
           <Typography variant="subtitle2">Budget Overview</Typography>
           <Typography variant="caption" color="text.secondary" sx={{ ml: 'auto' }}>
-            {format(now, 'MMM yyyy')}
+            {format(new Date(`${month}-15T12:00:00Z`), 'MMM yyyy')}
           </Typography>
         </Box>
 
@@ -92,7 +97,7 @@ export default function BudgetOverviewCard() {
           {top.map((b) => {
             const limit = parseFloat(b.monthly_limit);
             const spent = parseFloat(b.spent);
-            const pct = limit > 0 ? Math.min(100, Math.round((spent / limit) * 100)) : 0;
+            const pct = limit > 0 ? Math.max(0, Math.min(100, Math.round((spent / limit) * 100))) : 0;
             const palette = paletteForUtilisation(pct);
 
             return (

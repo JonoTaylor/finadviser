@@ -1,14 +1,15 @@
 'use client';
 
-import { Card, CardContent, Typography, Box, Button, Stack } from '@mui/material';
+import { Alert, Card, CardContent, Typography, Box, Button, Stack, Skeleton } from '@mui/material';
 import { alpha } from '@mui/material/styles';
 import SavingsRoundedIcon from '@mui/icons-material/SavingsRounded';
 import ChatRoundedIcon from '@mui/icons-material/ChatRounded';
 import useSWR from 'swr';
 import Link from 'next/link';
 import { softTokens } from '@/theme/theme';
+import { fetchJson } from '@/lib/http/client';
 
-const fetcher = (url: string) => fetch(url).then(r => r.json());
+const fetcher = fetchJson;
 
 interface SavingsGoal {
   id: number;
@@ -26,7 +27,10 @@ function paletteForProgress(pct: number) {
 }
 
 export default function SavingsGoalsCard() {
-  const { data: goals } = useSWR<SavingsGoal[]>('/api/savings-goals', fetcher);
+  const { data: goals, error, isLoading } = useSWR<SavingsGoal[]>('/api/savings-goals', fetcher, { shouldRetryOnError: false });
+
+  if (error) return <Card><CardContent><Typography variant="h6" sx={{ mb: 1 }}>Savings goals</Typography><Alert severity="warning">Your savings goals could not be loaded. Please try again when your accounts are connected.</Alert></CardContent></Card>;
+  if (isLoading) return <Skeleton variant="rounded" height={220} />;
 
   const activeGoals = (goals ?? []).filter(g => g.status === 'active');
 
@@ -47,11 +51,11 @@ export default function SavingsGoalsCard() {
             <Typography variant="subtitle2">Savings Goals</Typography>
           </Box>
           <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-            No savings goals yet. Use the AI chat to set targets and track your progress.
+            Give your savings a purpose. Set a target and date, then track your progress.
           </Typography>
           <Button
             component={Link}
-            href="/chat"
+            href="/goals"
             size="small"
             variant="outlined"
             startIcon={<ChatRoundedIcon />}
@@ -77,6 +81,7 @@ export default function SavingsGoalsCard() {
             <SavingsRoundedIcon sx={{ fontSize: 20 }} />
           </Box>
           <Typography variant="subtitle2">Savings Goals</Typography>
+          <Button component={Link} href="/goals" size="small" sx={{ ml: 'auto' }}>Manage goals</Button>
         </Box>
 
         <Stack spacing={2}>

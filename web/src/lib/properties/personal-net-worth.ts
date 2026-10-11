@@ -1,13 +1,18 @@
 import Decimal from 'decimal.js';
 import { sql } from 'drizzle-orm';
 import { getDb } from '@/lib/db';
+import { accountBalanceAsOf } from '@/lib/db/account-balance-as-of';
+import { londonTodayIso } from '@/lib/dates/today';
+import { ClientError } from '@/lib/errors';
+import { investmentBalanceInputSchema } from '@/lib/validation/investment-balance';
+import { financialPlanValidationError } from '@/lib/validation/financial-plans';
 import { propertyRepo } from '@/lib/repos';
 import { calculateEquity } from './equity-calculator';
 
 /**
  * "Your share" net worth — owner-scoped instead of household-aggregate.
  *
- * Three buckets per owner:
+ * Four buckets per owner:
  *  - Property equity: their slice of (market value − mortgage debt)
  *    across every property they own a share of, via the existing
  *    calculateEquity() (already mortgage-netted).
@@ -17,21 +22,23 @@ import { calculateEquity } from './equity-calculator';
  *    owner_id = $owner. Untagged shared cash is shown separately so
  *    the user can decide whether to attribute it.
  *
- * Liabilities are picked up via the property-equity calc (the only
- * tracked liability today is mortgages, and they're netted there).
- * Standalone owner-tagged liability accounts would need separate
- * handling — out of scope for this first cut, no such accounts exist.
+ *  - Personal liabilities: owner-tagged credit cards and other debts.
+ *    Mortgage accounts already counted in this owner's property equity
+ *    are excluded. Shared debts remain visible but unattributed.
  */
 
 export interface PersonalNetWorth {
   ownerId: number;
   ownerName: string;
+  balanceAsOf: string;
   propertyEquity: string;       // total across properties for this owner
   investments: string;          // total of is_investment accounts owned by this owner
   personalCash: string;         // total of NON-investment ASSET accounts owned by this owner
-  total: string;                // sum of the above
+  personalLiabilities: string;  // amount owed; debit/credit balances preserve their sign
+  total: string;                // assets + property equity - personal liabilities
   // For context — shows the user what's NOT included in `total`:
   sharedCashUnattributed: string; // ASSET accounts with owner_id IS NULL and is_investment = false
+  sharedLiabilitiesUnattributed: string;
   perProperty: Array<{
     propertyId: number;
     propertyName: string;
@@ -44,20 +51,26 @@ export interface PersonalNetWorth {
     investmentKind: string | null;
     balance: string;
   }>;
+  perLiability: Array<{
+    accountId: number;
+    name: string;
+    balance: string;            // positive means owed; negative means a credit balance
+  }>;
 }
 
-export async function calculatePersonalNetWorth(ownerId: number): Promise<PersonalNetWorth | null> {
+export async function calculatePersonalNetWorth(ownerId: number, now = new Date()): Promise<PersonalNetWorth | null> {
   const owner = await propertyRepo.getOwner(ownerId);
   if (!owner) return null;
 
   const db = getDb();
+  const asOf = londonTodayIso(now);
 
   // Property equity. Fetch the property list ONCE and run
   // calculateEquity per property in parallel — calculateAllEquity
   // would re-fetch listProperties internally, doubling the
   // round-trip on every dashboard load.
   const properties = await propertyRepo.listProperties();
-  const equitySlices = await Promise.all(properties.map(p => calculateEquity(p.id)));
+  const equitySlices = await Promise.all(properties.map(p => calculateEquity(p.id, asOf)));
 
   let propertyEquity = new Decimal(0);
   const perProperty: PersonalNetWorth['perProperty'] = [];
@@ -75,30 +88,56 @@ export async function calculatePersonalNetWorth(ownerId: number): Promise<Person
     });
   }
 
-  // Investments + personal cash + shared unattributed cash. Single
+  // Investments, cash and standalone debt. Single
   // round-trip via v_account_balances (single source of truth for
   // balance arithmetic — don't re-implement SUM(book_entries) here).
-  // Filtered to ASSET type and to rows the user could care about for
+  // Filtered to assets and non-mortgage liabilities relevant to
   // a personal-net-worth calc: their own accounts plus any shared
   // (owner_id IS NULL) accounts so we can report the sharedCashUnattributed
   // diagnostic.
+  const mortgageAlreadyNetted = perProperty.length > 0
+    ? sql`m.property_id IN (${sql.join(perProperty.map(property => sql`${property.propertyId}`), sql`, `)})`
+    : sql`FALSE`;
   const accountRows = await db.execute(sql`
-    SELECT a.id, a.name, a.is_investment, a.investment_kind, a.owner_id,
-           COALESCE(v.balance, 0) AS balance
+    SELECT a.id, a.name, a.account_type, a.is_investment, a.investment_kind, a.owner_id,
+           ${accountBalanceAsOf(asOf)} AS balance
     FROM accounts a
     LEFT JOIN v_account_balances v ON v.account_id = a.id
-    WHERE a.account_type = 'ASSET'
+    WHERE a.account_type IN ('ASSET', 'LIABILITY')
       AND (a.owner_id = ${ownerId} OR a.owner_id IS NULL)
+      AND NOT EXISTS (
+        SELECT 1 FROM mortgages m WHERE m.liability_account_id = a.id
+          AND ${mortgageAlreadyNetted}
+      )
   `);
 
   let investments = new Decimal(0);
   let personalCash = new Decimal(0);
   let sharedCashUnattributed = new Decimal(0);
+  let personalLiabilities = new Decimal(0);
+  let sharedLiabilitiesUnattributed = new Decimal(0);
   const perInvestment: PersonalNetWorth['perInvestment'] = [];
+  const perLiability: PersonalNetWorth['perLiability'] = [];
 
   for (const r of accountRows.rows) {
     const balance = new Decimal((r.balance as string) ?? '0');
     const accOwner = r.owner_id as number | null;
+    if (r.account_type === 'LIABILITY') {
+      // Liability credits are negative in the ledger; report the amount
+      // owed as positive. A debit credit-card balance reduces debt.
+      const owed = balance.negated();
+      if (accOwner === ownerId) {
+        personalLiabilities = personalLiabilities.plus(owed);
+        perLiability.push({
+          accountId: r.id as number,
+          name: r.name as string,
+          balance: owed.toFixed(2),
+        });
+      } else if (accOwner === null) {
+        sharedLiabilitiesUnattributed = sharedLiabilitiesUnattributed.plus(owed);
+      }
+      continue;
+    }
     const isInvestment = Boolean(r.is_investment);
     if (isInvestment && accOwner === ownerId) {
       investments = investments.plus(balance);
@@ -120,18 +159,22 @@ export async function calculatePersonalNetWorth(ownerId: number): Promise<Person
     }
   }
 
-  const total = propertyEquity.plus(investments).plus(personalCash);
+  const total = propertyEquity.plus(investments).plus(personalCash).minus(personalLiabilities);
 
   return {
     ownerId,
     ownerName: owner.name,
+    balanceAsOf: asOf,
     propertyEquity: propertyEquity.toFixed(2),
     investments: investments.toFixed(2),
     personalCash: personalCash.toFixed(2),
+    personalLiabilities: personalLiabilities.toFixed(2),
     total: total.toFixed(2),
     sharedCashUnattributed: sharedCashUnattributed.toFixed(2),
+    sharedLiabilitiesUnattributed: sharedLiabilitiesUnattributed.toFixed(2),
     perProperty,
     perInvestment: perInvestment.sort((a, b) => Number(b.balance) - Number(a.balance)),
+    perLiability: perLiability.sort((a, b) => new Decimal(b.balance).comparedTo(a.balance)),
   };
 }
 
@@ -167,6 +210,9 @@ export async function setInvestmentBalance(params: {
   asOfDate: string; // YYYY-MM-DD
   description?: string;
 }): Promise<{ journalId: number; delta: string; previousBalance: string }> {
+  const parsed = investmentBalanceInputSchema.safeParse(params);
+  if (!parsed.success) throw new ClientError(financialPlanValidationError(parsed.error));
+  const input = parsed.data;
   const db = getDb();
 
   // Validate target account + look up the seeded adjustment account
@@ -176,13 +222,13 @@ export async function setInvestmentBalance(params: {
       a.id, a.name, a.account_type, a.is_investment,
       (SELECT id FROM accounts WHERE name = 'Investment Adjustments' AND is_system = true LIMIT 1) AS adj_account_id
     FROM accounts a
-    WHERE a.id = ${params.accountId}
+    WHERE a.id = ${input.accountId}
     LIMIT 1
   `);
-  if (validation.rows.length === 0) throw new Error(`Account ${params.accountId} not found`);
+  if (validation.rows.length === 0) throw new Error(`Account ${input.accountId} not found`);
   const acct = validation.rows[0];
   if (!acct.is_investment) {
-    throw new Error(`Account ${params.accountId} (${acct.name}) is not flagged as an investment.`);
+    throw new Error(`Account ${input.accountId} (${acct.name}) is not flagged as an investment.`);
   }
   if (acct.account_type !== 'ASSET') {
     throw new Error(`Investment accounts must be ASSET type; ${acct.name} is ${acct.account_type}.`);
@@ -192,12 +238,12 @@ export async function setInvestmentBalance(params: {
     throw new Error('System "Investment Adjustments" equity account is missing — re-run the database migration.');
   }
 
-  const description = params.description ?? `Investment balance update - ${acct.name}`;
-  const targetBalance = new Decimal(params.newBalance).toFixed(2);
+  const description = input.description || `Investment balance update - ${acct.name}`;
+  const targetBalance = input.newBalance;
 
   // Calls the set_investment_balance Postgres function (defined in
   // migration.sql) as a single SELECT. The function reads the live
-  // balance, inserts a journal entry, inserts the two balanced book
+  // balance through the requested date, inserts a journal entry and the two balanced book
   // entries, and returns (journal_id, delta, previous_balance) in
   // one row. Earlier versions of this code used a multi-data-
   // modifying CTE inline, but the neon-http transport rejected that
@@ -207,9 +253,9 @@ export async function setInvestmentBalance(params: {
   const result = await db.execute(sql`
     SELECT journal_id, delta, previous_balance
       FROM set_investment_balance(
-        ${params.accountId}::integer,
+        ${input.accountId}::integer,
         ${targetBalance}::numeric,
-        ${params.asOfDate}::text,
+        ${input.asOfDate}::text,
         ${description}::text,
         ${adjAccountId}::integer
       )

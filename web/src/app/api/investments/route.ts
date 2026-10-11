@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { sql } from 'drizzle-orm';
 import { getDb } from '@/lib/db';
+import { accountBalanceAsOf } from '@/lib/db/account-balance-as-of';
+import { londonTodayIso } from '@/lib/dates/today';
 import { accountRepo, propertyRepo } from '@/lib/repos';
 
 const VALID_KINDS = ['pension', 'isa', 'lisa', 'savings', 'crypto', 'other'] as const;
@@ -14,13 +16,14 @@ type InvestmentKind = typeof VALID_KINDS[number];
 export async function GET() {
   try {
     const db = getDb();
+    const asOf = londonTodayIso();
     // Single query joining accounts + the v_account_balances view
     // (single source of truth for balance arithmetic) so we don't
     // re-implement the SUM(book_entries.amount) here.
     const rows = await db.execute(sql`
       SELECT a.id, a.name, a.investment_kind, a.owner_id,
              o.name AS owner_name,
-             COALESCE(v.balance, 0) AS balance
+             ${accountBalanceAsOf(asOf)} AS balance
       FROM accounts a
       LEFT JOIN owners o ON o.id = a.owner_id
       LEFT JOIN v_account_balances v ON v.account_id = a.id
@@ -34,6 +37,7 @@ export async function GET() {
       ownerId: r.owner_id,
       ownerName: r.owner_name,
       balance: r.balance,
+      balanceAsOf: asOf,
     })));
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Failed to list investments';

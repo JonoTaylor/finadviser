@@ -22,6 +22,9 @@ import AutoAwesomeRoundedIcon from '@mui/icons-material/AutoAwesomeRounded';
 import TuneRoundedIcon from '@mui/icons-material/TuneRounded';
 import MenuRoundedIcon from '@mui/icons-material/MenuRounded';
 import ShowChartRoundedIcon from '@mui/icons-material/ShowChartRounded';
+import ExploreRoundedIcon from '@mui/icons-material/ExploreRounded';
+import FlagRoundedIcon from '@mui/icons-material/FlagRounded';
+import SavingsRoundedIcon from '@mui/icons-material/SavingsRounded';
 import useMediaQuery from '@mui/material/useMediaQuery';
 import { useTheme } from '@mui/material/styles';
 import { softTokens, serifFamily } from '@/theme/theme';
@@ -31,10 +34,14 @@ const DRAWER_WIDTH = 240;
 
 const navItems = [
   { label: 'Dashboard',    href: '/',              icon: <DashboardRoundedIcon /> },
+  { label: 'Financial plan', href: '/plan',       icon: <ExploreRoundedIcon /> },
+  { label: 'Spending',     href: '/spending',      icon: <ShowChartRoundedIcon /> },
+  { label: 'Savings goals', href: '/goals',        icon: <FlagRoundedIcon /> },
   { label: 'Transactions', href: '/transactions',  icon: <ReceiptLongRoundedIcon /> },
   { label: 'Import',       href: '/import',        icon: <FileUploadRoundedIcon /> },
   { label: 'Properties',   href: '/properties',    icon: <HomeWorkRoundedIcon /> },
   { label: 'Investments',  href: '/investments',   icon: <TrendingUpRoundedIcon /> },
+  { label: 'Pensions',     href: '/pensions',      icon: <SavingsRoundedIcon /> },
   { label: 'Documents',    href: '/documents',     icon: <FolderRoundedIcon /> },
   { label: 'AI Chat',      href: '/chat',          icon: <AutoAwesomeRoundedIcon /> },
   { label: 'Settings',     href: '/settings',      icon: <TuneRoundedIcon /> },
@@ -122,7 +129,7 @@ export default function Sidebar({ children }: { children: React.ReactNode }) {
 
       <Box sx={{ px: 2.5, py: 1.5, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <Typography variant="caption" sx={{ color: softTokens.ink4 }}>
-          v0.1.0
+          Your financial home
         </Typography>
         <LogoutButton />
       </Box>
@@ -133,6 +140,7 @@ export default function Sidebar({ children }: { children: React.ReactNode }) {
     <Box sx={{ display: 'flex', minHeight: '100vh' }}>
       {isMobile && (
         <IconButton
+          aria-label="Open navigation"
           onClick={() => setMobileOpen(true)}
           sx={{
             position: 'fixed',

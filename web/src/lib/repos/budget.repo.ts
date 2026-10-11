@@ -1,5 +1,6 @@
 import { eq, sql } from 'drizzle-orm';
 import { getDb, schema } from '@/lib/db';
+import { londonTodayIso } from '@/lib/dates/today';
 
 const { budgets } = schema;
 
@@ -57,26 +58,45 @@ export const budgetRepo = {
     await db.delete(budgets).where(eq(budgets.id, id));
   },
 
-  async getStatusForMonth(month: string) {
+  async getStatusForMonth(month: string, asOf = londonTodayIso()) {
+    if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) {
+      throw new Error('Invalid budget month: expected YYYY-MM');
+    }
     const db = getDb();
     const startDate = `${month}-01`;
-    const endDate = `${month}-31`;
+    const [year, monthNumber] = month.split('-').map(Number);
+    const endDate = monthNumber === 12
+      ? `${year + 1}-01-01`
+      : `${year}-${String(monthNumber + 1).padStart(2, '0')}-01`;
 
     const rows = await db.execute(sql`
+      WITH RECURSIVE budget_categories AS (
+        SELECT id AS budget_id, category_id, ARRAY[category_id] AS visited
+        FROM budgets
+        UNION ALL
+        SELECT walk.budget_id, child.id, walk.visited || child.id
+        FROM budget_categories walk
+        JOIN categories child ON child.parent_id = walk.category_id
+        WHERE NOT child.id = ANY(walk.visited)
+      )
       SELECT
         b.id AS budget_id,
         b.category_id,
         c.name AS category_name,
         b.monthly_limit,
-        COALESCE(ABS(SUM(
-          CASE WHEN je.date >= ${startDate} AND je.date <= ${endDate}
-          THEN be.amount ELSE 0 END
-        )), 0)::text AS spent
+        COALESCE(SUM(CASE WHEN a.account_type = 'EXPENSE'
+          THEN be.amount::numeric ELSE 0 END), 0)::text AS spent
       FROM budgets b
       JOIN categories c ON c.id = b.category_id
-      LEFT JOIN journal_entries je ON je.category_id = b.category_id
+      LEFT JOIN budget_categories bc ON bc.budget_id = b.id
+      LEFT JOIN journal_entries je ON je.category_id = bc.category_id
+        AND je.date >= ${startDate} AND je.date < ${endDate}
+        AND je.date <= ${asOf}
+        AND COALESCE(je.is_transfer, FALSE) = FALSE
+        AND je.property_id IS NULL
       LEFT JOIN book_entries be ON be.journal_entry_id = je.id
-      LEFT JOIN accounts a ON a.id = be.account_id AND a.account_type = 'EXPENSE'
+      LEFT JOIN accounts a ON a.id = be.account_id
+      WHERE b.effective_from < ${endDate}
       GROUP BY b.id, b.category_id, c.name, b.monthly_limit
       ORDER BY c.name
     `);

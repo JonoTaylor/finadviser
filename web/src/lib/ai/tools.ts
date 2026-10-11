@@ -1,5 +1,6 @@
 import Decimal from 'decimal.js';
-import { format, subMonths } from 'date-fns';
+import { z } from 'zod';
+import { format } from 'date-fns';
 import { accountRepo, journalRepo, categoryRepo, propertyRepo, tipRepo, budgetRepo, savingsGoalRepo, aiMemoryRepo, ownerTaxRepo } from '@/lib/repos';
 import { calculateEquity } from '@/lib/properties/equity-calculator';
 import { setInvestmentBalance } from '@/lib/properties/personal-net-worth';
@@ -9,6 +10,11 @@ import { formatCurrency } from '@/lib/utils/formatting';
 import { matchRule } from '@/lib/import/categorizer';
 import { londonTodayIso } from '@/lib/dates/today';
 import { currentTaxYear } from '@/lib/tax/ukTaxYear';
+import { loadPlanningInput } from '@/lib/planning/load';
+import { buildFinancialPlan } from '@/lib/planning/engine';
+import type { FinancialPlan } from '@/lib/planning/types';
+import { projectRetirement } from '@/lib/retirement/projection';
+import { budgetBodySchema, savingsGoalBodySchema, savingsGoalPatchSchema, financialPlanValidationError } from '@/lib/validation/financial-plans';
 import {
   autoLinkPropertyExpenses,
   tagJournalAsPropertyExpense,
@@ -30,8 +36,26 @@ interface Tool {
     type: 'object';
     properties: Record<string, unknown>;
     required: string[];
+    additionalProperties?: false;
   };
 }
+
+const setBudgetInputSchema = z.object({
+  category_name: savingsGoalBodySchema.shape.name,
+  monthly_limit: budgetBodySchema.shape.monthlyLimit,
+}).strict();
+
+const setSavingsGoalInputSchema = z.object({
+  name: savingsGoalBodySchema.shape.name,
+  target_amount: savingsGoalBodySchema.shape.targetAmount,
+  target_date: savingsGoalBodySchema.shape.targetDate,
+  account_name: savingsGoalBodySchema.shape.name.optional(),
+}).strict();
+
+const updateSavingsProgressInputSchema = z.object({
+  goal_id: savingsGoalPatchSchema.shape.id,
+  current_amount: budgetBodySchema.shape.monthlyLimit,
+}).strict();
 
 // -------------------------------------------------------------------
 // Tool definitions (JSON-Schema; provider-agnostic)
@@ -257,6 +281,7 @@ export const TOOL_DEFINITIONS: Tool[] = [
         category_name: { type: 'string', description: 'The category name to budget for.' },
         monthly_limit: { type: 'string', description: 'Monthly budget limit as a decimal string (e.g. "500.00").' },
       },
+      additionalProperties: false,
       required: ['category_name', 'monthly_limit'],
     },
   },
@@ -288,6 +313,7 @@ export const TOOL_DEFINITIONS: Tool[] = [
         target_date: { type: 'string', description: 'Optional target date YYYY-MM-DD.' },
         account_name: { type: 'string', description: 'Optional savings account name to link.' },
       },
+      additionalProperties: false,
       required: ['name', 'target_amount'],
     },
   },
@@ -301,6 +327,7 @@ export const TOOL_DEFINITIONS: Tool[] = [
         goal_id: { type: 'number', description: 'The savings goal ID.' },
         current_amount: { type: 'string', description: 'New current amount saved.' },
       },
+      additionalProperties: false,
       required: ['goal_id', 'current_amount'],
     },
   },
@@ -317,7 +344,7 @@ export const TOOL_DEFINITIONS: Tool[] = [
   {
     name: 'get_income_expense_summary',
     description:
-      'Get monthly income, expenses, and net position over a number of months. Useful for affordability analysis and financial health checks.',
+      'Get recorded income, expenses, and net position for 1–12 completed calendar months (default 3). The shared plan loads six months: requests beyond this include explicit unknown rows, not assumed zeros. Averages require observed activity in every requested month. Excludes transfers; refunds reduce spending.',
     input_schema: {
       type: 'object' as const,
       properties: {
@@ -361,9 +388,19 @@ export const TOOL_DEFINITIONS: Tool[] = [
     },
   },
   {
+    name: 'get_financial_plan',
+    description:
+      'Read the same deterministic household financial plan used by the planning workspace. Returns completed-month spending and merchant comparisons, recurring-payment candidates, accessible cash, emergency reserve, property cashflow and concentration, saved retirement inputs, ordered actions, calculation methodology and data coverage. Unknown inputs remain null; recorded balances are not proof of all assets or debts. Read-only: does not change balances, holdings, budgets or goals.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {},
+      required: [],
+    },
+  },
+  {
     name: 'get_financial_health_check',
     description:
-      'Run a comprehensive financial health check. Analyses savings rate, budget adherence, debt-to-income ratio, emergency fund status, and flags concerns. Composite tool that gathers data from multiple sources.',
+      'Read a summary of the deterministic financial plan: observed surplus rate, budgets, recorded debt-balance-to-income, accessible emergency cash and data gaps. Unknown inputs are reported explicitly; debt balance is not debt-service affordability. Read-only.',
     input_schema: {
       type: 'object' as const,
       properties: {},
@@ -622,6 +659,7 @@ export const TOOL_LABELS: Record<string, string> = {
   update_savings_progress: 'Updating savings progress',
   get_debt_summary: 'Analysing debt position',
   get_income_expense_summary: 'Calculating income & expenses',
+  get_financial_plan: 'Building your financial plan',
   get_financial_health_check: 'Running financial health check',
   remember: 'Saving to memory',
   list_memories: 'Reading memory',
@@ -681,6 +719,8 @@ export async function executeTool(
       return executeGetDebtSummary();
     case 'get_income_expense_summary':
       return executeGetIncomeExpenseSummary(input);
+    case 'get_financial_plan':
+      return executeGetFinancialPlan();
     case 'get_financial_health_check':
       return executeGetFinancialHealthCheck();
     case 'remember':
@@ -1275,21 +1315,20 @@ async function executeGetBudgetStatus(input: Record<string, unknown>) {
 }
 
 async function executeSetBudget(input: Record<string, unknown>) {
-  const categoryName = input.category_name as string;
-  const monthlyLimit = input.monthly_limit as string;
+  const parsed = setBudgetInputSchema.safeParse(input);
+  if (!parsed.success) return { error: financialPlanValidationError(parsed.error) };
+  const { category_name: categoryName, monthly_limit: monthlyLimit } = parsed.data;
 
   let category = await categoryRepo.getByName(categoryName);
-  if (!category) {
-    category = await categoryRepo.create({ name: categoryName });
-  }
-
-  const effectiveFrom = format(new Date(), 'yyyy-MM-dd');
-  const budget = await budgetRepo.upsert(category.id, monthlyLimit, effectiveFrom);
-
+  if (!category) category = await categoryRepo.create({ name: categoryName });
+  const normalized = budgetBodySchema.safeParse({ categoryId: category.id, monthlyLimit, effectiveFrom: londonTodayIso() });
+  if (!normalized.success) return { error: financialPlanValidationError(normalized.error) };
+  const { categoryId, effectiveFrom } = normalized.data;
+  const budget = await budgetRepo.upsert(categoryId, monthlyLimit, effectiveFrom);
   return {
     budgetId: budget.id,
     category: category.name,
-    categoryId: category.id,
+    categoryId,
     monthlyLimit: formatCurrency(monthlyLimit),
     effectiveFrom: budget.effective_from,
   };
@@ -1319,27 +1358,20 @@ async function executeGetSavingsGoals(input: Record<string, unknown>) {
 }
 
 async function executeSetSavingsGoal(input: Record<string, unknown>) {
-  const name = input.name as string;
-  const targetAmount = input.target_amount as string;
-  const targetDate = input.target_date as string | undefined;
-  const accountName = input.account_name as string | undefined;
+  const parsed = setSavingsGoalInputSchema.safeParse(input);
+  if (!parsed.success) return { error: financialPlanValidationError(parsed.error) };
+  const { name, target_amount: targetAmount, target_date: targetDate, account_name: accountName } = parsed.data;
 
   let accountId: number | null = null;
   if (accountName) {
     const balances = await accountRepo.getBalances();
-    const match = balances.find(
-      (b) => b.account_name.toLowerCase() === accountName.toLowerCase(),
-    );
-    if (match) accountId = match.account_id as number;
+    const matches = balances.filter(b => b.account_name.toLowerCase() === accountName.toLowerCase());
+    if (matches.length !== 1) return { error: matches.length ? 'Account name is ambiguous.' : 'Account not found. Use the exact name of an existing account.' };
+    accountId = matches[0].account_id;
   }
-
-  const goal = await savingsGoalRepo.create({
-    name,
-    targetAmount,
-    targetDate: targetDate ?? null,
-    accountId,
-  });
-
+  const normalized = savingsGoalBodySchema.safeParse({ name, targetAmount, targetDate: targetDate ?? null, accountId });
+  if (!normalized.success) return { error: financialPlanValidationError(normalized.error) };
+  const goal = await savingsGoalRepo.create(normalized.data);
   return {
     id: goal.id,
     name: goal.name,
@@ -1350,26 +1382,27 @@ async function executeSetSavingsGoal(input: Record<string, unknown>) {
 }
 
 async function executeUpdateSavingsProgress(input: Record<string, unknown>) {
-  const goalId = input.goal_id as number;
-  const currentAmount = input.current_amount as string;
-
+  const parsed = updateSavingsProgressInputSchema.safeParse(input);
+  if (!parsed.success) return { error: financialPlanValidationError(parsed.error) };
+  const normalized = savingsGoalPatchSchema.safeParse({ id: parsed.data.goal_id, currentAmount: parsed.data.current_amount });
+  if (!normalized.success) return { error: financialPlanValidationError(normalized.error) };
+  const goalId = normalized.data.id;
+  const currentAmount = normalized.data.currentAmount!;
   const goal = await savingsGoalRepo.updateProgress(goalId, currentAmount);
   if (!goal) return { error: 'Goal not found' };
 
-  const target = parseFloat(goal.targetAmount);
-  const current = parseFloat(goal.currentAmount);
-  const progress = target > 0 ? Math.round((current / target) * 100) : 0;
-
+  const target = new Decimal(goal.targetAmount);
+  const current = new Decimal(goal.currentAmount);
+  const ratio = target.gt(0) ? current.div(target).mul(100) : new Decimal(0);
+  const progress = ratio.toDecimalPlaces(2, Decimal.ROUND_DOWN).toNumber();
+  const completed = target.gt(0) && current.gte(target);
   let milestone: string | null = null;
-  if (progress >= 100) milestone = 'Goal completed!';
-  else if (progress >= 75) milestone = '75% milestone reached!';
-  else if (progress >= 50) milestone = 'Halfway there!';
-  else if (progress >= 25) milestone = '25% milestone reached!';
+  if (completed) milestone = 'Goal completed!';
+  else if (ratio.gte(75)) milestone = '75% milestone reached!';
+  else if (ratio.gte(50)) milestone = 'Halfway there!';
+  else if (ratio.gte(25)) milestone = '25% milestone reached!';
 
-  if (progress >= 100) {
-    await savingsGoalRepo.update(goalId, { status: 'completed' });
-  }
-
+  if (completed) await savingsGoalRepo.update(goalId, { status: 'completed' });
   return {
     id: goal.id,
     name: goal.name,
@@ -1377,7 +1410,7 @@ async function executeUpdateSavingsProgress(input: Record<string, unknown>) {
     currentAmount: formatCurrency(goal.currentAmount),
     progress,
     milestone,
-    status: progress >= 100 ? 'completed' : goal.status,
+    status: completed ? 'completed' : goal.status,
   };
 }
 
@@ -1409,7 +1442,7 @@ async function executeGetDebtSummary() {
         termMonths: m.termMonths,
         remainingMonths,
         currentValuation: valuation ? formatCurrency(valuation.valuation) : null,
-        ltv: valuation
+        ltv: valuation && new Decimal(valuation.valuation).gt(0)
           ? `${absBalance.div(new Decimal(valuation.valuation)).mul(100).toFixed(1)}%`
           : null,
       });
@@ -1424,143 +1457,195 @@ async function executeGetDebtSummary() {
 }
 
 async function executeGetIncomeExpenseSummary(input: Record<string, unknown>) {
-  const monthCount = (input.months as number) || 3;
-  const now = new Date();
-  const months: Array<{
-    month: string;
-    income: string;
-    expenses: string;
-    net: string;
-  }> = [];
-
-  let totalIncome = new Decimal(0);
-  let totalExpenses = new Decimal(0);
-
-  for (let i = 0; i < monthCount; i++) {
-    const d = subMonths(now, i);
-    const monthStr = format(d, 'yyyy-MM');
-    const startDate = `${monthStr}-01`;
-    const endDate = `${monthStr}-31`;
-
-    const balances = await accountRepo.getBalances();
-    const incomeAccounts = balances.filter((b) => b.account_type === 'INCOME');
-    const expenseAccounts = balances.filter((b) => b.account_type === 'EXPENSE');
-
-    // Get income entries for this month
-    const incomeEntries = await journalRepo.listEntries({
-      startDate,
-      endDate,
-      limit: 1000,
-    });
-
-    let monthIncome = new Decimal(0);
-    let monthExpenses = new Decimal(0);
-
-    for (const entry of incomeEntries as Array<Record<string, unknown>>) {
-      const summary = entry.entries_summary as string;
-      if (!summary) continue;
-      for (const part of summary.split('|')) {
-        const [accountName, amount] = part.split(':');
-        if (!amount) continue;
-        const val = new Decimal(amount);
-        // Income accounts have negative balances (credit normal)
-        const matchedIncome = incomeAccounts.find((a) => a.account_name === accountName);
-        const matchedExpense = expenseAccounts.find((a) => a.account_name === accountName);
-        if (matchedIncome) monthIncome = monthIncome.plus(val.abs());
-        if (matchedExpense) monthExpenses = monthExpenses.plus(val.abs());
-      }
-    }
-
-    totalIncome = totalIncome.plus(monthIncome);
-    totalExpenses = totalExpenses.plus(monthExpenses);
-
-    months.push({
-      month: monthStr,
-      income: formatCurrency(monthIncome.toString()),
-      expenses: formatCurrency(monthExpenses.toString()),
-      net: formatCurrency(monthIncome.minus(monthExpenses).toString()),
-    });
+  const requestedMonths = input.months === undefined ? 3 : input.months;
+  if (typeof requestedMonths !== 'number' || !Number.isInteger(requestedMonths) || requestedMonths < 1 || requestedMonths > 12) {
+    return { error: 'months must be a whole number from 1 to 12.' };
   }
-
-  const avgIncome = totalIncome.div(monthCount);
-  const avgExpenses = totalExpenses.div(monthCount);
-
+  const result = await executeGetFinancialPlan();
+  if ('error' in result) return result;
+  const monthByKey = new Map(result.cashflow.months.map(row => [row.month, row]));
+  const anchor = new Date(`${result.asOf.slice(0, 7)}-01T12:00:00Z`);
+  const rows = Array.from({ length: requestedMonths }, (_, index) => {
+    const month = new Date(Date.UTC(anchor.getUTCFullYear(), anchor.getUTCMonth() - index - 1, 1)).toISOString().slice(0, 7);
+    return monthByKey.get(month) ?? { month, totals: null };
+  });
+  const observedRows = rows.filter(row => row.totals !== null);
+  const hasAllRequestedMonths = rows.length === requestedMonths && observedRows.length === requestedMonths;
+  const totalIncome = observedRows.reduce((total, row) => total.plus(row.totals!.income), new Decimal(0));
+  const totalExpenses = observedRows.reduce((total, row) => total.plus(row.totals!.spending), new Decimal(0));
   return {
-    months,
-    averageMonthlyIncome: formatCurrency(avgIncome.toString()),
-    averageMonthlyExpenses: formatCurrency(avgExpenses.toString()),
-    averageMonthlyNet: formatCurrency(avgIncome.minus(avgExpenses).toString()),
-    period: `${monthCount} months`,
+    months: rows.map(row => ({
+      month: row.month,
+      income: row.totals === null ? null : formatCurrency(row.totals.income),
+      expenses: row.totals === null ? null : formatCurrency(row.totals.spending),
+      net: row.totals === null ? null : formatCurrency(row.totals.net),
+    })),
+    averageMonthlyIncome: hasAllRequestedMonths ? formatCurrency(totalIncome.div(requestedMonths).toString()) : null,
+    averageMonthlyExpenses: hasAllRequestedMonths ? formatCurrency(totalExpenses.div(requestedMonths).toString()) : null,
+    averageMonthlyNet: hasAllRequestedMonths ? formatCurrency(totalIncome.minus(totalExpenses).div(requestedMonths).toString()) : null,
+    period: `${requestedMonths} months`,
+    periodBasis: 'Completed calendar months requested; current month excluded.',
+    requestedMonths,
+    observedMonths: observedRows.length,
+    loadedMonths: rows.filter(row => monthByKey.has(row.month)).length,
+    missingRequestedMonths: rows.filter(row => row.totals === null).map(row => row.month),
+    coverage: result.coverage,
+    basis: 'Completed calendar months only. Transfers are excluded and expense refunds reduce spending. Averages require observed activity in every requested month; statements may still be incomplete.',
+    warnings: hasAllRequestedMonths ? result.coverage.warnings : [
+      ...result.coverage.warnings,
+      'The financial plan does not contain observed activity for every requested month. Missing activity is unknown, not zero.',
+    ],
   };
 }
 
+/** No provider call or mutation: keep adviser evidence identical to the planning UI. */
+async function executeGetFinancialPlan() {
+  try {
+    const { input, source, profileSaved } = await loadPlanningInput();
+    const plan = buildFinancialPlan(input);
+    return {
+      ...plan,
+      dataSource: source,
+      profileSaved,
+      retirementScenario: input.profile?.retirementScenario ? {
+        status: 'illustration' as const,
+        assumptions: input.profile.retirementScenario,
+        projection: projectRetirement(input.profile.retirementScenario),
+        basis: 'Saved user-entered assumptions, not forecasts or guaranteed pension income. Gross contributions are credited without automatic tax relief. Income is in today’s money, excludes tax and sequence-of-return risk, and the withdrawal rate is an illustration, not a safe-income guarantee.',
+      } : {
+        status: 'inputs-required' as const,
+        savedInputs: plan.retirement,
+        requiredInputs: [
+          'current pension balance and whether it is a defined-contribution pot',
+          'current age and retirement age',
+          'gross personal contributions and employer contributions',
+          'assumed investment return, total annual charges and inflation',
+          'target income in today’s money and illustrative withdrawal rate',
+          'personal State Pension forecast and access age, if included',
+        ],
+        basis: 'The saved planning summary uses contributions only. Use the retirement planner for explicit assumption-based lower, base and higher scenarios; no return or entitlement is inferred.',
+      },
+    };
+  } catch {
+    // Database/provider errors can contain credentials or connection strings.
+    // A failed load is unavailable evidence, never an empty healthy household.
+    return { error: 'Financial plan unavailable. Check the database connection and saved planning inputs.', status: 'unavailable' as const };
+  }
+}
+
+function formatKnownMoney(value: number | null): string | null {
+  return value === null ? null : formatCurrency(value);
+}
+
 async function executeGetFinancialHealthCheck() {
-  // Gather data from multiple sources
-  const currentMonth = format(new Date(), 'yyyy-MM');
-  const [budgetStatus, incomeExpense, debtSummary, savingsGoals] = await Promise.all([
-    executeGetBudgetStatus({ month: currentMonth }),
-    executeGetIncomeExpenseSummary({ months: 3 }),
-    executeGetDebtSummary(),
-    executeGetSavingsGoals({ status: 'active' }),
-  ]);
+  const result = await executeGetFinancialPlan();
+  if ('error' in result) return result;
+  const plan: FinancialPlan = result;
+  const { cashflow, emergencyFund, balanceSheet } = plan;
+  const knownBudgets = plan.budgets.filter(b => b.utilisationPercent !== null);
+  const overBudget = knownBudgets.filter(b => b.status === 'over-budget');
+  const nearBudget = knownBudgets.filter(b => b.utilisationPercent! >= 80 && b.utilisationPercent! <= 100);
+  const annualIncome = cashflow.monthlyIncome === null ? null : cashflow.monthlyIncome * 12;
+  const debtToIncome = annualIncome !== null && annualIncome > 0 && balanceSheet.totalDebt !== null
+    ? new Decimal(balanceSheet.totalDebt).div(annualIncome).mul(100).toFixed(0) + '%'
+    : null;
+  // Reserve saving time uses the shortfall after existing cash, not the full target.
+  const monthsToSave = emergencyFund.shortfall === null
+    ? null
+    : emergencyFund.shortfall === 0
+      ? 0
+      : cashflow.monthlySurplus !== null && cashflow.monthlySurplus > 0
+        ? new Decimal(emergencyFund.shortfall).div(cashflow.monthlySurplus).ceil().toNumber()
+        : null;
+  const concerns = [...plan.coverage.warnings];
+  if (cashflow.monthlySurplus !== null && cashflow.monthlySurplus < 0) {
+    concerns.push('Recorded spending exceeded income across the covered completed months. Check upcoming essential bills and debt payments.');
+  }
+  if (overBudget.length) concerns.push(`Observed spending exceeds budget in: ${overBudget.map(b => b.category).join(', ')}.`);
+  if (emergencyFund.status === 'below-target') concerns.push('Recorded accessible cash is below the chosen essential-spending reserve.');
+  if (emergencyFund.status === 'unknown') concerns.push('Emergency reserve adequacy is unknown until accessible cash and essential monthly spending are confirmed.');
+  concerns.push('Recorded debt balances do not establish repayment affordability: debt APRs, minimum payments and upcoming bills must also be checked.');
 
-  // Savings rate
-  const avgIncome = parseFloat(
-    (incomeExpense as { averageMonthlyIncome: string }).averageMonthlyIncome.replace(/[£,]/g, ''),
-  );
-  const avgExpenses = parseFloat(
-    (incomeExpense as { averageMonthlyExpenses: string }).averageMonthlyExpenses.replace(/[£,]/g, ''),
-  );
-  const savingsRate = avgIncome > 0 ? ((avgIncome - avgExpenses) / avgIncome) * 100 : 0;
-
-  // Budget adherence
-  const budgets = budgetStatus as Array<{ category: string; percentUsed: number }>;
-  const overBudget = budgets.filter((b) => b.percentUsed > 100);
-  const nearBudget = budgets.filter((b) => b.percentUsed >= 80 && b.percentUsed <= 100);
-
-  // Debt-to-income
-  const totalDebtVal = parseFloat(
-    (debtSummary as { totalDebt: string }).totalDebt.replace(/[£,]/g, ''),
-  );
-  const annualIncome = avgIncome * 12;
-  const debtToIncome = annualIncome > 0 ? (totalDebtVal / annualIncome) * 100 : 0;
-
-  // Emergency fund estimate (3 months expenses)
-  const emergencyTarget = avgExpenses * 3;
-  const monthlySurplus = avgIncome - avgExpenses;
-
-  // Concerns
-  const concerns: string[] = [];
-  if (savingsRate < 10) concerns.push('Savings rate is below 10% — consider reducing discretionary spending.');
-  if (overBudget.length > 0)
-    concerns.push(`Over budget in ${overBudget.length} categor${overBudget.length === 1 ? 'y' : 'ies'}: ${overBudget.map((b) => b.category).join(', ')}.`);
-  if (debtToIncome > 400)
-    concerns.push('Debt-to-income ratio is high — focus on debt reduction.');
-  if (monthlySurplus < 0)
-    concerns.push('You are spending more than you earn on average. Review expenses urgently.');
-  if (nearBudget.length > 0)
-    concerns.push(`Approaching budget limits in: ${nearBudget.map((b) => b.category).join(', ')}.`);
-
+  let savingsGoals: unknown = null;
+  try {
+    savingsGoals = await executeGetSavingsGoals({ status: 'active' });
+  } catch {
+    concerns.push('Savings goals could not be loaded; existing commitments to goals remain unknown.');
+  }
+  let debtSummary: unknown;
+  try {
+    const mortgageDetails = await executeGetDebtSummary();
+    debtSummary = {
+      ...mortgageDetails,
+      totalDebt: formatKnownMoney(balanceSheet.totalDebt),
+      mortgageDebt: formatKnownMoney(balanceSheet.propertyDebt),
+      otherDebt: formatKnownMoney(balanceSheet.otherDebt),
+      basis: 'Detailed mortgage records plus known recorded other debt; completeness and repayment terms require confirmation.',
+    };
+  } catch {
+    concerns.push('Detailed mortgage terms could not be loaded. Recorded plan debt balances remain available.');
+    debtSummary = {
+      debts: plan.properties.filter(p => p.debt > 0).map(p => ({
+        property: p.name,
+        currentBalance: formatCurrency(p.debt),
+        currentValuation: formatKnownMoney(p.value),
+        ltv: p.loanToValuePercent === null ? null : `${p.loanToValuePercent.toFixed(1)}%`,
+      })),
+      totalDebt: formatKnownMoney(balanceSheet.totalDebt),
+      otherDebt: formatKnownMoney(balanceSheet.otherDebt),
+      count: null,
+      status: 'details-unavailable',
+      basis: 'Known recorded property and other debt; individual mortgage terms and count are unavailable.',
+    };
+  }
+  // Keep existing summary field names for chat clients while disclosing unknown values.
   return {
-    savingsRate: `${savingsRate.toFixed(1)}%`,
-    savingsRateStatus: savingsRate >= 20 ? 'good' : savingsRate >= 10 ? 'fair' : 'poor',
+    savingsRate: cashflow.savingsRate === null ? null : `${cashflow.savingsRate.toFixed(1)}%`,
+    savingsRateStatus: cashflow.savingsRate === null ? 'unknown' : cashflow.savingsRate < 0 ? 'poor' : 'unscored',
+    savingsRateBasis: 'Observed net surplus divided by recorded income; this is not proof of money transferred into savings and has no universal target.',
     budgetAdherence: {
-      total: budgets.length,
-      onTrack: budgets.filter((b) => b.percentUsed <= 80).length,
+      total: plan.budgets.length,
+      onTrack: knownBudgets.filter(b => b.utilisationPercent! < 80).length,
       nearLimit: nearBudget.length,
       overBudget: overBudget.length,
+      unknown: plan.budgets.length - knownBudgets.length,
+      basis: 'Average spending across the completed months in the financial plan, compared with monthly budget limits.',
     },
-    debtToIncome: `${debtToIncome.toFixed(0)}%`,
+    debtToIncome,
+    debtToIncomeBasis: 'Known recorded debt balance divided by observed annualised income; not a debt-service ratio or an affordability decision.',
     emergencyFund: {
-      target: formatCurrency(emergencyTarget),
-      monthlyExpenses: formatCurrency(avgExpenses),
-      monthsToSave: monthlySurplus > 0 ? Math.ceil(emergencyTarget / monthlySurplus) : null,
+      target: formatKnownMoney(emergencyFund.targetAmount),
+      monthlyExpenses: formatKnownMoney(emergencyFund.essentialMonthlySpending),
+      cashAvailable: formatKnownMoney(emergencyFund.cashAvailable),
+      shortfall: formatKnownMoney(emergencyFund.shortfall),
+      coverageMonths: emergencyFund.coverageMonths,
+      targetMonths: emergencyFund.targetMonths,
+      status: emergencyFund.status,
+      monthsToSave,
+      basis: emergencyFund.basis,
+      savingTimeBasis: 'Illustration using recorded monthly surplus and reserve shortfall; excludes changes in income, spending and earmarked cash.',
     },
-    monthlySurplus: formatCurrency(monthlySurplus),
+    monthlySurplus: formatKnownMoney(cashflow.monthlySurplus),
     concerns,
-    incomeExpenseSummary: incomeExpense,
+    incomeExpenseSummary: {
+      months: cashflow.months.map(row => ({
+        month: row.month,
+        income: row.totals === null ? null : formatCurrency(row.totals.income),
+        expenses: row.totals === null ? null : formatCurrency(row.totals.spending),
+        net: row.totals === null ? null : formatCurrency(row.totals.net),
+      })),
+      averageMonthlyIncome: formatKnownMoney(cashflow.monthlyIncome),
+      averageMonthlyExpenses: formatKnownMoney(cashflow.monthlySpending),
+      averageMonthlyNet: formatKnownMoney(cashflow.monthlySurplus),
+      period: `${cashflow.recentPeriod.months.length} months`,
+      calculationPeriod: cashflow.recentPeriod,
+    },
     savingsGoals,
     debtSummary,
+    coverage: plan.coverage,
+    methodology: plan.methodology,
+    actions: plan.actions,
+    retirement: plan.retirement,
   };
 }
 

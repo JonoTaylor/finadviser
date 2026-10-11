@@ -1,5 +1,7 @@
 import { eq, inArray, sql } from 'drizzle-orm';
 import { getDb, schema } from '@/lib/db';
+import { accountBalanceAsOf } from '@/lib/db/account-balance-as-of';
+import { londonTodayIso } from '@/lib/dates/today';
 
 const { accounts, bookEntries } = schema;
 
@@ -116,9 +118,14 @@ export const accountRepo = {
       .orderBy(accounts.name);
   },
 
-  async getBalances() {
+  async getBalances(asOf = londonTodayIso()) {
     const db = getDb();
-    const rows = await db.execute(sql`SELECT * FROM v_account_balances`);
+    const rows = await db.execute(sql`
+      SELECT a.id AS account_id, a.name AS account_name, a.account_type,
+             ${accountBalanceAsOf(asOf)}::text AS balance
+      FROM accounts a
+      LEFT JOIN v_account_balances v ON v.account_id = a.id
+    `);
     return rows.rows as Array<{
       account_id: number;
       account_name: string;
@@ -127,8 +134,17 @@ export const accountRepo = {
     }>;
   },
 
-  async getBalance(accountId: number): Promise<string> {
+  async getBalance(accountId: number, asOf?: string): Promise<string> {
     const db = getDb();
+    if (asOf !== undefined) {
+      const rows = await db.execute(sql`
+        SELECT ${accountBalanceAsOf(asOf)}::text AS balance
+        FROM accounts a
+        LEFT JOIN v_account_balances v ON v.account_id = a.id
+        WHERE a.id = ${accountId}
+      `);
+      return (rows.rows[0]?.balance as string | undefined) ?? '0';
+    }
     const [row] = await db
       .select({ balance: sql<string>`COALESCE(SUM(${bookEntries.amount}::numeric), 0)` })
       .from(bookEntries)

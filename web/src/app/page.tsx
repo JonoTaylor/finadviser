@@ -1,6 +1,6 @@
 'use client';
 
-import { Box, Grid, Typography, Skeleton } from '@mui/material';
+import { Alert, Box, Button, Grid, Stack, Typography, Skeleton } from '@mui/material';
 import { format } from 'date-fns';
 import useSWR from 'swr';
 import YourShareCard from '@/components/dashboard/YourShareCard';
@@ -11,13 +11,16 @@ import RecentTransactionsTable from '@/components/dashboard/RecentTransactionsTa
 import AiInsightsCard from '@/components/dashboard/AiInsightsCard';
 import BudgetOverviewCard from '@/components/dashboard/BudgetOverviewCard';
 import SavingsGoalsCard from '@/components/dashboard/SavingsGoalsCard';
+import PlanningSnapshotCard from '@/components/dashboard/PlanningSnapshotCard';
+import { fetchJson } from '@/lib/http/client';
+import Link from 'next/link';
 
-const fetcher = (url: string) => fetch(url).then(r => r.json());
+const fetcher = fetchJson;
 
 export default function DashboardPage() {
-  const { data: balances, isLoading: loadingBalances } = useSWR('/api/accounts?balances=true', fetcher);
-  const { data: spending, isLoading: loadingSpending } = useSWR('/api/journal/monthly-spending', fetcher);
-  const { data: journalData, isLoading: loadingJournal } = useSWR('/api/journal?limit=10', fetcher);
+  const { data: balances, error: balancesError, isLoading: loadingBalances } = useSWR<Parameters<typeof MonthlySummaryCard>[0]['balances']>('/api/accounts?balances=true', fetcher);
+  const { data: spending, error: spendingError, isLoading: loadingSpending } = useSWR<Parameters<typeof MonthlySummaryCard>[0]['spending']>('/api/journal/monthly-spending', fetcher);
+  const { data: journalData, error: journalError, isLoading: loadingJournal } = useSWR<{ entries: Parameters<typeof RecentTransactionsTable>[0]['entries'] }>('/api/journal?limit=10', fetcher);
 
   const recentEntries = journalData?.entries ?? [];
 
@@ -30,30 +33,35 @@ export default function DashboardPage() {
 
   return (
     <Box>
-      <Box sx={{ mb: 4 }}>
+      <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" gap={2} sx={{ mb: 4 }}>
+        <Box>
         <Typography variant="h4">{greeting}</Typography>
         <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
           {format(new Date(), 'EEEE, d MMMM yyyy')}
         </Typography>
-      </Box>
+        </Box>
+        <Stack direction="row" gap={1} flexWrap="wrap" alignItems="center"><Button component={Link} href="/spending" variant="outlined">Review spending</Button><Button component={Link} href="/pensions" variant="outlined">Plan retirement</Button></Stack>
+      </Stack>
 
       <Grid container spacing={2.5}>
+        <Grid size={{ xs: 12 }}><PlanningSnapshotCard /></Grid>
+        {(balancesError || spendingError || journalError) && <Grid size={{ xs: 12 }}><Alert severity="warning">Some account data could not be loaded. Figures will appear when your accounts are available; missing data is not a zero balance.</Alert></Grid>}
         {/* Metric cards row */}
         <Grid size={{ xs: 12, sm: 6, lg: 3 }}>
           <YourShareCard />
         </Grid>
         <Grid size={{ xs: 12, sm: 6, lg: 3 }}>
-          {(loadingSpending || loadingBalances) ? <Skeleton variant="rounded" height={180} sx={{ borderRadius: 5 }} /> : (
+          {(loadingSpending || loadingBalances) ? <Skeleton variant="rounded" height={180} sx={{ borderRadius: 5 }} /> : balancesError || spendingError ? <Alert severity="info">Monthly cash flow is unavailable.</Alert> : (
             <MonthlySummaryCard spending={spending ?? []} balances={balances ?? []} />
           )}
         </Grid>
         <Grid size={{ xs: 12, sm: 6, lg: 3 }}>
-          {(loadingSpending || loadingBalances) ? <Skeleton variant="rounded" height={180} sx={{ borderRadius: 5 }} /> : (
+          {(loadingSpending || loadingBalances) ? <Skeleton variant="rounded" height={180} sx={{ borderRadius: 5 }} /> : balancesError || spendingError ? <Alert severity="info">The savings rate needs account activity.</Alert> : (
             <SavingsRateCard spending={spending ?? []} balances={balances ?? []} />
           )}
         </Grid>
         <Grid size={{ xs: 12, sm: 6, lg: 3 }}>
-          {loadingSpending ? <Skeleton variant="rounded" height={180} sx={{ borderRadius: 5 }} /> : (
+          {loadingSpending ? <Skeleton variant="rounded" height={180} sx={{ borderRadius: 5 }} /> : spendingError ? <Alert severity="info">Spending categories are unavailable.</Alert> : (
             <TopCategoriesCard spending={spending ?? []} />
           )}
         </Grid>
@@ -73,7 +81,7 @@ export default function DashboardPage() {
 
         {/* Recent transactions */}
         <Grid size={{ xs: 12 }}>
-          {loadingJournal ? <Skeleton variant="rounded" height={400} sx={{ borderRadius: 5 }} /> : (
+          {loadingJournal ? <Skeleton variant="rounded" height={400} sx={{ borderRadius: 5 }} /> : journalError ? <Alert severity="info">Recent transactions could not be loaded.</Alert> : (
             <RecentTransactionsTable entries={recentEntries} />
           )}
         </Grid>

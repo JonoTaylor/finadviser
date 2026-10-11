@@ -1,4 +1,4 @@
-import { eq, sql, and, inArray } from 'drizzle-orm';
+import { eq, sql, and, inArray, lte } from 'drizzle-orm';
 import Decimal from 'decimal.js';
 import { getDb, schema } from '@/lib/db';
 import type { LettingType } from '@/lib/db/schema';
@@ -140,12 +140,15 @@ export const propertyRepo = {
     return row;
   },
 
-  async getLatestValuation(propertyId: number) {
+  async getLatestValuation(propertyId: number, asOf?: string) {
     const db = getDb();
     const rows = await db
       .select()
       .from(propertyValuations)
-      .where(eq(propertyValuations.propertyId, propertyId))
+      .where(and(
+        eq(propertyValuations.propertyId, propertyId),
+        asOf !== undefined ? lte(propertyValuations.valuationDate, asOf) : undefined,
+      ))
       .orderBy(sql`valuation_date DESC`)
       .limit(1);
     return rows[0] ?? null;

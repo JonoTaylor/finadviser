@@ -1,6 +1,5 @@
 'use client';
 
-import { useMemo } from 'react';
 import { Card, CardContent, Typography, Box } from '@mui/material';
 import { alpha } from '@mui/material/styles';
 import DonutSmallRoundedIcon from '@mui/icons-material/DonutSmallRounded';
@@ -9,6 +8,7 @@ import ArrowDropDownRoundedIcon from '@mui/icons-material/ArrowDropDownRounded';
 import { formatCurrency } from '@/lib/utils/formatting';
 import { getCategoryColor } from '@/lib/utils/category-colors';
 import { londonTodayIso } from '@/lib/dates/today';
+import { monthlyCategories, previousMonth } from '@/lib/dashboard/monthly-cash-flow';
 import { format } from 'date-fns';
 import Decimal from 'decimal.js';
 import { softTokens } from '@/theme/theme';
@@ -18,14 +18,6 @@ interface SpendingRow {
   category_name: string | null;
   account_type: string;   // e.g. 'INCOME' | 'EXPENSE'
   total: string;
-}
-
-function previousMonth(yyyyMm: string): string {
-  const [y, m] = yyyyMm.split('-').map(Number);
-  if (!Number.isFinite(y) || !Number.isFinite(m)) return yyyyMm;
-  const prevMonth = m === 1 ? 12 : m - 1;
-  const prevYear = m === 1 ? y - 1 : y;
-  return `${prevYear}-${String(prevMonth).padStart(2, '0')}`;
 }
 
 function monthLabel(yyyyMm: string): string {
@@ -41,41 +33,18 @@ function monthLabel(yyyyMm: string): string {
  * increase is a warning; for INCOME, an increase is a success.
  * The arrow direction (▲/▼) always reflects raw direction; only
  * the colour swaps based on whether more-of-this-thing is good or
- * bad. account_type per category is captured during aggregation
- * (one category → one type in this dataset).
+ * bad. Income and expense rows with the same category name remain
+ * separate, and refunds reduce their expense bucket.
  */
 export default function TopCategoriesCard({ spending }: { spending: SpendingRow[] }) {
   const today = londonTodayIso();
   const currentMonth = today.slice(0, 7);
   const prevMonth = previousMonth(currentMonth);
 
-  const { thisByCategory, prevByCategory, typeByCategory } = useMemo(() => {
-    const thisMap = new Map<string, Decimal>();
-    const prevMap = new Map<string, Decimal>();
-    const typeMap = new Map<string, string>();
-    for (const row of spending) {
-      const cat = row.category_name || 'Uncategorized';
-      if (!typeMap.has(cat)) typeMap.set(cat, row.account_type);
-      const val = new Decimal(row.total).abs();
-      if (row.month === currentMonth) {
-        thisMap.set(cat, (thisMap.get(cat) ?? new Decimal(0)).plus(val));
-      } else if (row.month === prevMonth) {
-        prevMap.set(cat, (prevMap.get(cat) ?? new Decimal(0)).plus(val));
-      }
-    }
-    return { thisByCategory: thisMap, prevByCategory: prevMap, typeByCategory: typeMap };
-  }, [spending, currentMonth, prevMonth]);
+  const sorted = monthlyCategories(spending, currentMonth).slice(0, 5);
 
-  const sorted = useMemo(
-    () =>
-      Array.from(thisByCategory.entries())
-        .sort(([, a], [, b]) => b.minus(a).toNumber())
-        .slice(0, 5),
-    [thisByCategory],
-  );
-
-  const topAmount = sorted.length > 0 && !sorted[0][1].isZero()
-    ? sorted[0][1]
+  const topAmount = sorted.length > 0 && sorted[0].amount.gt(0)
+    ? sorted[0].amount
     : new Decimal(1);
 
   return (
@@ -105,18 +74,17 @@ export default function TopCategoriesCard({ spending }: { spending: SpendingRow[
           </Typography>
         ) : (
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.75, mt: 1.25 }}>
-            {sorted.map(([cat, amount]) => {
-              const previous = prevByCategory.get(cat) ?? new Decimal(0);
+            {sorted.map(({ key, category: cat, amount, previous, accountType }) => {
               const delta = amount.minus(previous);
-              const pct = topAmount.lte(0) ? 0 : amount.div(topAmount).mul(100).toNumber();
+              const pct = Math.max(0, Math.min(100, amount.div(topAmount).mul(100).toNumber()));
               const { fill } = getCategoryColor(cat);
               const deltaIsZero = delta.abs().lt('0.01');
               const deltaUp = delta.gt(0);
-              const isIncome = typeByCategory.get(cat) === 'INCOME';
+              const isIncome = accountType === 'INCOME';
               const goodDirection = isIncome ? deltaUp : !deltaUp;
               const deltaColor = goodDirection ? softTokens.mint.ink : softTokens.peach.ink;
               return (
-                <Box key={cat}>
+                <Box key={key}>
                   <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.25 }}>
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                       <Box
@@ -128,7 +96,9 @@ export default function TopCategoriesCard({ spending }: { spending: SpendingRow[
                           flexShrink: 0,
                         }}
                       />
-                      <Typography variant="body2" noWrap sx={{ maxWidth: 120 }}>{cat}</Typography>
+                      <Typography variant="body2" noWrap sx={{ maxWidth: 120 }}>
+                        {cat}{isIncome ? ' · income' : ''}
+                      </Typography>
                     </Box>
                     <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 0.5 }}>
                       <Typography variant="body2" fontWeight={600}>

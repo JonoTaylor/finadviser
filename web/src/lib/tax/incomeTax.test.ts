@@ -81,6 +81,15 @@ describe('computeIncomeTax: bands and personal allowance (2025-26)', () => {
     expect(fx(r.liability)).toBe('44703.00');
   });
 
+  it('matches widely published figures for salary-only taxpayers', () => {
+    // Employment only, 2025-26 England: £50,270 -> 7,540; £60,000 -> 11,432;
+    // £100,000 -> 27,432; £150,000 -> 53,703 (no allowance, 45% above 125,140).
+    expect(fx(calc({ nonSavingsIncome: 50270 }).liability)).toBe('7540.00');
+    expect(fx(calc({ nonSavingsIncome: 60000 }).liability)).toBe('11432.00');
+    expect(fx(calc({ nonSavingsIncome: 100000 }).liability)).toBe('27432.00');
+    expect(fx(calc({ nonSavingsIncome: 150000 }).liability)).toBe('53703.00');
+  });
+
   it('rejects negative inputs with a ClientError', () => {
     expect(() => calc({ nonSavingsIncome: -1 })).toThrow(ClientError);
     expect(() => calc({ dividends: 'abc' })).toThrow(ClientError);

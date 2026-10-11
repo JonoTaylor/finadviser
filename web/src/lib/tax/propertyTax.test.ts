@@ -184,9 +184,24 @@ describe('computePropertyIncome: rent-a-room', () => {
 });
 
 describe('computePropertyIncome: input checks and lines', () => {
-  it('rejects negative money', () => {
-    expect(() => run([standard('A', -1, 0)])).toThrow(ClientError);
+  it('rejects negative losses brought forward and non-numeric amounts', () => {
     expect(() => run([], { losses: -5 })).toThrow(ClientError);
+    expect(() => run([standard('A', Number.NaN, 0)])).toThrow(ClientError);
+  });
+
+  it('accepts ledger figures that went negative because refunds exceeded charges', () => {
+    // Net expenses of -200 (a service-charge refund bigger than the year's costs) add to profit.
+    const refund = run([standard('A', 5000, -200)]);
+    expect(fx(refund.standard.profitByExpenses)).toBe('5200.00');
+    // Net receipts below zero are just a bigger loss, and open no allowance relief.
+    const negativeReceipts = run([standard('A', -100, 0)]);
+    expect(fx(negativeReceipts.currentYearResult)).toBe('-100.00');
+    expect(negativeReceipts.standard.allowanceRelief).toBe('none');
+  });
+
+  it('floors a net negative mortgage interest at zero finance costs', () => {
+    const r = run([standard('A', 5000, 0, -50)]);
+    expect(fx(r.financeCostsClaimed)).toBe('0.00');
   });
 
   it('writes a readable line for each step', () => {

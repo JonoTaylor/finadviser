@@ -32,7 +32,7 @@
 import Decimal from 'decimal.js';
 import { formatCurrency } from '@/lib/utils/formatting';
 import type { BreakdownLine } from './breakdown';
-import { nonNegativeMoney } from './moneyInput';
+import { nonNegativeMoney, signedMoney } from './moneyInput';
 import type { TaxRateTable } from './taxRates';
 
 export type LettingType = 'standard' | 'rent_a_room';
@@ -43,6 +43,10 @@ const SECTION = 'Property income';
 export interface PropertyLetting {
   name: string;
   lettingType: LettingType;
+  // The three money figures come from the ledger and may be negative when
+  // refunds exceed charges in the year (a net expense recovery simply adds
+  // to profit). Mortgage interest is floored at zero: a net interest refund
+  // is not a finance cost.
   /** Owner's share of gross receipts. */
   grossIncome: Decimal.Value;
   /** Owner's share of allowable expenses, EXCLUDING finance costs. */
@@ -115,6 +119,10 @@ export interface PropertyIncomeResult {
   lines: BreakdownLine[];
 }
 
+function financeCostsOf(p: PropertyLetting): Decimal {
+  return Decimal.max(signedMoney(p.mortgageInterest, `${p.name} mortgage interest`), 0);
+}
+
 export function computePropertyIncome(inputs: PropertyIncomeInputs): PropertyIncomeResult {
   const { rates, method } = inputs;
   const lossesBroughtForward = nonNegativeMoney(inputs.lossesBroughtForward, 'Property losses brought forward');
@@ -131,9 +139,9 @@ export function computePropertyIncome(inputs: PropertyIncomeInputs): PropertyInc
   for (const p of inputs.properties) {
     if (p.lettingType !== 'standard') continue;
     standardNames.push(p.name);
-    stdGross = stdGross.plus(nonNegativeMoney(p.grossIncome, `${p.name} gross income`));
-    stdExpenses = stdExpenses.plus(nonNegativeMoney(p.totalExpenses, `${p.name} expenses`));
-    stdFinance = stdFinance.plus(nonNegativeMoney(p.mortgageInterest, `${p.name} mortgage interest`));
+    stdGross = stdGross.plus(signedMoney(p.grossIncome, `${p.name} gross income`));
+    stdExpenses = stdExpenses.plus(signedMoney(p.totalExpenses, `${p.name} expenses`));
+    stdFinance = stdFinance.plus(financeCostsOf(p));
   }
 
   const profitByExpenses = stdGross.minus(stdExpenses);
@@ -173,9 +181,9 @@ export function computePropertyIncome(inputs: PropertyIncomeInputs): PropertyInc
   const rentARoom: RentARoomResult[] = [];
   for (const p of inputs.properties) {
     if (p.lettingType !== 'rent_a_room') continue;
-    const receipts = nonNegativeMoney(p.grossIncome, `${p.name} gross income`);
-    const expenses = nonNegativeMoney(p.totalExpenses, `${p.name} expenses`);
-    const finance = nonNegativeMoney(p.mortgageInterest, `${p.name} mortgage interest`);
+    const receipts = signedMoney(p.grossIncome, `${p.name} gross income`);
+    const expenses = signedMoney(p.totalExpenses, `${p.name} expenses`);
+    const finance = financeCostsOf(p);
     const shared = Boolean(p.rentARoomShared);
     const limit = shared ? rates.rentARoomLimit.div(2) : rates.rentARoomLimit;
 
@@ -262,7 +270,7 @@ export function computePropertyIncome(inputs: PropertyIncomeInputs): PropertyInc
   // ---- Finance costs entering the S.24 pool ----
   const rentARoomFinance = rentARoom.reduce((acc, r) => acc.plus(r.financeCosts), new Decimal(0));
   const totalFinanceIncurred = inputs.properties.reduce(
-    (acc, p) => acc.plus(nonNegativeMoney(p.mortgageInterest, `${p.name} mortgage interest`)),
+    (acc, p) => acc.plus(financeCostsOf(p)),
     new Decimal(0),
   );
   const financeCostsClaimed = method === 'allowance' ? new Decimal(0) : stdFinance.plus(rentARoomFinance);

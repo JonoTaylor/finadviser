@@ -58,6 +58,9 @@ describe('computeOwnerTax: realistic Emily-like scenario (2025-26)', () => {
     expect(result.financeCosts.limitedBy).toBe('finance_costs');
     expect(result.financeCosts.reducer).toBe('480.00');
     expect(result.financeCosts.carriedForward).toBe('0.00');
+    expect(result.financeCosts.hasFinanceCosts).toBe(true);
+    expect(result.financeCosts.hasCarriedForward).toBe(false);
+    expect(result.property.hasLosses).toBe(false);
     // Liability 1,640 - 480 = 1,160.00.
     expect(result.incomeTax.liability).toBe('1160.00');
   });
@@ -71,6 +74,8 @@ describe('computeOwnerTax: realistic Emily-like scenario (2025-26)', () => {
   it('shows a Self Assessment balance with payments on account', () => {
     // PAYE paid is nil, so the whole 1,160 is due by 31 Jan 2027.
     expect(result.selfAssessment.balanceDue).toBe('1160.00');
+    expect(result.selfAssessment.amountDue).toBe('1160.00');
+    expect(result.selfAssessment.refundDue).toBe('0.00');
     expect(result.selfAssessment.isRefund).toBe(false);
     expect(result.selfAssessment.deadline).toBe('2027-01-31');
     // 1,160 is at least 1,000 and 0% was collected at source, so payments on account apply:
@@ -165,6 +170,7 @@ describe('computeOwnerTax: losses and carry-forwards', () => {
     expect(r.property.currentYearResult).toBe('-2000.00');
     expect(r.property.taxableProfit).toBe('0.00');
     expect(r.property.lossesCarriedForward).toBe('2000.00');
+    expect(r.property.hasLosses).toBe(true);
     expect(r.taxOnRentalIncome.amount).toBe('0.00');
   });
 
@@ -184,6 +190,7 @@ describe('computeOwnerTax: losses and carry-forwards', () => {
     expect(r.financeCosts.relieved).toBe('3000.00');
     expect(r.financeCosts.reducer).toBe('600.00');
     expect(r.financeCosts.carriedForward).toBe('8000.00');
+    expect(r.financeCosts.hasCarriedForward).toBe(true);
   });
 });
 
@@ -251,6 +258,8 @@ describe('computeOwnerTax: higher-rate taxpayer and payments on account', () => 
     const r = run([], { employmentIncome: 20000, payeTaxPaid: 2000 });
     // Liability 1,486.00; paid 2,000.
     expect(r.selfAssessment.balanceDue).toBe('-514.00');
+    expect(r.selfAssessment.amountDue).toBe('0.00');
+    expect(r.selfAssessment.refundDue).toBe('514.00');
     expect(r.selfAssessment.isRefund).toBe(true);
     expect(r.selfAssessment.paymentsOnAccount.required).toBe(false);
     expect(r.warnings.some(w => w.includes('repayment of £514.00'))).toBe(true);
@@ -331,6 +340,7 @@ describe('computeOwnerTax: whole-profile effects', () => {
     // Employment 110,000: allowance 7,570, tax 33,432.00 (see incomeTax tests).
     const r = run([], { employmentIncome: 110000 });
     expect(r.incomeTax.personalAllowance.taperReduction).toBe('5000.00');
+    expect(r.incomeTax.personalAllowance.tapered).toBe(true);
     expect(r.incomeTax.liability).toBe('33432.00');
   });
 
@@ -362,6 +372,15 @@ describe('computeOwnerTax: whole-profile effects', () => {
 
   it('rejects negative profile figures', () => {
     expect(() => run([], { dividends: -1 })).toThrow(ClientError);
+  });
+
+  it('still computes when a ledger total is negative (refunds exceed costs)', () => {
+    // Expenses net to -200: profit 5,200; no error, and MTD counts the receipts only.
+    const r = run([flat(5000, -200)], { employmentIncome: 12570 });
+    expect(r.property.profitByExpenses).toBe('5200.00');
+    expect(r.mtd.propertyReceipts).toBe('5000.00');
+    // A property whose receipts are negative adds nothing to MTD qualifying income.
+    expect(run([flat(-100, 0)]).mtd.propertyReceipts).toBe('0.00');
   });
 });
 

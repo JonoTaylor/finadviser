@@ -29,7 +29,7 @@ import {
   type TaxRowKind,
 } from './incomeTax';
 import { computeMtdItsaStatus, type MtdItsaStatus } from './mtdItsa';
-import { nonNegativeMoney, round2 } from './moneyInput';
+import { nonNegativeMoney, round2, signedMoney } from './moneyInput';
 import {
   computePropertyIncome,
   type LettingType,
@@ -122,6 +122,8 @@ export interface OwnerTaxComputation {
     lossesUsed: string;
     taxableProfit: string;
     lossesCarriedForward: string;
+    /** True when any loss was brought forward or is carried forward (UI shows the loss line). */
+    hasLosses: boolean;
   };
   financeCosts: {
     claimedThisYear: string;
@@ -132,9 +134,12 @@ export interface OwnerTaxComputation {
     reliefRatePct: string;
     reducer: string;
     carriedForward: string;
+    /** True when there are finance costs to show (this year or brought forward). */
+    hasFinanceCosts: boolean;
+    hasCarriedForward: boolean;
   };
   incomeTax: {
-    personalAllowance: { standard: string; taperReduction: string; effective: string };
+    personalAllowance: { standard: string; taperReduction: string; effective: string; tapered: boolean };
     rows: Array<{
       layer: IncomeLayer;
       layerLabel: string;
@@ -158,6 +163,10 @@ export interface OwnerTaxComputation {
     payeTaxPaid: string;
     /** Liability minus PAYE already paid. Negative means an overpayment. */
     balanceDue: string;
+    /** The part of the balance still to pay: balanceDue, or 0.00 when overpaid. */
+    amountDue: string;
+    /** The overpayment to be repaid: 0.00 unless PAYE paid exceeds the liability. */
+    refundDue: string;
     isRefund: boolean;
     /** Online filing and payment deadline for the balance. */
     deadline: string;
@@ -319,8 +328,9 @@ export function computeOwnerTax(inputs: OwnerTaxInputs): OwnerTaxComputation {
   const dueOnDeadline = Decimal.max(balance, 0).plus(firstPayment);
 
   // ---- MTD ITSA ----
+  // A property whose receipts net to a refund contributes nothing, not a negative.
   const propertyReceipts = inputs.properties.reduce(
-    (acc, p) => acc.plus(nonNegativeMoney(p.grossIncome, `${p.name} gross income`)),
+    (acc, p) => acc.plus(Decimal.max(signedMoney(p.grossIncome, `${p.name} gross income`), 0)),
     new Decimal(0),
   );
   const mtd = computeMtdItsaStatus({
@@ -338,9 +348,9 @@ export function computeOwnerTax(inputs: OwnerTaxInputs): OwnerTaxComputation {
     warnings.push(`${rates.taxYear} rates are provisional: ${rates.provisionalNotes.join(' ')}`);
   }
   for (const p of inputs.properties) {
-    const expenses = nonNegativeMoney(p.totalExpenses, `${p.name} expenses`);
-    const interest = nonNegativeMoney(p.mortgageInterest, `${p.name} mortgage interest`);
-    if (p.lettingType === 'rent_a_room' && (expenses.gt(0) || interest.gt(0))) {
+    const expenses = signedMoney(p.totalExpenses, `${p.name} expenses`);
+    const interest = signedMoney(p.mortgageInterest, `${p.name} mortgage interest`);
+    if (p.lettingType === 'rent_a_room' && (!expenses.isZero() || interest.gt(0))) {
       warnings.push(
         `${p.name} is a rent-a-room letting but has recorded expenses or mortgage interest. Only the part that relates to the let room is claimable; make sure these figures are already apportioned.`,
       );
@@ -371,8 +381,8 @@ export function computeOwnerTax(inputs: OwnerTaxInputs): OwnerTaxComputation {
   for (const p of inputs.properties) {
     add(
       'Inputs',
-      `${p.name} (${p.lettingType === 'rent_a_room' ? 'rent-a-room' : 'standard letting'}), your share: receipts ${formatCurrency(nonNegativeMoney(p.grossIncome, 'income'))}, ` +
-        `expenses ${formatCurrency(nonNegativeMoney(p.totalExpenses, 'expenses'))}, mortgage interest ${formatCurrency(nonNegativeMoney(p.mortgageInterest, 'interest'))}.`,
+      `${p.name} (${p.lettingType === 'rent_a_room' ? 'rent-a-room' : 'standard letting'}), your share: receipts ${formatCurrency(signedMoney(p.grossIncome, 'income'))}, ` +
+        `expenses ${formatCurrency(signedMoney(p.totalExpenses, 'expenses'))}, mortgage interest ${formatCurrency(signedMoney(p.mortgageInterest, 'interest'))}.`,
     );
   }
 
@@ -444,6 +454,7 @@ export function computeOwnerTax(inputs: OwnerTaxInputs): OwnerTaxComputation {
       lossesUsed: fixed2(chosen.property.lossesUsed),
       taxableProfit: fixed2(chosen.property.taxableProfit),
       lossesCarriedForward: fixed2(chosen.property.lossesCarriedForward),
+      hasLosses: chosen.property.lossesBroughtForward.gt(0) || chosen.property.lossesCarriedForward.gt(0),
     },
     financeCosts: {
       claimedThisYear: fixed2(chosen.property.financeCostsClaimed),
@@ -454,12 +465,15 @@ export function computeOwnerTax(inputs: OwnerTaxInputs): OwnerTaxComputation {
       reliefRatePct: reducer.reliefRatePct.toString(),
       reducer: fixed2(reducer.reducer),
       carriedForward: fixed2(reducer.carriedForward),
+      hasFinanceCosts: reducer.financeCostsAvailable.gt(0),
+      hasCarriedForward: reducer.carriedForward.gt(0),
     },
     incomeTax: {
       personalAllowance: {
         standard: fixed2(chosen.tax.personalAllowance.standard),
         taperReduction: fixed2(chosen.tax.personalAllowance.taperReduction),
         effective: fixed2(chosen.tax.personalAllowance.effective),
+        tapered: chosen.tax.personalAllowance.taperReduction.gt(0),
       },
       rows: chosen.tax.rows.map(r => ({
         layer: r.layer,
@@ -482,6 +496,8 @@ export function computeOwnerTax(inputs: OwnerTaxInputs): OwnerTaxComputation {
     selfAssessment: {
       payeTaxPaid: fixed2(payeTaxPaid),
       balanceDue: fixed2(balance),
+      amountDue: fixed2(Decimal.max(balance, 0)),
+      refundDue: fixed2(Decimal.max(balance.neg(), 0)),
       isRefund: balance.isNeg(),
       deadline,
       paymentsOnAccount: {

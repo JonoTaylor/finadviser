@@ -65,7 +65,7 @@ export default function TransactionFilters({
   ];
 
   return (
-    <Box sx={{ mb: 3 }}>
+    <Box sx={{ mb: 2, p: 2, bgcolor: 'background.paper', border: '1px solid', borderColor: 'divider', borderRadius: '10px' }}>
       {/* Quick date presets */}
       <Stack direction="row" spacing={0.75} sx={{ mb: 2 }} flexWrap="wrap" useFlexGap>
         {presets.map((preset) => (
@@ -94,9 +94,10 @@ export default function TransactionFilters({
       </Stack>
 
       {/* Filters row */}
-      <Stack direction={{ xs: 'column', md: 'row' }} spacing={1.5}>
+      <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, minmax(0, 1fr))', lg: 'minmax(180px, 1.5fr) repeat(2, minmax(120px, 1fr)) repeat(2, minmax(125px, 0.8fr))' }, gap: 1.5 }}>
         <TextField
-          placeholder="Search transactions..."
+          label="Search transactions"
+          placeholder="Description or merchant"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           slotProps={{
@@ -104,23 +105,23 @@ export default function TransactionFilters({
               startAdornment: <SearchRoundedIcon sx={{ color: 'text.secondary', mr: 1, fontSize: 20 }} />,
             },
           }}
-          sx={{ minWidth: 220, flex: 1 }}
+          sx={{ minWidth: 0, gridColumn: { sm: '1 / -1', lg: 'auto' } }}
         />
         <Autocomplete
           options={categories}
           getOptionLabel={(o) => o.name}
           value={categories.find(c => c.id === filters.categoryId) ?? null}
           onChange={(_, val) => onFilterChange({ ...filters, categoryId: val?.id })}
-          renderInput={(params) => <TextField {...params} placeholder="Category" />}
-          sx={{ minWidth: 180 }}
+          renderInput={(params) => <TextField {...params} label="Category" />}
+          sx={{ minWidth: 0 }}
         />
         <Autocomplete
           options={accounts}
           getOptionLabel={(o) => `${o.name} (${o.accountType})`}
           value={accounts.find(a => a.id === filters.accountId) ?? null}
           onChange={(_, val) => onFilterChange({ ...filters, accountId: val?.id })}
-          renderInput={(params) => <TextField {...params} placeholder="Account" />}
-          sx={{ minWidth: 200 }}
+          renderInput={(params) => <TextField {...params} label="Account" />}
+          sx={{ minWidth: 0 }}
         />
         <TextField
           type="date"
@@ -128,7 +129,7 @@ export default function TransactionFilters({
           slotProps={{ inputLabel: { shrink: true } }}
           value={filters.startDate}
           onChange={(e) => onFilterChange({ ...filters, startDate: e.target.value })}
-          sx={{ minWidth: 150 }}
+          sx={{ minWidth: 0 }}
         />
         <TextField
           type="date"
@@ -136,9 +137,9 @@ export default function TransactionFilters({
           slotProps={{ inputLabel: { shrink: true } }}
           value={filters.endDate}
           onChange={(e) => onFilterChange({ ...filters, endDate: e.target.value })}
-          sx={{ minWidth: 150 }}
+          sx={{ minWidth: 0 }}
         />
-      </Stack>
+      </Box>
     </Box>
   );
 }

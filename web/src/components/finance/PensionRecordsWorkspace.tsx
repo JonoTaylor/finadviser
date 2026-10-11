@@ -3,7 +3,7 @@
 import { useRef, useState, type FormEvent } from 'react';
 import useSWR from 'swr';
 import Link from 'next/link';
-import { Alert, Box, Button, Card, CardContent, Chip, Dialog, DialogActions, DialogContent, DialogTitle, Divider, MenuItem, Skeleton, Snackbar, Stack, TextField, Typography } from '@mui/material';
+import { Alert, Box, Button, Card, CardContent, Chip, Dialog, DialogActions, DialogContent, DialogTitle, MenuItem, Skeleton, Snackbar, Stack, TextField, Typography } from '@mui/material';
 import AddRoundedIcon from '@mui/icons-material/AddRounded';
 import EditRoundedIcon from '@mui/icons-material/EditRounded';
 import DeleteOutlineRoundedIcon from '@mui/icons-material/DeleteOutlineRounded';
@@ -15,15 +15,15 @@ import { pensionRecordSchema, pensionRecordsDataSchema, type PensionRecord, type
 import { pensionRecordDraft, pensionRecordFromDraft, type PensionRecordDraft } from '@/lib/pension-records/editor';
 import { pensionRecordOwnerId, pensionRecordPot, summarizePensionRecords, type PensionAmountSummary } from '@/lib/pension-records/summary';
 import type { PensionRecordsWorkspace as WorkspaceData } from '@/lib/pension-records/load';
-import { serifFamily, softTokens } from '@/theme/theme';
+import PageHeader from '@/components/ui/PageHeader';
 
 const typeNames: Record<PensionRecordType, string> = { dc: 'Defined contribution', db: 'Defined benefit', state: 'State Pension forecast' };
 
 function Amount({ value, label, suffix = '' }: { value: PensionAmountSummary; label: string; suffix?: string }) {
   return <Box sx={{ minWidth: 0 }}>
-    <Typography variant="caption">{label}</Typography>
-    <Typography variant="h4" sx={{ mt: 1, fontFamily: serifFamily, overflowWrap: 'anywhere' }}>{value.knownTotal === null ? 'Unknown' : `${formatCurrency(value.knownTotal)}${suffix}`}</Typography>
-    <Typography variant="caption">{value.knownCount} recorded · {value.unknownCount} unknown{value.unknownCount > 0 && value.knownCount > 0 ? ' · partial total' : ''}</Typography>
+    <Typography variant="body2" color="text.secondary">{label}</Typography>
+    <Typography sx={{ mt: 0.75, fontSize: { xs: 24, sm: 28 }, fontWeight: 600, lineHeight: 1.25, fontVariantNumeric: 'tabular-nums', letterSpacing: '-0.035em', overflowWrap: 'anywhere' }}>{value.knownTotal === null ? 'Unknown' : formatCurrency(value.knownTotal)}{value.knownTotal !== null && suffix && <Typography component="span" sx={{ display: 'inline-block', whiteSpace: 'nowrap', ml: 0.5, fontSize: 12, fontWeight: 400, letterSpacing: 0, color: 'text.secondary' }}>{suffix}</Typography>}</Typography>
+    <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.75 }}>{value.knownCount} recorded · {value.unknownCount} unknown{value.unknownCount > 0 && value.knownCount > 0 ? ' · partial total' : ''}</Typography>
   </Box>;
 }
 
@@ -110,46 +110,68 @@ export default function PensionRecordsWorkspace() {
   />;
   const currentLink = editor?.draft.linkedAccountId ? accounts.find(account => String(account.id) === editor.draft.linkedAccountId) : null;
 
-  return <Box sx={{ pt: { xs: 4, md: 0 } }}>
-    <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" alignItems={{ xs: 'flex-start', sm: 'center' }} gap={2} sx={{ mb: 3 }}>
-      <Box><Typography variant="overline" sx={{ letterSpacing: '0.14em', color: softTokens.mint.ink }}>Know what you already have</Typography><Typography variant="h4" component="h1">Pension records</Typography><Typography variant="body2" sx={{ mt: 1, maxWidth: 680 }}>Bring together pension pots, scheme promises and your official State Pension forecast. Keep each person&apos;s benefits separate and use your own records to fill the gaps.</Typography></Box>
-      <Button variant="contained" startIcon={<AddRoundedIcon />} disabled={Boolean(error || isLoading || busy)} onClick={() => openEditor(null)} sx={{ flexShrink: 0 }}>Add pension record</Button>
+  return <Box>
+    <PageHeader
+      title="Pension records"
+      description="Your pension pots, scheme benefits and State Pension forecasts, organised by owner."
+      actions={<Button variant="contained" startIcon={<AddRoundedIcon />} disabled={Boolean(error || isLoading || busy)} onClick={() => openEditor(null)}>Add pension record</Button>}
+    />
+    <Stack direction={{ xs: 'column', sm: 'row' }} gap={1} sx={{ mb: 3 }}>
+      <Button component={Link} href="/pensions" variant="outlined" endIcon={<ArrowForwardRoundedIcon />}>Retirement calculator</Button>
+      <Button component={Link} href="/investments">Ledger pension accounts</Button>
+      <Button component={Link} href="https://www.gov.uk/check-state-pension" target="_blank" rel="noopener noreferrer">Official State Pension forecast</Button>
     </Stack>
-    <Stack direction={{ xs: 'column', sm: 'row' }} gap={1} sx={{ mb: 3 }}><Button component={Link} href="/pensions" endIcon={<ArrowForwardRoundedIcon />}>Explore a retirement scenario</Button><Button component={Link} href="/investments">Manage ledger pension accounts</Button><Button component={Link} href="https://www.gov.uk/check-state-pension" target="_blank" rel="noopener noreferrer">Check your official State Pension forecast</Button></Stack>
-    <Alert severity="info" sx={{ mb: 3 }}>These records describe your existing benefits. They do not add money to your ledger or net worth. A defined benefit promise is annual income, and a State Pension forecast is your recorded forecast; neither is converted into a guessed pot value.</Alert>
 
     {isLoading ? <Skeleton variant="rounded" height={200} /> : error ? <Alert severity="warning" action={<Button size="small" onClick={() => void mutate()}>Retry</Button>}>Your pension inventory and ledger balances are unavailable. Retry when the database connection is restored. No missing figures have been replaced with zero.</Alert> : data && <>
-      <TextField select label="View pension records for" value={scope} onChange={event => setScope(event.target.value)} slotProps={{ inputLabel: { shrink: true }, select: { displayEmpty: true } }} sx={{ width: { xs: '100%', sm: 320 }, mb: 3 }}>
-        <MenuItem value="">Household · all recorded schemes</MenuItem>{data.owners.map(owner => <MenuItem key={owner.id} value={String(owner.id)}>{owner.name}</MenuItem>)}
-      </TextField>
-      <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: 'repeat(3, minmax(0, 1fr))' }, gap: 2, mb: 3 }}>
-        <Card sx={{ bgcolor: softTokens.cream }}><CardContent><Amount value={summary.dc.pot} label={`${summary.scope === 'household' ? 'Household' : 'Personal'} DC pots · known values`} /><Typography variant="caption" sx={{ mt: 1, display: 'block' }}>{summary.dc.linkedAccountCount} linked ledger {summary.dc.linkedAccountCount === 1 ? 'account' : 'accounts'}</Typography></CardContent></Card>
-        <Card><CardContent><Amount value={summary.db.annualIncome} label="DB promised annual income" suffix=" / year" /><Typography variant="caption" sx={{ mt: 1, display: 'block' }}>At each scheme&apos;s recorded start age.</Typography></CardContent></Card>
-        <Card><CardContent><Amount value={summary.state.annualForecast} label="Recorded State Pension forecasts" suffix=" / year" /><Typography variant="caption" sx={{ mt: 1, display: 'block' }}>{summary.scope === 'household' ? 'Combined known forecasts for recorded people.' : 'Your entered official forecast.'}</Typography></CardContent></Card>
+      <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" alignItems={{ xs: 'stretch', sm: 'center' }} gap={2} sx={{ mb: 2 }}>
+        <TextField select label="View pension records for" value={scope} onChange={event => setScope(event.target.value)} size="small" slotProps={{ inputLabel: { shrink: true }, select: { displayEmpty: true } }} sx={{ width: { xs: '100%', sm: 320 } }}>
+          <MenuItem value="">Household · all recorded schemes</MenuItem>{data.owners.map(owner => <MenuItem key={owner.id} value={String(owner.id)}>{owner.name}</MenuItem>)}
+        </TextField>
+        <Typography variant="body2" color="text.secondary">{visibleRecords.length} {visibleRecords.length === 1 ? 'record' : 'records'} · {summary.scope === 'household' ? 'Household view' : 'Personal view'}</Typography>
+      </Stack>
+      <Box sx={{ display: 'grid', gridTemplateColumns: { xs: 'repeat(2, minmax(0, 1fr))', md: 'repeat(3, minmax(0, 1fr))' }, gap: 2, mb: 2 }}>
+        <Card sx={{ gridColumn: { xs: '1 / -1', md: 'auto' } }}><CardContent><Amount value={summary.dc.pot} label={`${summary.scope === 'household' ? 'Household' : 'Personal'} DC pots · known values`} /><Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>{summary.dc.linkedAccountCount} linked ledger {summary.dc.linkedAccountCount === 1 ? 'account' : 'accounts'}</Typography></CardContent></Card>
+        <Card><CardContent><Amount value={summary.db.annualIncome} label="DB annual income" suffix="/ year" /><Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>Promised at each scheme&apos;s recorded start age.</Typography></CardContent></Card>
+        <Card><CardContent><Amount value={summary.state.annualForecast} label="State Pension forecasts" suffix="/ year" /><Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>{summary.scope === 'household' ? 'Combined known forecasts for recorded people.' : 'Your entered official forecast.'}</Typography></CardContent></Card>
       </Box>
+      <Alert severity="info" sx={{ mb: 3 }}>These records describe your existing benefits and do not add money to your ledger or net worth. DB promises and State Pension forecasts are annual income; neither is converted into a guessed pot value.</Alert>
       {summary.warnings.map(warning => <Alert key={warning} severity="warning" sx={{ mb: 2 }}>{warning}</Alert>)}
-      <Card sx={{ mb: 3 }}><CardContent><Typography variant="h6">Gross monthly contributions into DC pots</Typography><Stack direction={{ xs: 'column', md: 'row' }} gap={3} sx={{ mt: 2 }}><Box sx={{ flex: 1 }}><Amount value={summary.dc.personalMonthlyContributions} label="Personal · gross credited amount" /></Box><Box sx={{ flex: 1 }}><Amount value={summary.dc.employerMonthlyContributions} label="Employer · credited amount" /></Box><Box sx={{ flex: 1 }}><Amount value={summary.dc.totalMonthlyContributions} label="Combined · schemes with both amounts known" /></Box></Stack><Typography variant="caption" sx={{ display: 'block', mt: 2 }}>Enter the gross amount credited to the pension, including any relief already credited. No tax relief or employer match is added automatically. An explicit zero is different from an unknown amount.</Typography></CardContent></Card>
-      {visibleRecords.length === 0 ? <Card><CardContent sx={{ textAlign: 'center', py: 5 }}><Typography variant="h6">{records.length === 0 ? 'Start with your latest pension statement' : 'No schemes recorded for this person'}</Typography><Typography variant="body2" sx={{ mt: 1, mb: 2 }}>Add a pot or scheme promise, assign its owner, and leave any unconfirmed figure blank.</Typography><Button variant="outlined" onClick={() => openEditor(null)} startIcon={<AddRoundedIcon />}>Add pension record</Button></CardContent></Card> : <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', lg: 'repeat(2, minmax(0, 1fr))' }, gap: 3 }}>
-        {visibleRecords.map(record => {
+      <Card sx={{ mb: 3 }}><CardContent>
+        <Typography variant="h6">Monthly DC contributions</Typography>
+        <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>Gross amounts credited to your pension pots.</Typography>
+        <Box sx={{ display: 'grid', gridTemplateColumns: { xs: 'repeat(2, minmax(0, 1fr))', md: 'repeat(3, minmax(0, 1fr))' }, gap: { xs: 2, md: 3 }, mt: 2.5 }}>
+          <Amount value={summary.dc.personalMonthlyContributions} label="Personal" />
+          <Amount value={summary.dc.employerMonthlyContributions} label="Employer" />
+          <Box sx={{ gridColumn: { xs: '1 / -1', md: 'auto' }, borderTop: { xs: '1px solid', md: 'none' }, borderColor: 'divider', pt: { xs: 2, md: 0 } }}><Amount value={summary.dc.totalMonthlyContributions} label="Combined · both amounts known" /></Box>
+        </Box>
+        <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 2 }}>Include relief already credited. No tax relief or employer match is added automatically. An explicit zero is different from an unknown amount.</Typography>
+      </CardContent></Card>
+      <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 1.5 }}><Typography variant="h6">Recorded schemes</Typography><Typography variant="caption" color="text.secondary">{visibleRecords.length} {visibleRecords.length === 1 ? 'scheme' : 'schemes'}</Typography></Stack>
+      {visibleRecords.length === 0 ? <Card><CardContent sx={{ textAlign: 'center', py: 5 }}><Typography variant="h6">{records.length === 0 ? 'Start with your latest pension statement' : 'No schemes recorded for this person'}</Typography><Typography variant="body2" color="text.secondary" sx={{ mt: 1, mb: 2, maxWidth: 440, mx: 'auto' }}>Use your latest statement or official forecast. Assign its owner and leave unconfirmed figures blank.</Typography><Button variant="outlined" onClick={() => openEditor(null)} startIcon={<AddRoundedIcon />}>Add pension record</Button></CardContent></Card> : <Card>
+        {visibleRecords.map((record, index) => {
           const owner = data.owners.find(item => item.id === pensionRecordOwnerId(record, accounts));
           const account = record.type === 'dc' ? accounts.find(item => item.id === record.linkedAccountId) : undefined;
-          return <Card key={record.id} component="article" aria-label={record.name}><CardContent>
-            <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" gap={1}><Box sx={{ minWidth: 0 }}><Typography variant="h6" component="h2" sx={{ overflowWrap: 'anywhere' }}>{record.name}</Typography><Typography variant="caption">{record.provider ?? 'Provider unknown'} · {owner?.name ?? 'Ownership unknown'}</Typography></Box><Chip label={typeNames[record.type]} size="small" sx={{ alignSelf: 'flex-start', maxWidth: '100%' }} /></Stack>
-            <Divider sx={{ my: 2 }} />
-            {record.type === 'dc' ? <>
-              <Typography variant="caption">{record.linkedAccountId !== null ? 'Current linked ledger pot' : 'Recorded statement pot'}</Typography><Typography variant="h4" sx={{ mt: 0.5, fontFamily: serifFamily, overflowWrap: 'anywhere' }}>{moneyOrUnknown(pensionRecordPot(record, accounts))}</Typography>
-              <Typography variant="caption" sx={{ display: 'block', mt: 1 }}>{record.linkedAccountId !== null ? account ? `${account.name} · ledger as of ${account.balanceAsOf}` : 'Linked account unavailable' : record.statementAsOf ? `Statement as of ${record.statementAsOf}` : 'Statement date unknown'}</Typography>
-              <Typography variant="body2" sx={{ mt: 2 }}>Monthly personal {moneyOrUnknown(record.personalMonthlyContribution)} · employer {moneyOrUnknown(record.employerMonthlyContribution)}</Typography><Typography variant="body2" sx={{ mt: 0.5 }}>Annual fee rate: {record.annualFeeRate === null ? 'Unknown' : `${record.annualFeeRate}%`}</Typography>
-            </> : <>
-              <Typography variant="caption">{record.type === 'db' ? 'Promised annual income' : 'Entered official forecast · annual income'}</Typography><Typography variant="h4" sx={{ mt: 0.5, fontFamily: serifFamily, overflowWrap: 'anywhere' }}>{moneyOrUnknown(record.type === 'db' ? record.promisedAnnualIncome : record.forecastAnnualIncome)}</Typography><Typography variant="body2" sx={{ mt: 1 }}>Recorded start age: {record.startAge ?? 'Unknown'}</Typography><Typography variant="caption" sx={{ display: 'block', mt: 1 }}>{record.type === 'state' ? `Forecast source date: ${record.forecastSourceDate ?? 'Unknown'}` : `Statement as of ${record.statementAsOf ?? 'Unknown'}`}</Typography>
-            </>}
-            {record.notes && <Typography variant="body2" sx={{ mt: 2, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{record.notes}</Typography>}
-            <Stack direction="row" gap={1} sx={{ mt: 3 }}><Button size="small" startIcon={<EditRoundedIcon />} aria-label={`Edit ${record.name}`} disabled={busy} onClick={() => openEditor(record)}>Edit record</Button><Button size="small" color="error" startIcon={<DeleteOutlineRoundedIcon />} aria-label={`Remove ${record.name}`} disabled={busy} onClick={() => { setSaveError(''); setConflict(false); setRemoving(record); }}>Remove</Button></Stack>
-          </CardContent></Card>;
+          return <Box key={record.id} component="article" aria-label={record.name} sx={{ p: { xs: 2, sm: 3 }, borderTop: index > 0 ? '1px solid' : undefined, borderColor: 'divider' }}>
+            <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" gap={1.5}>
+              <Box sx={{ minWidth: 0 }}><Typography variant="subtitle1" component="h2" fontWeight={600} sx={{ overflowWrap: 'anywhere' }}>{record.name}</Typography><Typography variant="body2" color="text.secondary" sx={{ mt: 0.25, overflowWrap: 'anywhere' }}>{record.provider ?? 'Provider unknown'} · {owner?.name ?? 'Ownership unknown'}</Typography></Box>
+              <Chip label={typeNames[record.type]} size="small" variant="outlined" sx={{ alignSelf: 'flex-start', maxWidth: '100%', flexShrink: 0 }} />
+            </Stack>
+            <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: 'minmax(0, 1fr) minmax(0, 1fr)' }, gap: 2, mt: 2 }}>
+              {record.type === 'dc' ? <>
+                <Box><Typography variant="caption" color="text.secondary">{record.linkedAccountId !== null ? 'Current linked ledger pot' : 'Recorded statement pot'}</Typography><Typography sx={{ mt: 0.5, fontSize: 28, fontWeight: 600, lineHeight: 1.25, letterSpacing: '-0.035em', fontVariantNumeric: 'tabular-nums', overflowWrap: 'anywhere' }}>{moneyOrUnknown(pensionRecordPot(record, accounts))}</Typography><Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.75, overflowWrap: 'anywhere' }}>{record.linkedAccountId !== null ? account ? `${account.name} · ledger as of ${account.balanceAsOf}` : 'Linked account unavailable' : record.statementAsOf ? `Statement as of ${record.statementAsOf}` : 'Statement date unknown'}</Typography></Box>
+                <Stack gap={0.75}><RecordDetail label="Personal monthly contribution" value={moneyOrUnknown(record.personalMonthlyContribution)} /><RecordDetail label="Employer monthly contribution" value={moneyOrUnknown(record.employerMonthlyContribution)} /><RecordDetail label="Annual fee rate" value={record.annualFeeRate === null ? 'Unknown' : `${record.annualFeeRate}%`} /></Stack>
+              </> : <>
+                <Box><Typography variant="caption" color="text.secondary">{record.type === 'db' ? 'Promised annual income' : 'Entered official forecast · annual income'}</Typography><Typography sx={{ mt: 0.5, fontSize: 28, fontWeight: 600, lineHeight: 1.25, letterSpacing: '-0.035em', fontVariantNumeric: 'tabular-nums', overflowWrap: 'anywhere' }}>{moneyOrUnknown(record.type === 'db' ? record.promisedAnnualIncome : record.forecastAnnualIncome)}</Typography></Box>
+                <Stack gap={0.75}><RecordDetail label="Recorded start age" value={String(record.startAge ?? 'Unknown')} /><RecordDetail label={record.type === 'state' ? 'Forecast source date' : 'Statement date'} value={record.type === 'state' ? record.forecastSourceDate ?? 'Unknown' : record.statementAsOf ?? 'Unknown'} /></Stack>
+              </>}
+            </Box>
+            {record.notes && <Box sx={{ mt: 2, pl: 1.5, borderLeft: '2px solid', borderColor: 'divider' }}><Typography variant="caption" color="text.secondary">Source notes and conditions</Typography><Typography variant="body2" sx={{ mt: 0.5, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{record.notes}</Typography></Box>}
+            <Stack direction="row" gap={1} sx={{ mt: 2 }}><Button size="small" startIcon={<EditRoundedIcon />} aria-label={`Edit ${record.name}`} disabled={busy} onClick={() => openEditor(record)}>Edit record</Button><Button size="small" color="error" startIcon={<DeleteOutlineRoundedIcon />} aria-label={`Remove ${record.name}`} disabled={busy} onClick={() => { setSaveError(''); setConflict(false); setRemoving(record); }}>Remove</Button></Stack>
+          </Box>;
         })}
-      </Box>}
+      </Card>}
       <Alert severity="info" sx={{ mt: 3 }}>To use these figures in the retirement calculator, choose the relevant person&apos;s DC pots and enter their contributions and forecast explicitly. The calculator projects DC accumulation and compares initial withdrawal-rate income; it does not model drawdown longevity. DB promised income is recorded here and is not included in that calculation. Existing saved scenarios are preserved.</Alert>
-      <Typography variant="caption" sx={{ display: 'block', mt: 2 }}>{summary.methodology}</Typography>
+      <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 2 }}>{summary.methodology}</Typography>
     </>}
 
     <Dialog open={Boolean(editor)} onClose={() => { if (!busy) setEditor(null); }} fullWidth maxWidth="sm"><Box component="form" onSubmit={save}><DialogTitle>{editor?.original ? 'Edit pension record' : 'Add pension record'}</DialogTitle><DialogContent><Stack gap={2} sx={{ pt: 1 }}>
@@ -169,4 +191,8 @@ export default function PensionRecordsWorkspace() {
     <Dialog open={Boolean(removing)} onClose={() => { if (!busy) setRemoving(null); }} fullWidth maxWidth="xs"><DialogTitle>Remove pension record?</DialogTitle><DialogContent><Typography variant="body2">Remove {removing?.name} from your inventory? Its ledger account, balances and saved retirement scenario are preserved.</Typography>{errorNotice}</DialogContent><DialogActions><Button disabled={busy} onClick={() => setRemoving(null)}>Cancel</Button><Button color="error" disabled={busy || conflict} onClick={() => void persist(records.filter(record => record.id !== removing?.id), 'Pension record removed.')}>{busy ? 'Removing…' : 'Remove record'}</Button></DialogActions></Dialog>
     <Snackbar open={Boolean(success)} autoHideDuration={5000} onClose={() => setSuccess('')} message={success} />
   </Box>;
+}
+
+function RecordDetail({ label, value }: { label: string; value: string }) {
+  return <Stack direction="row" justifyContent="space-between" gap={2}><Typography variant="body2" color="text.secondary" sx={{ minWidth: 0 }}>{label}</Typography><Typography variant="body2" fontWeight={500} sx={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums', overflowWrap: 'anywhere' }}>{value}</Typography></Stack>;
 }

@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import MonthlySummaryCard from './MonthlySummaryCard';
 import SavingsRateCard from './SavingsRateCard';
 import TopCategoriesCard from './TopCategoriesCard';
+import MonthlySpendingCard from './MonthlySpendingCard';
 
 // Still September in UTC; the app's UK calendar is already October.
 beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(new Date('2026-09-30T23:30:00Z')); });
@@ -45,6 +46,16 @@ describe('dashboard monthly cards', () => {
     expect(html).toContain('Oct 2026');
     expect(html).toContain('Salary · income');
     expect(html).toContain('£1,500.00');
+    expect(html).not.toContain('£1,700.00');
+  });
+
+  it('keeps the primary spending metric net of refunds and labels the prior calendar month', () => {
+    const rows = [...spending, { month: '2026-09', account_type: 'EXPENSE', category_name: 'Shopping', total: '2000' }];
+    const html = clean(renderToString(createElement(MonthlySpendingCard, { spending: rows })));
+    expect(html).toContain('£1,500.00');
+    expect(html).toContain('£2,000.00');
+    expect(html).toContain('September:');
+    expect(html).toContain('Previous calendar month, as recorded');
     expect(html).not.toContain('£1,700.00');
   });
 });

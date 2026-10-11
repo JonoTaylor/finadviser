@@ -1,15 +1,17 @@
 'use client';
 
 import { useState } from 'react';
-import { Alert, Box, Typography, Grid, Card, CardContent, CardActionArea, Button, Chip, Stack } from '@mui/material';
+import { Alert, Box, Typography, Grid, Card, CardContent, CardActionArea, Button, Divider, Skeleton, Stack } from '@mui/material';
 import AddRoundedIcon from '@mui/icons-material/AddRounded';
 import HomeWorkRoundedIcon from '@mui/icons-material/HomeWorkRounded';
+import ArrowForwardRoundedIcon from '@mui/icons-material/ArrowForwardRounded';
 import useSWR from 'swr';
 import Link from 'next/link';
 import { formatCurrency } from '@/lib/utils/formatting';
 import { fetchJson } from '@/lib/http/client';
 import type { Property } from '@/lib/types';
 import AddPropertyDialog from '@/components/properties/AddPropertyDialog';
+import PageHeader from '@/components/ui/PageHeader';
 
 type PropertyLite = Pick<Property, 'id' | 'name' | 'address' | 'purchasePrice' | 'purchaseDate'>;
 
@@ -46,58 +48,44 @@ export default function PropertiesPage() {
   };
 
   return (
-    <Box>
-      <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2, justifyContent: 'space-between', alignItems: 'center', mb: 4 }}>
-        <Box>
-          <Typography variant="h4">Properties</Typography>
-          <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-            Track property values, mortgages, and equity
-          </Typography>
-        </Box>
-        <Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap', gap: 1 }}>
+    <Box sx={{ maxWidth: 1440, mx: 'auto' }}>
+      <PageHeader title="Property portfolio" description="Manage your properties, mortgages and rental activity."
+        actions={<>
           <Button component={Link} href="/properties/operations" variant="outlined">
-            Rent and tasks
+            Rent &amp; tasks
           </Button>
           <Button variant="contained" startIcon={<AddRoundedIcon />} onClick={() => setAddOpen(true)}>
-            Add Property
+            Add property
           </Button>
-        </Stack>
-      </Box>
+        </>} />
 
       {error ? (
         <Alert severity="error" action={<Button color="inherit" onClick={() => void mutate()}>Retry</Button>}>
           Properties could not be loaded. {error instanceof Error ? error.message : 'Please try again.'}
         </Alert>
       ) : isLoading ? (
-        <Typography color="text.secondary">Loading...</Typography>
+        <Grid container spacing={2}>{[1, 2, 3, 4].map(item => <Grid key={item} size={{ xs: 12, md: 6 }}><Skeleton variant="rounded" height={200} /></Grid>)}</Grid>
       ) : !properties || properties.length === 0 ? (
-        <Card sx={{ p: 4, textAlign: 'center' }}>
-          <HomeWorkRoundedIcon sx={{ fontSize: 48, color: 'text.secondary', opacity: 0.3, mb: 1 }} />
-          <Typography color="text.secondary">No properties yet. Add your first property to track equity.</Typography>
-        </Card>
+        <Card><CardContent sx={{ py: 5, textAlign: 'center' }}>
+          <Box sx={{ width: 44, height: 44, borderRadius: '8px', bgcolor: '#F1F5F9', color: 'text.secondary', display: 'grid', placeItems: 'center', mx: 'auto', mb: 2 }}><HomeWorkRoundedIcon /></Box>
+          <Typography variant="h6">Add your first property</Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mt: 1, mb: 3 }}>Record the property, then add valuations, mortgages and tenancy details.</Typography>
+          <Button variant="contained" startIcon={<AddRoundedIcon />} onClick={() => setAddOpen(true)}>Add property</Button>
+        </CardContent></Card>
       ) : (
-        <Grid container spacing={3}>
+        <Grid container spacing={2}>
           {properties.map(prop => (
             <Grid key={prop.id} size={{ xs: 12, md: 6 }}>
-              <Card>
-                <CardActionArea component={Link} href={`/properties/${prop.id}`}>
+              <Card sx={{ height: '100%' }}>
+                <CardActionArea component={Link} href={`/properties/${prop.id}`} aria-label={`View ${prop.name}`} sx={{ height: '100%', '&:hover': { bgcolor: '#F8FAFC' } }}>
                   <CardContent>
-                    <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ flexWrap: 'wrap', gap: 1 }}>
-                      <Typography variant="h6" sx={{ overflowWrap: 'anywhere' }}>{prop.name}</Typography>
-                      {prop.purchasePrice && (
-                        <Chip label={formatCurrency(prop.purchasePrice)} size="small" color="primary" variant="outlined" />
-                      )}
+                    <Stack direction="row" justifyContent="space-between" alignItems="flex-start" gap={2}>
+                      <Stack direction="row" gap={1.5} sx={{ minWidth: 0 }}><Box sx={{ width: 40, height: 40, flexShrink: 0, bgcolor: '#F1F5F9', borderRadius: '8px', color: 'text.secondary', display: 'grid', placeItems: 'center' }}><HomeWorkRoundedIcon fontSize="small" /></Box><Box sx={{ minWidth: 0 }}><Typography variant="h6" sx={{ overflowWrap: 'anywhere' }}>{prop.name}</Typography><Typography variant="body2" color="text.secondary" sx={{ mt: 0.25, overflowWrap: 'anywhere' }}>{prop.address || 'Address not recorded'}</Typography></Box></Stack>
+                      <ArrowForwardRoundedIcon sx={{ color: 'text.secondary', fontSize: 18, mt: 0.5, flexShrink: 0 }} />
                     </Stack>
-                    {prop.address && (
-                      <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5, overflowWrap: 'anywhere' }}>
-                        {prop.address}
-                      </Typography>
-                    )}
-                    {prop.purchaseDate && (
-                      <Typography variant="caption" color="text.secondary">
-                        Purchased: {prop.purchaseDate}
-                      </Typography>
-                    )}
+                    <Divider sx={{ my: 2.5 }} />
+                    <Stack direction="row" gap={3} justifyContent="space-between"><Box sx={{ minWidth: 0 }}><Typography variant="caption">Recorded purchase price</Typography><Typography variant="subtitle1" sx={{ mt: 0.5, fontVariantNumeric: 'tabular-nums', overflowWrap: 'anywhere' }}>{prop.purchasePrice ? formatCurrency(prop.purchasePrice) : 'Not recorded'}</Typography></Box><Box sx={{ minWidth: 0, textAlign: 'right' }}><Typography variant="caption">Purchase date</Typography><Typography variant="body2" sx={{ mt: 0.5 }}>{prop.purchaseDate || 'Not recorded'}</Typography></Box></Stack>
+                    <Stack direction="row" justifyContent="space-between" alignItems="center" gap={2} sx={{ mt: 2.5 }}><Typography variant="caption">Purchase price is not a current valuation.</Typography><Typography variant="caption" color="primary.main" fontWeight={600} sx={{ whiteSpace: 'nowrap' }}>View property</Typography></Stack>
                   </CardContent>
                 </CardActionArea>
               </Card>

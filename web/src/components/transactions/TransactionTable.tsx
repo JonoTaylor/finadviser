@@ -3,13 +3,15 @@
 import {
   Card, Table, TableHead, TableBody, TableRow, TableCell,
   TablePagination, Chip, Box, CircularProgress, Typography,
-  Tooltip, IconButton,
+  Tooltip, IconButton, Button, Stack, TableContainer,
 } from '@mui/material';
 import { alpha } from '@mui/material/styles';
 import SearchOffRoundedIcon from '@mui/icons-material/SearchOffRounded';
 import SwapHorizRoundedIcon from '@mui/icons-material/SwapHorizRounded';
 import { formatCurrency } from '@/lib/utils/formatting';
 import { getCategoryColor } from '@/lib/utils/category-colors';
+
+const descriptionFocus = { '&.Mui-focusVisible': { outline: '2px solid #0F766E', outlineOffset: 2, borderRadius: '3px' } };
 
 export interface Entry {
   id: number;
@@ -79,13 +81,35 @@ export default function TransactionTable({
         </Box>
       ) : (
         <>
-          <Table size="small">
+          <Box sx={{ display: { xs: 'block', md: 'none' } }}>
+            {entries.map(entry => {
+              const amount = parseAmount(entry.entries_summary);
+              return <Box key={entry.id} sx={{ p: 2, borderBottom: '1px solid', borderColor: 'divider', '&:last-child': { borderBottom: 0 } }}>
+                <Stack direction="row" justifyContent="space-between" alignItems="flex-start" gap={2}>
+                  <Box sx={{ minWidth: 0 }}>
+                    <Typography variant="caption">{entry.date}</Typography>
+                    <Button disableRipple color="inherit" onClick={() => onRowClick(entry)} aria-label={`Change category for ${entry.description}`} sx={{ display: 'flex', justifyContent: 'flex-start', textAlign: 'left', p: 0, minHeight: 30, whiteSpace: 'normal', overflowWrap: 'anywhere', fontSize: '0.8125rem', fontWeight: 550, ...descriptionFocus }}>{entry.description}</Button>
+                    {entry.reference && <Typography variant="caption" sx={{ display: 'block', overflowWrap: 'anywhere' }}>{entry.reference}</Typography>}
+                  </Box>
+                  <Typography sx={{ fontSize: '0.875rem', fontWeight: 600, color: parseFloat(amount) >= 0 ? 'success.main' : 'text.primary', whiteSpace: 'nowrap', pt: 0.25 }}>{formatCurrency(amount)}</Typography>
+                </Stack>
+                <Stack direction="row" alignItems="center" gap={1} flexWrap="wrap" sx={{ mt: 1 }}>
+                  <Tooltip title={entry.category_name || 'Uncategorised'}><Chip size="small" label={entry.category_name || 'Uncategorised'} sx={{ maxWidth: '100%' }} /></Tooltip>
+                  {entry.is_transfer && <Chip size="small" variant="outlined" label="Transfer" />}
+                  {!entry.is_transfer && entry.transfer_group_id && <Chip size="small" color="warning" label="Review transfer" />}
+                  {onMarkAsTransfer && !entry.is_transfer && <IconButton size="small" onClick={() => onMarkAsTransfer(entry)} aria-label={`Mark ${entry.description} as transfer`} sx={{ ml: 'auto' }}><SwapHorizRoundedIcon fontSize="small" /></IconButton>}
+                </Stack>
+              </Box>;
+            })}
+          </Box>
+          <TableContainer tabIndex={0} role="region" aria-label="Transaction records" sx={{ display: { xs: 'none', md: 'block' }, overflowX: 'auto' }}>
+          <Table size="small" sx={{ minWidth: 900 }}>
             <TableHead>
               <TableRow>
                 <TableCell>Date</TableCell>
-                <TableCell>Description</TableCell>
-                <TableCell>Category</TableCell>
-                <TableCell>Reference</TableCell>
+                <TableCell sx={{ minWidth: 220 }}>Description</TableCell>
+                <TableCell sx={{ width: 200 }}>Category</TableCell>
+                <TableCell sx={{ width: 180 }}>Reference</TableCell>
                 <TableCell align="right">Amount</TableCell>
                 <TableCell align="right" sx={{ width: 48 }} />
               </TableRow>
@@ -94,7 +118,7 @@ export default function TransactionTable({
               {entries.map((entry) => {
                 const amount = parseAmount(entry.entries_summary);
                 const numAmount = parseFloat(amount);
-                const catName = entry.category_name || 'Uncategorized';
+                const catName = entry.category_name || 'Uncategorised';
                 const cat = getCategoryColor(catName);
                 const isTransfer = Boolean(entry.is_transfer);
                 const isCandidate = !isTransfer && Boolean(entry.transfer_group_id);
@@ -115,8 +139,8 @@ export default function TransactionTable({
                     <TableCell sx={{ whiteSpace: 'nowrap', color: 'text.secondary' }}>
                       {entry.date}
                     </TableCell>
-                    <TableCell sx={{ fontWeight: 500 }}>
-                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <TableCell sx={{ fontWeight: 500, minWidth: 220 }}>
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap', minWidth: 0 }}>
                         {isTransfer && (
                           <Tooltip title={`Transfer${entry.transfer_kind ? ` (${entry.transfer_kind.replace('_', ' ')})` : ''}`}>
                             <Chip
@@ -140,10 +164,11 @@ export default function TransactionTable({
                             />
                           </Tooltip>
                         )}
-                        <span>{entry.description}</span>
+                        <Button disableRipple color="inherit" aria-label={`Change category for ${entry.description}`} onClick={event => { event.stopPropagation(); onRowClick(entry); }} sx={{ p: 0, minHeight: 28, textAlign: 'left', justifyContent: 'flex-start', whiteSpace: 'normal', fontWeight: 500, overflowWrap: 'anywhere', ...descriptionFocus }}>{entry.description}</Button>
                       </Box>
                     </TableCell>
                     <TableCell>
+                      <Tooltip title={catName}>
                       <Chip
                         label={catName}
                         size="small"
@@ -151,14 +176,16 @@ export default function TransactionTable({
                           bgcolor: alpha(cat.fill, 0.1),
                           color: cat.ink,
                           fontWeight: 500,
+                          maxWidth: 180,
                         }}
                       />
+                      </Tooltip>
                     </TableCell>
-                    <TableCell sx={{ color: 'text.secondary' }}>{entry.reference || ''}</TableCell>
+                    <TableCell sx={{ color: 'text.secondary' }}><Typography variant="body2" sx={{ maxWidth: 160, overflowWrap: 'anywhere' }}>{entry.reference || ''}</Typography></TableCell>
                     <TableCell
                       align="right"
                       sx={{
-                        color: numAmount >= 0 ? 'success.main' : 'error.main',
+                        color: numAmount >= 0 ? 'success.main' : 'text.primary',
                         fontWeight: 600,
                         fontFeatureSettings: '"tnum"',
                         whiteSpace: 'nowrap',
@@ -171,6 +198,7 @@ export default function TransactionTable({
                         <Tooltip title="Mark as transfer">
                           <IconButton
                             size="small"
+                            aria-label={`Mark ${entry.description} as transfer`}
                             onClick={(e) => {
                               e.stopPropagation();
                               onMarkAsTransfer(entry);
@@ -186,12 +214,14 @@ export default function TransactionTable({
               })}
             </TableBody>
           </Table>
+          </TableContainer>
           <TablePagination
             component="div"
             count={total}
             page={page}
             rowsPerPage={pageSize}
             rowsPerPageOptions={[10, 25, 50, 100]}
+            labelRowsPerPage="Rows"
             onPageChange={(_, p) => onPageChange(p)}
             onRowsPerPageChange={(e) => {
               onPageSizeChange(parseInt(e.target.value, 10));

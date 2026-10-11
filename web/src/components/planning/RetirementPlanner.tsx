@@ -19,7 +19,7 @@ import {
   type RetirementInput, type RetirementProjection,
 } from '@/lib/retirement/projection';
 import { formatCurrency } from '@/lib/utils/formatting';
-import { serifFamily, softTokens } from '@/theme/theme';
+import { softTokens } from '@/theme/theme';
 
 type FormValues = Record<keyof RetirementInput, string>;
 const INITIAL: FormValues = {
@@ -178,28 +178,28 @@ export default function RetirementPlanner() {
         <Grid size={{ xs: 12, lg: 7 }}>
           <Card>
             <CardContent>
-              <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 2.5 }}>
+              <Stack direction={{ xs: 'column', sm: 'row' }} gap={1} justifyContent="space-between" alignItems={{ sm: 'center' }} sx={{ mb: 2.5 }}>
                 <Box>
-                  <Typography variant="h6">Build your retirement picture</Typography>
-                  <Typography variant="body2" sx={{ mt: 0.5 }}>Enter your figures. Every assumption is editable.</Typography>
+                  <Typography variant="h6">Scenario inputs</Typography>
+                  <Typography variant="body2" sx={{ mt: 0.5 }}>Edit your figures and assumptions to update the projection.</Typography>
                 </Box>
                 <Chip label="GBP · UK" variant="outlined" />
               </Stack>
               <Grid container spacing={2.5}>{PERSONAL_FIELDS.map(field)}</Grid>
               <Divider sx={{ my: 3 }} />
-              <Typography variant="subtitle1" sx={{ mb: 2 }}>Money going into your pension</Typography>
+              <Typography variant="subtitle1" fontWeight={600} sx={{ mb: 2 }}>Contributions and State Pension</Typography>
               <Grid container spacing={2.5}>{CONTRIBUTION_FIELDS.map(field)}</Grid>
               <Typography variant="caption" component="p" sx={{ mt: 2 }}>
                 No automatic tax relief is added. Personal and employer deposits stay fixed in pounds, paid at month-end.
               </Typography>
-              <Accordion disableGutters elevation={0} sx={{ mt: 2, '&:before': { display: 'none' } }}>
+              <Accordion disableGutters elevation={0} sx={{ mt: 2.5, borderTop: 1, borderBottom: 1, borderColor: 'divider', borderRadius: '0px', '&:before': { display: 'none' } }}>
                 <AccordionSummary expandIcon={<ExpandMoreRoundedIcon />} aria-controls="retirement-assumptions" id="retirement-assumptions-heading">
                   <Box>
-                    <Typography variant="subtitle1">Growth, fees &amp; inflation</Typography>
+                    <Typography variant="subtitle1" fontWeight={600}>Growth, fees &amp; inflation</Typography>
                     <Typography variant="caption">{values.annualGrowthRate || '—'}% growth · {values.annualFeeRate || '—'}% fees · {values.inflationRate || '—'}% inflation</Typography>
                   </Box>
                 </AccordionSummary>
-                <AccordionDetails id="retirement-assumptions" sx={{ px: 0 }}>
+                <AccordionDetails id="retirement-assumptions" sx={{ px: 0, pt: 2, pb: 3 }}>
                   <Grid container spacing={2.5}>{ASSUMPTION_FIELDS.map(field)}</Grid>
                 </AccordionDetails>
               </Accordion>
@@ -224,11 +224,11 @@ export default function RetirementPlanner() {
           {projection && validation.input ? (
             <ResultsSummary projection={projection} input={validation.input} />
           ) : (
-            <Card sx={{ height: '100%', minHeight: 320, bgcolor: softTokens.fog }}>
+            <Card sx={{ height: '100%', minHeight: 320 }}>
               <CardContent sx={{ height: '100%', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'flex-start' }}>
-                <SavingsRoundedIcon sx={{ color: softTokens.lavender.ink, fontSize: 42, mb: 2 }} />
-                <Typography variant="h5">A future you can plan for</Typography>
-                <Typography variant="body1" color="text.secondary" sx={{ mt: 1.5, maxWidth: 360 }}>
+                <Box sx={{ width: 44, height: 44, borderRadius: '8px', bgcolor: softTokens.cream, display: 'grid', placeItems: 'center', mb: 2 }}><SavingsRoundedIcon sx={{ color: 'text.secondary', fontSize: 24 }} /></Box>
+                <Typography variant="h6">Projection awaiting inputs</Typography>
+                <Typography variant="body2" color="text.secondary" sx={{ mt: 1.5, maxWidth: 360 }}>
                   Add your age, pension balance, monthly contribution and income goal to see your projection.
                   Enter 0 where appropriate.
                 </Typography>
@@ -244,7 +244,7 @@ export default function RetirementPlanner() {
           <CardContent>
             <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" spacing={2}>
               <Box>
-                <Typography variant="h6">The path to retirement</Typography>
+                <Typography variant="h6">Pension growth projection</Typography>
                 <Typography variant="body2" sx={{ mt: 0.5 }}>Three growth assumptions, with your contributions and fees included.</Typography>
               </Box>
               <ToggleButtonGroup size="small" value={display} exclusive
@@ -282,7 +282,7 @@ export default function RetirementPlanner() {
 
       <Card>
         <CardContent>
-          <Typography variant="h6">Make the next decision with better information</Typography>
+          <Typography variant="h6">Pension guidance</Typography>
           <Grid container spacing={3} sx={{ mt: 0.5 }}>
             <Grid size={{ xs: 12, md: 4 }}>
               <Typography variant="subtitle1">Check your pension income</Typography>
@@ -321,19 +321,19 @@ function ResultsSummary({ projection, input }: { projection: RetirementProjectio
   const progress = target.gt(0) ? Math.min(100, new Decimal(base.finalRealPot).div(target).mul(100).toNumber()) : 100;
   return (
     <Stack spacing={2} aria-live="polite">
-      <Card sx={{ bgcolor: softTokens.lavender.main }}>
+      <Card sx={{ borderTop: '3px solid', borderTopColor: 'primary.main' }}>
         <CardContent>
-          <Stack direction="row" justifyContent="space-between" alignItems="center">
-            <Typography variant="subtitle2" sx={{ color: softTokens.lavender.ink }}>PENSION AT AGE {input.retirementAge}</Typography>
+          <Stack direction="row" flexWrap="wrap" gap={1} justifyContent="space-between" alignItems="center">
+            <Typography variant="subtitle2">Projected pot at age {input.retirementAge}</Typography>
             <Chip label="Today&apos;s money" size="small" variant="outlined" />
           </Stack>
-          <Typography sx={{ fontFamily: serifFamily, fontStyle: 'italic', fontSize: { xs: 44, sm: 56 }, mt: 1, lineHeight: 1.2 }}>
+          <Typography sx={{ fontWeight: 650, fontVariantNumeric: 'tabular-nums', letterSpacing: '-0.04em', fontSize: { xs: 32, sm: 40 }, overflowWrap: 'anywhere', mt: 1.5, lineHeight: 1.2 }}>
             {formatCurrency(base.finalRealPot)}
           </Typography>
           <Typography variant="body2" sx={{ mt: 1 }}>{formatCurrency(base.finalNominalPot)} in future pounds · {projection.yearsToRetirement} years to plan</Typography>
           <Divider sx={{ my: 2 }} />
-          <Typography variant="body2">Income at retirement, before tax</Typography>
-          <Typography variant="h4" sx={{ mt: 0.5 }}>{formatCurrency(base.totalIncomeAtRetirement)}<Typography component="span" variant="body2"> / year</Typography></Typography>
+          <Typography variant="body2">Illustrative initial income, before tax</Typography>
+          <Typography variant="h4" sx={{ mt: 0.75, fontVariantNumeric: 'tabular-nums', overflowWrap: 'anywhere' }}>{formatCurrency(base.totalIncomeAtRetirement)}<Typography component="span" variant="body2"> / year</Typography></Typography>
           <Typography variant="caption" component="p" sx={{ mt: 1 }}>
             {formatCurrency(base.privateAnnualIncome)} from the pot at {input.withdrawalRate}% + {formatCurrency(projection.statePensionAtRetirement)} assumed State Pension.
           </Typography>
@@ -341,9 +341,9 @@ function ResultsSummary({ projection, input }: { projection: RetirementProjectio
       </Card>
       <Card>
         <CardContent>
-          <Stack direction="row" justifyContent="space-between" alignItems="center" spacing={1}>
-            <Typography variant="h6">Your income goal</Typography>
-            <Chip label={shortfall.gt(0) ? 'A gap to explore' : 'Covered in this scenario'} color={shortfall.gt(0) ? 'warning' : 'success'} />
+          <Stack direction={{ xs: 'column', sm: 'row' }} gap={1} justifyContent="space-between" alignItems={{ sm: 'center' }}>
+            <Typography variant="h6">Income target</Typography>
+            <Chip size="small" label={shortfall.gt(0) ? 'Projected shortfall' : 'Covered in this scenario'} color={shortfall.gt(0) ? 'warning' : 'success'} />
           </Stack>
           <Typography variant="body2" sx={{ mt: 1 }}>Target pot: {formatCurrency(projection.targetRealPot)} in today&apos;s money.</Typography>
           <LinearProgress variant="determinate" value={progress} aria-label="Illustrative pension pot as a percentage of target" sx={{ mt: 2, mb: 1 }} />
@@ -372,10 +372,10 @@ function ScenarioComparison({ projection, input }: { projection: RetirementProje
   return (
     <Card>
       <CardContent>
-        <Typography variant="h6">How sensitive is your plan?</Typography>
+        <Typography variant="h6">Scenario comparison</Typography>
         <Typography variant="body2" sx={{ mt: 0.5 }}>All income and pot comparisons below are in today&apos;s money. Income is before tax.</Typography>
         <TableContainer sx={{ mt: 2 }}>
-          <Table size="small" aria-label="Retirement scenario comparison">
+          <Table size="small" aria-label="Retirement scenario comparison" sx={{ minWidth: 650, '& .MuiTableCell-root': { fontVariantNumeric: 'tabular-nums' } }}>
             <TableHead><TableRow>
               <TableCell>Assumption</TableCell><TableCell align="right">Pot at retirement</TableCell>
               <TableCell align="right">Annual income at retirement</TableCell>
@@ -394,7 +394,7 @@ function ScenarioComparison({ projection, input }: { projection: RetirementProje
           This holds the retirement pot illustration constant; the intervening drawdown is not modelled.
         </Typography>}
         <Divider sx={{ my: 2 }} />
-        <Typography variant="subtitle2">Where the future pounds come from · your growth assumption</Typography>
+        <Typography variant="subtitle2">Projected pot breakdown · base growth assumption</Typography>
         <Grid container spacing={2} sx={{ mt: 0.5 }}>
           {[
             ['Starting pension', formatCurrency(input.currentPot)],
@@ -402,7 +402,7 @@ function ScenarioComparison({ projection, input }: { projection: RetirementProje
             ['Employer deposits', formatCurrency(base.employerContributions)],
             ['Investment growth / loss', formatCurrency(base.investmentGrowth)],
             ['Fees deducted', formatCurrency(base.feesPaid)],
-          ].map(([label, value]) => <Grid key={label} size={{ xs: 6, md: 'grow' }}><Typography variant="caption">{label}</Typography><Typography variant="subtitle1">{value}</Typography></Grid>)}
+          ].map(([label, value]) => <Grid key={label} size={{ xs: 6, md: 'grow' }}><Typography variant="caption">{label}</Typography><Typography variant="subtitle1" sx={{ fontVariantNumeric: 'tabular-nums', overflowWrap: 'anywhere' }}>{value}</Typography></Grid>)}
         </Grid>
         <Typography variant="caption" component="p" sx={{ mt: 2 }}>Growth is before fees. Starting pension + deposits + growth − fees = the final pot in future pounds, subject to penny rounding.</Typography>
       </CardContent>
@@ -438,7 +438,7 @@ function TrackedPensions({ onUseBalance }: { onUseBalance: (balance: string) => 
           <Box><Typography variant="h6">Your tracked pensions</Typography><Typography variant="body2" sx={{ mt: 0.5 }}>Select only the pots that belong in this person&apos;s scenario. Balances are manually tracked.</Typography></Box>
           <Button component={Link} href="/investments" variant="outlined" size="small">Manage pension accounts</Button>
         </Stack>
-        {status === 'loading' ? <Skeleton variant="rectangular" height={70} sx={{ mt: 2, borderRadius: 2 }} />
+        {status === 'loading' ? <Skeleton variant="rectangular" height={70} sx={{ mt: 2, borderRadius: '8px' }} />
           : status === 'error' ? <Alert severity="info" sx={{ mt: 2 }}>Tracked pension balances are unavailable. Enter your current pot above to keep planning.</Alert>
             : accounts.length === 0 ? <Typography variant="body2" sx={{ mt: 2 }}>No pension accounts tracked yet. Add one in Investments, or enter a balance directly in the calculator.</Typography>
               : <>

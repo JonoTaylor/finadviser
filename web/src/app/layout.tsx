@@ -12,23 +12,6 @@ const inter = localFont({
   variable: '--font-inter',
 });
 
-const instrumentSerif = localFont({
-  src: [
-    {
-      path: './fonts/instrument-serif-latin-400-normal.woff2',
-      weight: '400',
-      style: 'normal',
-    },
-    {
-      path: './fonts/instrument-serif-latin-400-italic.woff2',
-      weight: '400',
-      style: 'italic',
-    },
-  ],
-  display: 'swap',
-  variable: '--font-instrument-serif',
-});
-
 export const metadata: Metadata = {
   title: 'FinAdviser',
   description: 'Personal financial adviser',
@@ -40,7 +23,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en" className={`${inter.variable} ${instrumentSerif.variable}`}>
+    <html lang="en" className={inter.variable}>
       <body>
         <ThemeRegistry>
           <Sidebar>{children}</Sidebar>

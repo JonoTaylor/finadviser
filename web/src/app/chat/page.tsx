@@ -4,7 +4,7 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import {
   Box, Typography, TextField, IconButton, Button, Stack,
   List, ListItemButton, ListItemText, Paper, Divider, Drawer,
-  CircularProgress, Chip,
+  CircularProgress, Chip, Alert, Skeleton,
 } from '@mui/material';
 import { alpha } from '@mui/material/styles';
 import SendRoundedIcon from '@mui/icons-material/SendRounded';
@@ -23,9 +23,15 @@ import HistoryRoundedIcon from '@mui/icons-material/HistoryRounded';
 import useSWR from 'swr';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { softTokens } from '@/theme/theme';
+import PageHeader from '@/components/ui/PageHeader';
+import { fetchJson } from '@/lib/http/client';
 
-const fetcher = (url: string) => fetch(url).then(r => r.json());
+interface Conversation { id: number; title: string | null; updatedAt: string }
+const fetcher = async (url: string): Promise<Conversation[]> => {
+  const data = await fetchJson<unknown>(url);
+  if (!Array.isArray(data)) throw new Error('Chat history returned an unreadable response.');
+  return data as Conversation[];
+};
 
 // Stable plugin reference so ReactMarkdown doesn't re-process content
 // on every render (a fresh array literal would invalidate its memo).
@@ -39,13 +45,15 @@ const REMARK_PLUGINS = [remarkGfm];
 const markdownComponents = {
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   table: ({ node: _node, ...props }: { node?: unknown } & React.HTMLAttributes<HTMLTableElement>) => (
-    <Box sx={{ overflowX: 'auto' }}>
+    <Box sx={{ overflowX: 'auto', minWidth: 0, maxWidth: '100%' }}>
       <table {...props} />
     </Box>
   ),
 };
 
 const markdownSx = {
+  fontSize: '0.875rem', minWidth: 0, overflowWrap: 'anywhere',
+  '& img': { maxWidth: '100%' },
   '& p': { m: 0, mb: 1.5, lineHeight: 1.7, '&:last-child': { mb: 0 } },
   '& h1': { fontSize: '1.4rem', fontWeight: 700, mt: 2.5, mb: 1, '&:first-of-type': { mt: 0 } },
   '& h2': { fontSize: '1.2rem', fontWeight: 700, mt: 2.5, mb: 1, '&:first-of-type': { mt: 0 } },
@@ -54,22 +62,22 @@ const markdownSx = {
   '& ul, & ol': { pl: 2.5, mb: 1.5, '& li': { mb: 0.5, lineHeight: 1.6 } },
   '& hr': { border: 'none', borderTop: '1px solid', borderColor: 'divider', my: 2 },
   '& table': {
-    width: '100%', borderCollapse: 'collapse', mb: 1.5, fontSize: '0.875rem',
+    width: '100%', minWidth: 480, borderCollapse: 'collapse', mb: 1.5, fontSize: '0.875rem', overflowWrap: 'normal',
     '& th': { textAlign: 'left', fontWeight: 600, p: '8px 12px', borderBottom: '2px solid', borderColor: 'divider' },
     '& td': { p: '6px 12px', borderBottom: '1px solid', borderColor: 'divider' },
     '& tr:last-child td': { borderBottom: 'none' },
   },
   '& code': {
     fontFamily: 'monospace', fontSize: '0.85em',
-    bgcolor: 'rgba(255,255,255,0.06)', px: 0.75, py: 0.25, borderRadius: 1,
+    bgcolor: 'action.hover', px: 0.75, py: 0.25, borderRadius: '3px',
   },
   '& pre': {
-    bgcolor: 'rgba(0,0,0,0.3)', borderRadius: 2, p: 2, mb: 1.5, overflow: 'auto',
+    bgcolor: 'action.hover', borderRadius: '6px', p: 2, mb: 1.5, overflow: 'auto', maxWidth: '100%',
     '& code': { bgcolor: 'transparent', p: 0, fontSize: '0.85rem' },
   },
   '& blockquote': {
     borderLeft: '3px solid', borderColor: 'primary.main', pl: 2, ml: 0, my: 1.5,
-    color: 'text.secondary', fontStyle: 'italic',
+    color: 'text.secondary',
   },
   '& strong': { fontWeight: 600 },
   '& a': { color: 'primary.main', textDecoration: 'none', '&:hover': { textDecoration: 'underline' } },
@@ -99,32 +107,50 @@ export default function ChatPage() {
   const [loading, setLoading] = useState(false);
   const [streamingContent, setStreamingContent] = useState('');
   const [activeTools, setActiveTools] = useState<string[]>([]);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const messagesViewportRef = useRef<HTMLDivElement>(null);
+  const [loadingConversation, setLoadingConversation] = useState<number | null>(null);
+  const [historyError, setHistoryError] = useState<string | null>(null);
+  const [sendError, setSendError] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
-  const { data: conversations, mutate: mutateConversations } = useSWR('/api/chat/conversations', fetcher);
+  const { data: conversations, error: conversationsError, isLoading: historyLoading, mutate: mutateConversations } = useSWR<Conversation[]>('/api/chat/conversations', fetcher, { shouldRetryOnError: false });
 
   const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    const viewport = messagesViewportRef.current;
+    viewport?.scrollTo({ top: viewport.scrollHeight, behavior: 'smooth' });
   };
 
   useEffect(scrollToBottom, [messages, streamingContent, activeTools]);
 
   const loadConversation = useCallback(async (id: number) => {
-    const res = await fetch(`/api/chat/conversations/${id}`);
-    const msgs = await res.json();
-    setConversationId(id);
-    setMessages(msgs.map((m: { role: string; content: string }) => ({ role: m.role, content: m.content })).filter((m: Message) => m.role === 'user' || m.role === 'assistant'));
-    setSidebarOpen(false);
-  }, []);
+    if (loading || loadingConversation !== null) return;
+    setHistoryError(null);
+    setLoadingConversation(id);
+    try {
+      const data = await fetchJson<unknown>(`/api/chat/conversations/${id}`);
+      if (!Array.isArray(data) || data.some(item => !item || typeof item.role !== 'string' || typeof item.content !== 'string')) {
+        throw new Error('Conversation returned an unreadable response.');
+      }
+      const nextMessages = data.filter(item => item.role === 'user' || item.role === 'assistant').map(item => ({ role: item.role, content: item.content })) as Message[];
+      setConversationId(id);
+      setMessages(nextMessages);
+      setSendError(null);
+      setSidebarOpen(false);
+    } catch {
+      setHistoryError('This conversation could not be loaded. Your current chat is unchanged. Please try again.');
+    } finally {
+      setLoadingConversation(null);
+    }
+  }, [loading, loadingConversation]);
 
   const sendMessage = useCallback(async (text: string) => {
-    if (!text.trim() || loading) return;
+    if (!text.trim() || loading || loadingConversation !== null) return;
 
     const userMsg: Message = { role: 'user', content: text };
     setMessages(prev => [...prev, userMsg]);
     setInput('');
     setLoading(true);
+    setSendError(null);
     setStreamingContent('');
     setActiveTools([]);
 
@@ -177,213 +203,94 @@ export default function ChatPage() {
       setActiveTools([]);
       mutateConversations();
     } catch {
-      setMessages(prev => [...prev, { role: 'assistant', content: 'Sorry, an error occurred. Please check your API key in settings.' }]);
+      setSendError('The adviser response is unavailable or was interrupted. Check your connection and try again.');
     } finally {
       setLoading(false);
+      setActiveTools([]);
     }
-  }, [conversationId, loading, mutateConversations]);
+  }, [conversationId, loading, loadingConversation, mutateConversations]);
 
   const handleNewChat = () => {
+    if (loading || loadingConversation !== null) return;
     setConversationId(null);
     setMessages([]);
     setStreamingContent('');
     setActiveTools([]);
+    setHistoryError(null);
+    setSendError(null);
+    setSidebarOpen(false);
   };
 
-  return (
-    <Box sx={{ display: 'flex', height: 'calc(100vh - 48px)' }}>
-      {/* Conversation sidebar */}
-      <Drawer
-        variant="temporary"
-        open={sidebarOpen}
-        onClose={() => setSidebarOpen(false)}
-        sx={{ '& .MuiDrawer-paper': { width: 300 } }}
-      >
-        <Box sx={{ p: 2 }}>
-          <Button fullWidth variant="outlined" startIcon={<AddRoundedIcon />} onClick={handleNewChat}>
-            New Chat
-          </Button>
-        </Box>
-        <Divider />
-        <List sx={{ px: 1 }}>
-          {(conversations ?? []).map((conv: { id: number; title: string | null; updatedAt: string }) => (
-            <ListItemButton
-              key={conv.id}
-              selected={conv.id === conversationId}
-              onClick={() => loadConversation(conv.id)}
-            >
-              <ListItemText
-                primary={conv.title || 'Untitled'}
-                primaryTypographyProps={{ noWrap: true, fontSize: '0.875rem' }}
-              />
-            </ListItemButton>
-          ))}
-        </List>
-      </Drawer>
+  return <Box sx={{
+    display: 'flex', flexDirection: 'column', minWidth: 0, minHeight: 0,
+    height: { xs: 'calc(100dvh - 96px)', sm: 'calc(100dvh - 112px)', md: 'calc(100dvh - 128px)', xl: 'calc(100dvh - 144px)' },
+  }}>
+    <Box sx={{ flexShrink: 0 }}><PageHeader title="Financial adviser" description="Make your next financial decision with a clearer picture." actions={<>
+      <Button size="small" variant="outlined" startIcon={<HistoryRoundedIcon />} onClick={() => setSidebarOpen(true)}>History</Button>
+      <Button size="small" variant="outlined" startIcon={<AddRoundedIcon />} onClick={handleNewChat} disabled={loading || loadingConversation !== null}>New chat</Button>
+    </>} /></Box>
 
-      {/* Main chat area */}
-      <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mb: 2 }}>
-          <Button
-            size="small"
-            variant="outlined"
-            startIcon={<HistoryRoundedIcon />}
-            onClick={() => setSidebarOpen(true)}
-          >
-            History
-          </Button>
-          <Typography variant="h4">AI Chat</Typography>
-        </Box>
-
-        {/* Messages */}
-        <Box sx={{ flex: 1, overflow: 'auto', mb: 2 }}>
-          {messages.length === 0 && !streamingContent ? (
-            <Box sx={{ textAlign: 'center', py: 10 }}>
-              <Box
-                sx={{
-                  width: 64, height: 64, borderRadius: 4, mx: 'auto', mb: 2,
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  bgcolor: softTokens.lavender.main,
-                  color: softTokens.lavender.ink,
-                }}
-              >
-                <AutoAwesomeRoundedIcon sx={{ fontSize: 32 }} />
-              </Box>
-              <Typography variant="h5" sx={{ mb: 1 }}>
-                Ask me anything
-              </Typography>
-              <Typography variant="body2" color="text.secondary" sx={{ mb: 4, maxWidth: 420, mx: 'auto' }}>
-                I can analyze spending, manage budgets, track savings goals, assess affordability, optimize debt, review property investments, and flag financial concerns.
-              </Typography>
-              <Stack direction="row" spacing={1} justifyContent="center" flexWrap="wrap" useFlexGap>
-                {QUICK_PROMPTS.map((qp) => (
-                  <Button
-                    key={qp.label}
-                    variant="outlined"
-                    size="small"
-                    startIcon={qp.icon}
-                    onClick={() => sendMessage(qp.prompt)}
-                    sx={{ mb: 1 }}
-                  >
-                    {qp.label}
-                  </Button>
-                ))}
-              </Stack>
-            </Box>
-          ) : (
-            <Stack spacing={2}>
-              {messages.map((msg, i) => (
-                <Paper
-                  key={i}
-                  elevation={0}
-                  sx={{
-                    p: 2,
-                    maxWidth: '80%',
-                    alignSelf: msg.role === 'user' ? 'flex-end' : 'flex-start',
-                    bgcolor: msg.role === 'user' ? softTokens.lavender.main : softTokens.fog,
-                    ml: msg.role === 'user' ? 'auto' : 0,
-                    borderLeft: msg.role === 'assistant' ? '3px solid' : 'none',
-                    borderColor: msg.role === 'assistant' ? 'secondary.main' : 'transparent',
-                    borderRadius: 4,
-                  }}
-                >
-                  {msg.role === 'assistant' ? (
-                    <Box sx={markdownSx}>
-                      <ReactMarkdown remarkPlugins={REMARK_PLUGINS} components={markdownComponents}>
-                        {msg.content}
-                      </ReactMarkdown>
-                    </Box>
-                  ) : (
-                    <Typography>{msg.content}</Typography>
-                  )}
-                </Paper>
-              ))}
-
-              {/* Tool status indicators */}
-              {activeTools.length > 0 && (
-                <Box sx={{ display: 'flex', gap: 0.75, flexWrap: 'wrap', alignItems: 'center', pl: 0.5 }}>
-                  <MemoryRoundedIcon sx={{ fontSize: 16, color: 'secondary.main' }} />
-                  {activeTools.map((label, i) => (
-                    <Chip
-                      key={i}
-                      label={label}
-                      size="small"
-                      variant="outlined"
-                      color="secondary"
-                      sx={{ fontSize: '0.75rem', height: 26 }}
-                    />
-                  ))}
-                </Box>
-              )}
-
-              {streamingContent && (
-                <Paper
-                  elevation={0}
-                  sx={{
-                    p: 2, maxWidth: '80%',
-                    bgcolor: softTokens.fog,
-                    borderLeft: '3px solid',
-                    borderColor: 'secondary.main',
-                    borderRadius: 4,
-                  }}
-                >
-                  <Box sx={markdownSx}>
-                    <ReactMarkdown remarkPlugins={REMARK_PLUGINS} components={markdownComponents}>
-                      {streamingContent}
-                    </ReactMarkdown>
-                  </Box>
-                </Paper>
-              )}
-              {loading && !streamingContent && activeTools.length === 0 && (
-                <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', pl: 0.5 }}>
-                  <CircularProgress size={16} color="secondary" />
-                  <Typography variant="body2" color="text.secondary">Thinking...</Typography>
-                </Box>
-              )}
-              <div ref={messagesEndRef} />
-            </Stack>
-          )}
-        </Box>
-
-        {/* Disclaimer */}
-        <Typography variant="caption" color="text.secondary" sx={{ mb: 1, textAlign: 'center', opacity: 0.6 }}>
-          AI responses are for informational purposes only. Not financial advice.
-        </Typography>
-
-        {/* Input */}
-        <Paper
-          elevation={0}
-          sx={{
-            display: 'flex', gap: 1, p: 1,
-            bgcolor: 'background.paper',
-            border: '1px solid',
-            borderColor: 'divider',
-            borderRadius: 4,
-          }}
-        >
-          <TextField
-            fullWidth
-            size="small"
-            placeholder="Ask about your finances..."
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(input); } }}
-            disabled={loading}
-            sx={{ '& .MuiOutlinedInput-notchedOutline': { border: 'none' } }}
-          />
-          <IconButton
-            color="primary"
-            onClick={() => sendMessage(input)}
-            disabled={loading || !input.trim()}
-            sx={{
-              bgcolor: loading || !input.trim() ? 'transparent' : (theme) => alpha(theme.palette.primary.main, 0.08),
-              '&:hover': { bgcolor: (theme) => alpha(theme.palette.primary.main, 0.16) },
-            }}
-          >
-            <SendRoundedIcon />
-          </IconButton>
-        </Paper>
+    <Drawer variant="temporary" open={sidebarOpen} onClose={() => setSidebarOpen(false)}
+      sx={{ '& .MuiDrawer-paper': { width: 320, maxWidth: 'calc(100vw - 32px)', bgcolor: 'background.paper', color: 'text.primary', borderRadius: 0 } }}>
+      <Box sx={{ p: 2.5 }}><Typography variant="h6" sx={{ mb: 0.75 }}>Conversation history</Typography><Typography variant="body2" color="text.secondary">Continue a previous financial discussion.</Typography></Box>
+      <Divider />
+      <Box sx={{ p: 2 }}>
+        <Button fullWidth variant="outlined" startIcon={<AddRoundedIcon />} onClick={handleNewChat} disabled={loading || loadingConversation !== null}>New chat</Button>
+        {historyLoading && !conversations && <Skeleton height={70} sx={{ mt: 1 }} />}
+        {conversationsError && <Alert severity="warning" sx={{ mt: 2 }}>Conversation history is unavailable. Your current chat remains open.<Button size="small" onClick={() => mutateConversations()} sx={{ display: 'block', mt: 1 }}>Try again</Button></Alert>}
+        {historyError && <Alert severity="error" sx={{ mt: 2 }}>{historyError}</Alert>}
       </Box>
-    </Box>
-  );
+      <List sx={{ px: 1, minWidth: 0 }}>
+        {(conversations ?? []).map(conversation => <ListItemButton key={conversation.id} selected={conversation.id === conversationId}
+          onClick={() => loadConversation(conversation.id)} disabled={loading || loadingConversation !== null} sx={{ borderRadius: '6px', color: 'text.primary', '&.Mui-selected': { bgcolor: 'action.selected', color: 'text.primary' } }}>
+          <ListItemText primary={conversation.title || 'Untitled conversation'} primaryTypographyProps={{ noWrap: true, fontSize: '0.8125rem', fontWeight: 500 }} />
+          {loadingConversation === conversation.id && <CircularProgress size={14} />}
+        </ListItemButton>)}
+        {!historyLoading && !conversationsError && conversations?.length === 0 && <Typography variant="body2" color="text.secondary" sx={{ px: 2, py: 1 }}>No saved conversations yet.</Typography>}
+      </List>
+    </Drawer>
+
+    <Paper elevation={0} sx={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, minWidth: 0, border: 1, borderColor: 'divider', borderRadius: '8px', overflow: 'hidden' }}>
+      <Box ref={messagesViewportRef} sx={{ flex: 1, minHeight: 0, minWidth: 0, overflowY: 'auto', overscrollBehavior: 'contain', px: { xs: 2, md: 3 }, py: 2.5 }}>
+        {messages.length === 0 && !streamingContent ? <Box sx={{ maxWidth: 840, mx: 'auto', py: { xs: 1, sm: 3 } }}>
+          <Stack direction="row" alignItems="center" gap={1.25} sx={{ mb: 1.25 }}><AutoAwesomeRoundedIcon sx={{ fontSize: 22, color: 'primary.main' }} /><Typography variant="h6">Where would you like to start?</Typography></Stack>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2.5, maxWidth: 640 }}>Review spending, build a plan or explore a financial decision using your recorded accounts and planning workspaces.</Typography>
+          <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, minmax(0, 1fr))', lg: 'repeat(3, minmax(0, 1fr))' }, gap: 1 }}>
+            {QUICK_PROMPTS.map(prompt => <Button key={prompt.label} variant="outlined" size="small" startIcon={prompt.icon} onClick={() => sendMessage(prompt.prompt)}
+              sx={{ justifyContent: 'flex-start', py: 1.5, px: 1.5, minWidth: 0, textAlign: 'left' }}>{prompt.label}</Button>)}
+          </Box>
+        </Box> : <Stack spacing={2}>
+          {messages.map((message, index) => <Paper key={index} elevation={0} sx={{
+            p: { xs: 1.5, sm: 2 }, minWidth: 0, maxWidth: { xs: '100%', sm: '90%' }, overflowWrap: 'anywhere',
+            alignSelf: message.role === 'user' ? 'flex-end' : 'flex-start', bgcolor: message.role === 'user' ? '#EDF7F5' : 'background.paper',
+            border: 1, borderColor: message.role === 'user' ? '#D2E9E4' : 'divider', borderRadius: '8px',
+          }}>
+            <Typography variant="caption" sx={{ display: 'block', fontWeight: 600, mb: 0.75 }}>{message.role === 'user' ? 'You' : 'Adviser'}</Typography>
+            {message.role === 'assistant' ? <Box sx={markdownSx}><ReactMarkdown remarkPlugins={REMARK_PLUGINS} components={markdownComponents}>{message.content}</ReactMarkdown></Box> : <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap', lineHeight: 1.7 }}>{message.content}</Typography>}
+          </Paper>)}
+          {activeTools.length > 0 && <Stack direction="row" gap={0.75} flexWrap="wrap" alignItems="center" aria-live="polite">
+            <MemoryRoundedIcon sx={{ fontSize: 16, color: 'primary.main' }} />{activeTools.map((label, index) => <Chip key={index} label={label} size="small" variant="outlined" />)}
+          </Stack>}
+          {streamingContent && <Paper elevation={0} sx={{ p: { xs: 1.5, sm: 2 }, maxWidth: { xs: '100%', sm: '90%' }, minWidth: 0, alignSelf: 'flex-start', border: 1, borderColor: 'divider', borderRadius: '8px' }}>
+            <Typography variant="caption" sx={{ display: 'block', fontWeight: 600, mb: 0.75 }}>{sendError ? 'Incomplete adviser response' : 'Adviser'}</Typography>
+            <Box sx={markdownSx}><ReactMarkdown remarkPlugins={REMARK_PLUGINS} components={markdownComponents}>{streamingContent}</ReactMarkdown></Box>
+          </Paper>}
+          {loading && !streamingContent && activeTools.length === 0 && <Stack direction="row" gap={1} alignItems="center" aria-live="polite"><CircularProgress size={16} /><Typography variant="body2" color="text.secondary">Reviewing your question…</Typography></Stack>}
+        </Stack>}
+      </Box>
+
+      <Box sx={{ flexShrink: 0, borderTop: 1, borderColor: 'divider', p: { xs: 1.5, sm: 2 }, bgcolor: 'background.paper' }}>
+        {sendError && <Alert severity="error" sx={{ mb: 1.5 }}>{sendError}</Alert>}
+        <Stack direction="row" gap={1} alignItems="flex-end" sx={{ border: 1, borderColor: 'divider', borderRadius: '6px', p: 0.5, minWidth: 0 }}>
+          <TextField fullWidth multiline minRows={1} maxRows={4} size="small" placeholder="Ask about your finances…" value={input} onChange={event => setInput(event.target.value)}
+            onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); sendMessage(input); } }}
+            disabled={loading || loadingConversation !== null} inputProps={{ 'aria-label': 'Message your financial adviser' }}
+            sx={{ minWidth: 0, '& .MuiOutlinedInput-notchedOutline': { border: 'none' } }} />
+          <IconButton aria-label="Send message" color="primary" onClick={() => sendMessage(input)} disabled={loading || loadingConversation !== null || !input.trim()}
+            sx={{ flexShrink: 0, borderRadius: '5px', bgcolor: !loading && input.trim() ? theme => alpha(theme.palette.primary.main, 0.08) : 'transparent' }}><SendRoundedIcon sx={{ fontSize: 20 }} /></IconButton>
+        </Stack>
+        <Typography variant="caption" sx={{ display: 'block', mt: 1, textAlign: 'center', fontSize: '0.6875rem' }}>AI responses are informational. Check the evidence and assumptions before acting.</Typography>
+      </Box>
+    </Paper>
+  </Box>;
 }

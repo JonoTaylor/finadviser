@@ -21,14 +21,28 @@ function totalsFor(state: DbState) {
 }
 
 describe('computeOwnerTotals mirrors the tax report', () => {
-  it('counts 10 rent dues for a tenancy anchored on the 1st that ends 1 Feb 2026 (inclusive)', () => {
+  it('counts 9 rent dues for a tenancy anchored on the 1st that ends 1 Feb 2026 (no due on the end date)', () => {
     const state = baseState();
     state.tenancies = [tenancy()];
     const road = totalsFor(state).properties.find(p => p.propertyId === ROAD_ID)!;
-    // 1 May 2025 ... 1 Feb 2026 = 10 dues; Alex's equal-split share is 50%
-    expect(road.scheduledRentLines).toBe(10);
-    expect(road.scheduledRent).toBe('11000.00');
-    expect(road.grossIncome).toBe('11000.00');
+    // 1 May 2025 ... 1 Jan 2026 = 9 dues; the due on 1 Feb 2026 is the handover day, not a new
+    // period. Alex's equal-split share is 50%.
+    expect(road.scheduledRentLines).toBe(9);
+    expect(road.scheduledRent).toBe('9900.00');
+    expect(road.grossIncome).toBe('9900.00');
+  });
+
+  it('counts the handover day once when the next tenancy starts on the day the previous one ends', () => {
+    const state = baseState();
+    state.tenancies = [
+      tenancy(),
+      tenancy({ id: 2, tenantName: 'Sam Tenant', startDate: '2026-02-01', endDate: '2027-01-31' }),
+    ];
+    const road = totalsFor(state).properties.find(p => p.propertyId === ROAD_ID)!;
+    // 9 dues from tenancy 1 + 3 from tenancy 2 (1 Feb, 1 Mar, 1 Apr 2026) = 12 x 2200 = 26400, at 50%
+    expect(road.scheduledRentLines).toBe(12);
+    expect(road.scheduledRent).toBe('13200.00');
+    expect(road.grossIncome).toBe('13200.00');
   });
 
   it('would count 12 dues for the same tenancy running to the contract end, and 9 if it ended 31 Jan', () => {
@@ -38,6 +52,10 @@ describe('computeOwnerTotals mirrors the tax report', () => {
     const early = baseState();
     early.tenancies = [tenancy({ endDate: '2026-01-31' })];
     expect(totalsFor(early).properties[0].scheduledRentLines).toBe(9);
+    // ending the day after a due still includes that due (the period is capped, not dropped)
+    const justAfter = baseState();
+    justAfter.tenancies = [tenancy({ endDate: '2026-02-02' })];
+    expect(totalsFor(justAfter).properties[0].scheduledRentLines).toBe(10);
   });
 
   it('rounds the owner share per line, then sums the rounded lines', () => {
@@ -80,7 +98,7 @@ describe('computeOwnerTotals mirrors the tax report', () => {
     state.tenancies = [tenancy()];
     state.taggedLines = [line({ date: '2025-08-01', amount: '-100.00', accountName: 'Uncategorized Income', accountType: 'INCOME', propertyId: STREET_ID })];
     const t = totalsFor(state);
-    expect(t.combined.grossIncome).toBe('11060.00');
+    expect(t.combined.grossIncome).toBe('9960.00'); // 9900 rent + 60 other income
     expect(t.properties.map(p => p.propertyName)).toEqual(['1 Example Road', '2 Sample Street']);
   });
 

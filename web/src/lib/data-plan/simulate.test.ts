@@ -18,9 +18,10 @@ describe('simulateChanges', () => {
     const after = simulateChanges(state, result.changes);
     const t = computeOwnerTotals({ ownerId: OWNER_ID, taxYear: '2025-26', state: after });
     const road = t.properties.find(p => p.propertyId === ROAD_ID)!;
-    // tenancy 2024-09-01 .. 2026-03-01 monthly 1000: dues 1 May 2025 .. 1 Mar 2026 = 11, at 50%
-    expect(road.scheduledRentLines).toBe(11);
-    expect(road.scheduledRent).toBe('5500.00');
+    // tenancy 2024-09-01 .. 2026-03-01 monthly 1000: dues 1 May 2025 .. 1 Feb 2026 = 10, at 50%
+    // (no due on 1 Mar 2026: the end date is the handover day, not a new rent period)
+    expect(road.scheduledRentLines).toBe(10);
+    expect(road.scheduledRent).toBe('5000.00');
     expect(road.totalExpenses).toBe('150.00'); // 300 insurance at 50%
     expect(road.mortgageInterest).toBe('200.00'); // 400 at 50%
     const street = t.properties.find(p => p.propertyName === '2 Sample Street')!;

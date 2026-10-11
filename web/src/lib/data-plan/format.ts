@@ -3,6 +3,7 @@ import Decimal from 'decimal.js';
 import { formatGbp, formatGbpDelta } from './money';
 import { accountAliasUses, propertyExpenseSubtree, resolveAccountAlias } from './planner';
 import { PROFILE_FIELD_COLUMNS, TAX_PROFILE_FIELDS, type Plan } from './schema';
+import type { SchemaReport } from './state';
 import type { Change, DbState, LedgerLine, OwnerTotals, PlanResult, SkipReason, Totals } from './types';
 import { taxYearRange } from '@/lib/tax/ukTaxYear';
 
@@ -12,6 +13,7 @@ import { taxYearRange } from '@/lib/tax/ukTaxYear';
  */
 
 const SKIP_HEADINGS: Record<SkipReason, string> = {
+  pending_migration: 'Pending migration (the schema is not migrated yet)',
   already_loaded: 'Already loaded by this plan (re-run is a no-op)',
   duplicate_tagged: 'Already present in the ledger, tagged to the property',
   duplicate_untagged: 'Likely duplicates NOT tagged or created: needs a decision',
@@ -23,6 +25,7 @@ const SKIP_HEADINGS: Record<SkipReason, string> = {
 };
 
 const SKIP_ORDER: SkipReason[] = [
+  'pending_migration',
   'duplicate_untagged',
   'alternate_amount',
   'different_amount',
@@ -170,6 +173,18 @@ export function renderPlanResult(result: PlanResult, heading = 'Changes it WOULD
   return out.join('\n');
 }
 
+/** Banner for a database whose schema lacks what the pending migration adds. Empty when nothing is pending. */
+export function renderSchemaNotice(schema: Pick<SchemaReport, 'pendingMigration'>): string {
+  if (schema.pendingMigration.length === 0) return '';
+  return [
+    '== Schema not migrated yet ==',
+    ...schema.pendingMigration.map(p => `  - ${p}`),
+    '  Items that need these are listed below as "pending migration: would apply after `npm run db:migrate` or the next deploy".',
+    '  They are NOT in the change list or the digest. Everything else is planned normally against the schema as it is now;',
+    '  the totals do not depend on them. --apply refuses until the schema is migrated.',
+  ].join('\n');
+}
+
 const TOTAL_ROWS: Array<[keyof Totals, string]> = [
   ['grossIncome', 'Gross income'],
   ['totalExpenses', 'Expenses'],
@@ -280,7 +295,8 @@ export function renderSnapshot(plan: Plan, state: DbState): string {
         return `${o.ownerName}${rule ? ` [${rule}]` : ' [no rule: equal split]'}`;
       })
       .join('; ');
-    out.push(`  #${p.id} ${p.name}  letting_type=${p.lettingType}${inPlan ? '   <- in plan' : ''}`);
+    const letting = state.pendingMigration?.lettingType ? '(not migrated yet)' : p.lettingType;
+    out.push(`  #${p.id} ${p.name}  letting_type=${letting}${inPlan ? '   <- in plan' : ''}`);
     out.push(`        owners: ${owners || '(none)'}`);
   }
   for (const pp of planProps) {
@@ -320,7 +336,9 @@ export function renderSnapshot(plan: Plan, state: DbState): string {
 
   out.push('');
   out.push(`== Owner tax profile: ${plan.owner} ${plan.taxYear} ==`);
-  if (!state.taxProfile) {
+  if (state.pendingMigration?.taxProfile) {
+    out.push('  (table owner_tax_profiles does not exist yet: schema not migrated)');
+  } else if (!state.taxProfile) {
     out.push('  (no row saved: the app treats every figure as nil)');
   } else {
     for (const f of TAX_PROFILE_FIELDS) {

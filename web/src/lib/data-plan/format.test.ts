@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { changeDigest, renderChange, renderPlanResult, renderSnapshot, renderTotalsComparison } from './format';
+import { changeDigest, renderChange, renderPlanResult, renderSchemaNotice, renderSnapshot, renderTotalsComparison } from './format';
 import { formatGbp, formatGbpDelta } from './money';
 import { planChanges } from './planner';
 import { simulateChanges } from './simulate';
@@ -66,5 +66,45 @@ describe('rendering', () => {
     expect(text).toContain('ownerBank -> (not set)');
     expect(text).toContain('ASSET accounts that exist: "Example Current Account"');
     expect(text).toContain('"Property insurance": #2 (under Property expenses)');
+  });
+});
+
+describe('schema not migrated yet', () => {
+  const pendingState = () => {
+    const s = baseState();
+    s.pendingMigration = { lettingType: true, taxProfile: true };
+    return s;
+  };
+
+  it('the notice names what is missing and what it means', () => {
+    const text = renderSchemaNotice({ pendingMigration: ['properties is missing column letting_type', 'table owner_tax_profiles is missing'] });
+    expect(text).toContain('== Schema not migrated yet ==');
+    expect(text).toContain('- properties is missing column letting_type');
+    expect(text).toContain('pending migration: would apply after `npm run db:migrate` or the next deploy');
+    expect(text).toContain('--apply refuses until the schema is migrated');
+    expect(renderSchemaNotice({ pendingMigration: [] })).toBe('');
+  });
+
+  it('pending items are listed under their own heading with the explanation', () => {
+    const text = renderPlanResult(planChanges(basePlan(), pendingState()));
+    expect(text).toContain('Pending migration (the schema is not migrated yet) (3)');
+    expect(text).toContain('[=] sample-letting-type');
+    expect(text).toContain('pending migration: would apply after `npm run db:migrate` or the next deploy');
+    // listed before the plain "Excluded" group
+    expect(text.indexOf('Pending migration')).toBeLessThan(text.indexOf('Excluded (include: false)'));
+  });
+
+  it('the snapshot does not pretend to know the letting type or the profile', () => {
+    const text = renderSnapshot(basePlan(), pendingState());
+    expect(text).toContain('letting_type=(not migrated yet)');
+    expect(text).not.toContain('letting_type=standard');
+    expect(text).toContain('table owner_tax_profiles does not exist yet');
+  });
+
+  it('the digest only covers the changes that are planned', () => {
+    const migrated = planChanges(basePlan(), baseState()).changes;
+    const pending = planChanges(basePlan(), pendingState()).changes;
+    expect(pending.length).toBe(migrated.length - 2);
+    expect(changeDigest(pending)).not.toBe(changeDigest(migrated));
   });
 });

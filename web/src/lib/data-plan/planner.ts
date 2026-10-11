@@ -56,6 +56,9 @@ const TENANCY_FIELDS: TenancyUpdatable[] = [
 
 const MAX_LISTED = 40;
 
+/** What the dry run says about an item that needs a table or column the migration has not created yet. */
+export const PENDING_MIGRATION_NOTE = 'pending migration: would apply after `npm run db:migrate` or the next deploy';
+
 function listNames(names: string[]): string {
   if (names.length === 0) return '(none)';
   const shown = names.slice(0, MAX_LISTED).map(n => `"${n}"`).join(', ');
@@ -316,6 +319,8 @@ export function planChanges(plan: Plan, state: DbState): PlanResult {
       const label = `letting type of ${property.name} -> ${it.value}`;
       if (!it.include) {
         skip(it.id, label, 'excluded', `include is false. ${it.note}`);
+      } else if (state.pendingMigration?.lettingType) {
+        skip(it.id, label, 'pending_migration', `${PENDING_MIGRATION_NOTE} (properties.letting_type does not exist yet, so the current value is unknown). Would set '${it.value}'`);
       } else if (property.lettingType === it.value) {
         skip(it.id, label, 'unchanged', `already "${it.value}"`);
       } else {
@@ -406,6 +411,7 @@ export function planChanges(plan: Plan, state: DbState): PlanResult {
     const row = existing[0];
     const diffs: FieldDiff[] = [];
     const set: Partial<Omit<TenancyValues, 'startDate'>> = {};
+    const before: Partial<Record<TenancyUpdatable, string | null>> = {};
     for (const field of TENANCY_FIELDS) {
       const planned = t.fields[field];
       if (!planned) continue;
@@ -415,6 +421,7 @@ export function planChanges(plan: Plan, state: DbState): PlanResult {
       diffs.push({ field, current: currentValue, planned: plannedValue, willUpdate: planned.update });
       if (planned.update) {
         (set as Record<string, string | null>)[field] = plannedValue;
+        before[field] = row[field] ?? null;
       }
     }
 
@@ -450,6 +457,7 @@ export function planChanges(plan: Plan, state: DbState): PlanResult {
       startDate,
       set,
       diffs,
+      before,
     });
   }
 
@@ -711,6 +719,16 @@ export function planChanges(plan: Plan, state: DbState): PlanResult {
   function planTaxProfile() {
     const section = plan.ownerTaxProfile;
     if (!section) return;
+    if (state.pendingMigration?.taxProfile) {
+      // The table does not exist yet: nothing can be compared or written.
+      const pending = (itemId: string, label: string, include: boolean, note: string) => {
+        if (!include) skip(itemId, label, 'excluded', `include is false. ${note}`);
+        else skip(itemId, label, 'pending_migration', `${PENDING_MIGRATION_NOTE} (owner_tax_profiles does not exist yet)`);
+      };
+      for (const it of section.items) pending(it.id, `tax profile ${it.field} = ${formatGbp(it.value)}`, it.include, it.note);
+      if (section.notes) pending(section.notes.id, 'tax profile notes', section.notes.include, section.notes.note);
+      return;
+    }
     const existing = state.taxProfile;
     const set: Partial<Record<TaxProfileField, string>> = {};
     const previous: Partial<Record<TaxProfileField, string>> = {};

@@ -20,6 +20,30 @@ You can start editing the page by modifying `app/page.tsx`. The page auto-update
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
 
+## Data-plan loader
+
+`scripts/apply-data-plan.ts` loads a reviewed JSON "data plan" (tenancies, journals, letting type, owner tax profile) into the database. It only ever INSERTs and UPDATEs, is idempotent, and its dry run is read-only. The plan format is `src/lib/data-plan/schema.ts`; `scripts/data-plan.example.json` is a made-up template (keep real plans outside the repo: `*.plan.json` is git-ignored).
+
+```bash
+export DATABASE_URL=postgres://...
+npm run data-plan:check -- --plan plan.json --snapshot              # what the database holds now
+npm run data-plan:check -- --plan plan.json --account alias="Exact Name"   # dry run: prints a change digest
+npm run data-plan:apply -- --plan plan.json --account alias="Exact Name" --expect-digest <digest>
+```
+
+Before the latest migration has run (`npm run db:migrate`, or the next deploy), the dry run still works: it says "schema not migrated yet", lists the letting-type and tax-profile items as "pending migration" and plans everything else. `--apply` refuses until the schema is present.
+
+**From a sandbox that only reaches the internet through an HTTPS CONNECT proxy** (no WebSocket upgrades), use the HTTP driver. It speaks plain HTTPS on port 443, through `HTTPS_PROXY`, and trusts the proxy's CA via `NODE_EXTRA_CA_CERTS`:
+
+```bash
+npm run data-plan:check -- --driver http --plan plan.json --account alias="Exact Name"
+npm run data-plan:apply -- --driver http --plan plan.json --account alias="Exact Name" --expect-digest <digest from the dry run>
+```
+
+`DATA_PLAN_DRIVER=http` does the same as `--driver http`. In this mode `--expect-digest` is required: apply sends all its writes as one atomic batch, every write guards itself in SQL, and a final check rolls the whole batch back if anything changed since the read (see the header of `src/lib/data-plan/http-statements.ts`).
+
+Exit codes: 0 ok, 1 unexpected error (or a failed post-commit check), 2 refused, 3 not ready to apply (dry run), 4 bad usage or invalid plan.
+
 ## Learn More
 
 To learn more about Next.js, take a look at the following resources:

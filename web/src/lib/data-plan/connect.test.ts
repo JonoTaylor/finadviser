@@ -7,6 +7,7 @@ import {
   parseDatabaseUrl,
   proxyUrlFor,
   redactSecrets,
+  resolveDriverChoice,
   type ConnectionInfo,
 } from './connect';
 
@@ -84,5 +85,60 @@ describe('error messages never leak credentials', () => {
     const auth = explainConnectError(new Error(`password authentication failed for user "app_user" (${URL_WITH_PASSWORD})`), info, URL_WITH_PASSWORD);
     expect(auth).not.toContain('s3cr3t-pw');
     expect(auth).toContain('rejected the credentials');
+  });
+});
+
+describe('driver choice', () => {
+  it('the --driver flag wins, then DATA_PLAN_DRIVER, then auto', () => {
+    expect(resolveDriverChoice(null, env({}))).toBe('auto');
+    expect(resolveDriverChoice(undefined, env({ DATA_PLAN_DRIVER: 'http' }))).toBe('http');
+    expect(resolveDriverChoice('pg', env({ DATA_PLAN_DRIVER: 'http' }))).toBe('pg');
+    expect(resolveDriverChoice('HTTP', env({}))).toBe('http');
+    expect(resolveDriverChoice('neon', env({}))).toBe('neon');
+  });
+
+  it('an explicit "auto" still lets DATA_PLAN_DRIVER decide (auto means "not chosen")', () => {
+    expect(resolveDriverChoice('auto', env({ DATA_PLAN_DRIVER: 'http' }))).toBe('http');
+    expect(resolveDriverChoice('auto', env({}))).toBe('auto');
+    expect(resolveDriverChoice(null, env({ DATA_PLAN_DRIVER: '  ' }))).toBe('auto');
+  });
+
+  it('rejects unknown values, naming where they came from', () => {
+    expect(() => resolveDriverChoice('websocket', env({}))).toThrow(/--driver must be one of auto, pg, neon, http \(got "websocket"\)/);
+    expect(() => resolveDriverChoice(null, env({ DATA_PLAN_DRIVER: 'bogus' }))).toThrow(/DATA_PLAN_DRIVER must be one of/);
+  });
+});
+
+describe('HTTP driver error messages', () => {
+  const http: ConnectionInfo = { host: 'ep-example.neon.tech', port: '443', database: 'app', driver: 'neon-http', proxy: '127.0.0.1:45833', endpoint: 'api.neon.tech' };
+
+  it('names the API host, the driver and the proxy', () => {
+    const msg = explainConnectError(new Error('Error connecting to database: Error: socket hang up'), http, URL_WITH_PASSWORD);
+    expect(msg).toContain('Could not connect to api.neon.tech:443 (neon-http via proxy 127.0.0.1:45833)');
+    expect(msg).toContain('plain HTTPS');
+    expect(msg).not.toContain('WebSocket upgrade is allowed');
+  });
+
+  it('a write that dropped does not claim it never arrived', () => {
+    const msg = explainConnectError(new Error('Error connecting to database: Error: socket hang up'), http, URL_WITH_PASSWORD, 'write');
+    expect(msg).toContain('The write request to api.neon.tech:443');
+    expect(msg).toContain('may or may not have been received');
+  });
+
+  it('explains proxy / API status codes', () => {
+    expect(explainConnectError(new Error('Server error (HTTP status 403): '), http, URL_WITH_PASSWORD)).toContain('egress policy');
+    expect(explainConnectError(new Error('Server error (HTTP status 502): bad gateway'), http, URL_WITH_PASSWORD, 'write')).toContain('outcome of the write is not known');
+    expect(explainConnectError(new Error('Server error (HTTP status 502): bad gateway'), http, URL_WITH_PASSWORD)).toContain('a read changes nothing');
+  });
+
+  it('suggests HTTPS_PROXY (not the WebSocket) when the name does not resolve', () => {
+    const msg = explainConnectError(new Error('getaddrinfo ENOTFOUND api.neon.tech'), { ...http, proxy: null }, URL_WITH_PASSWORD);
+    expect(msg).toContain('requests are then tunnelled through it');
+    expect(msg).not.toContain('WebSocket');
+  });
+
+  it('never leaks the password', () => {
+    const msg = explainConnectError(new Error(`failed: ${URL_WITH_PASSWORD}`), http, URL_WITH_PASSWORD, 'write');
+    expect(msg).not.toContain('s3cr3t-pw');
   });
 });

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { mergeNotesBlock, planChanges, propertyExpenseSubtree } from './planner';
 import { simulateChanges } from './simulate';
+import { computeOwnerTotals } from './totals';
 import { baseState, basePlan, line, ROAD_ID, STREET_ID, type Json } from './test-fixtures';
 import type { Change, DbState } from './types';
 
@@ -499,5 +500,63 @@ describe('DbState isolation', () => {
     const snapshot = JSON.stringify(state);
     planChanges(basePlan(), state);
     expect(JSON.stringify(state)).toBe(snapshot);
+  });
+});
+
+describe('planChanges: schema not migrated yet', () => {
+  const pending = (over: Partial<NonNullable<DbState['pendingMigration']>> = {}): DbState => {
+    const state = baseState();
+    state.pendingMigration = { lettingType: true, taxProfile: true, ...over };
+    return state;
+  };
+
+  it('reports the letting-type and profile items as pending migration, not as changes', () => {
+    const r = planChanges(basePlan(), pending());
+    expect(r.refusals).toEqual([]);
+    expect(changesOf(r.changes, 'letting_type')).toHaveLength(0);
+    expect(changesOf(r.changes, 'tax_profile')).toHaveLength(0);
+    expect(skipFor(r, 'sample-letting-type')).toMatchObject({ reason: 'pending_migration' });
+    expect(skipFor(r, 'sample-letting-type')!.detail).toContain('pending migration: would apply after `npm run db:migrate` or the next deploy');
+    expect(skipFor(r, 'sample-letting-type')!.detail).toContain("Would set 'rent_a_room'");
+    expect(skipFor(r, 'example-employment-income')).toMatchObject({ reason: 'pending_migration' });
+    expect(skipFor(r, 'example-profile-notes')).toMatchObject({ reason: 'pending_migration' });
+  });
+
+  it('still plans everything else normally, identically to a migrated database', () => {
+    const migrated = planChanges(basePlan(), baseState()).changes.filter(c => c.type !== 'letting_type' && c.type !== 'tax_profile');
+    const r = planChanges(basePlan(), pending());
+    expect(r.changes).toEqual(migrated);
+    expect(r.changes.length).toBeGreaterThan(3);
+    expect(r.blocked).toEqual([]);
+  });
+
+  it('items excluded in the plan stay "excluded", and the two pieces are independent', () => {
+    const r = planChanges(basePlan(), pending({ taxProfile: false }));
+    expect(skipFor(r, 'sample-letting-type')).toMatchObject({ reason: 'pending_migration' });
+    expect(skipFor(r, 'example-dividends')).toMatchObject({ reason: 'excluded' });
+    expect(changesOf(r.changes, 'tax_profile')).toHaveLength(1);
+    const other = planChanges(basePlan(), pending({ lettingType: false }));
+    expect(changesOf(other.changes, 'letting_type')).toHaveLength(1);
+    expect(skipFor(other, 'example-dividends')).toMatchObject({ reason: 'excluded' });
+    expect(skipFor(other, 'example-employment-income')).toMatchObject({ reason: 'pending_migration' });
+  });
+
+  it('the predicted totals are the same as for a migrated database: they do not depend on those items', () => {
+    const totals = (state: DbState) => {
+      const r = planChanges(basePlan(), state);
+      return computeOwnerTotals({ ownerId: 1, taxYear: '2025-26', state: simulateChanges(state, r.changes) }).combined;
+    };
+    expect(totals(pending())).toEqual(totals(baseState()));
+    expect(totals(pending()).mortgageInterest).not.toBe('0.00');
+  });
+});
+
+describe('planChanges: tenancy update keeps the database text it was based on', () => {
+  it('records each overwritten field exactly as read, for the optimistic write guard', () => {
+    const state = baseState();
+    state.tenancies = [{ id: 3, propertyId: ROAD_ID, tenantName: 'Pat Tenant', startDate: '2024-09-01', endDate: '2026-02-01', rentAmount: '1000.00', rentFrequency: 'monthly', depositAmount: '1000.00', notes: 'Example tenancy agreement ref 123.' }];
+    const u = changesOf(planChanges(basePlan(), state).changes, 'tenancy_update')[0];
+    expect(u.set).toEqual({ endDate: '2026-03-01' });
+    expect(u.before).toEqual({ endDate: '2026-02-01' });
   });
 });

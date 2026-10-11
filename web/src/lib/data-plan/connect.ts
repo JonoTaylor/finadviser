@@ -14,17 +14,43 @@ import type { Queryable, QueryResult } from './statements';
  *     through an HTTP CONNECT tunnel.
  *   - A plain local Postgres (localhost / 127.0.0.1) cannot speak the Neon
  *     WebSocket protocol, so it uses `pg`. Used by the local test harness.
+ *   - `http` (see http.ts) is for networks that only allow plain HTTPS
+ *     through a CONNECT proxy and refuse WebSocket upgrades. It cannot hold
+ *     an interactive transaction, so it is not a DbConnection and is not
+ *     created here; this module only decides when to use it.
  */
 
-export type DriverChoice = 'auto' | 'pg' | 'neon';
+/** Drivers that give an interactive connection (BEGIN ... COMMIT on one session). */
+export type TxDriverChoice = 'auto' | 'pg' | 'neon';
+export type DriverChoice = TxDriverChoice | 'http';
+export const DRIVER_CHOICES: readonly DriverChoice[] = ['auto', 'pg', 'neon', 'http'];
+
+/**
+ * The driver to use: `--driver` if it names one, otherwise DATA_PLAN_DRIVER
+ * from the environment (so a runner can pick `http` once, for every command),
+ * otherwise `auto`. Throws a usage-style Error for an unknown value.
+ */
+export function resolveDriverChoice(cliValue: string | null | undefined, env: NodeJS.ProcessEnv = process.env): DriverChoice {
+  const pick = (value: string, where: string): DriverChoice => {
+    const v = value.trim().toLowerCase();
+    if ((DRIVER_CHOICES as readonly string[]).includes(v)) return v as DriverChoice;
+    throw new Error(`${where} must be one of ${DRIVER_CHOICES.join(', ')} (got "${value}")`);
+  };
+  if (cliValue && cliValue.trim().toLowerCase() !== 'auto') return pick(cliValue, '--driver');
+  const fromEnv = env.DATA_PLAN_DRIVER;
+  if (fromEnv && fromEnv.trim() !== '') return pick(fromEnv, 'DATA_PLAN_DRIVER');
+  return 'auto';
+}
 
 export interface ConnectionInfo {
   host: string;
   port: string;
   database: string;
-  driver: 'pg' | 'neon-ws';
-  /** host:port of the proxy the WebSocket is tunnelled through, if any. Never includes credentials. */
+  driver: 'pg' | 'neon-ws' | 'neon-http';
+  /** host:port of the proxy the WebSocket / HTTPS requests are tunnelled through, if any. Never includes credentials. */
   proxy: string | null;
+  /** neon-http only: the API host the requests go to (derived from the database host). */
+  endpoint?: string;
 }
 
 export interface DbConnection extends Queryable {
@@ -78,7 +104,7 @@ export function proxyUrlFor(host: string, env: NodeJS.ProcessEnv = process.env):
   return proxy;
 }
 
-function proxyDisplay(proxyUrl: string): string {
+export function proxyDisplay(proxyUrl: string): string {
   try {
     const u = new URL(proxyUrl);
     return `${u.hostname}:${u.port || (u.protocol === 'https:' ? '443' : '80')}`;
@@ -131,21 +157,36 @@ export function redactSecrets(message: string, url: string): string {
 }
 
 /** Turn a low-level connection failure into something the operator can act on. */
-export function explainConnectError(err: unknown, info: ConnectionInfo, url: string): string {
+export function explainConnectError(err: unknown, info: ConnectionInfo, url: string, phase: 'connect' | 'write' = 'connect'): string {
   const raw = errorText(err);
   const code = (err as { code?: string } | null)?.code ?? '';
   const message = redactSecrets(raw, url);
-  const where = `${info.host}:${info.port} (${info.driver}${info.proxy ? ` via proxy ${info.proxy}` : ''})`;
+  const target = info.driver === 'neon-http' && info.endpoint ? info.endpoint : info.host;
+  const where = `${target}:${info.port} (${info.driver}${info.proxy ? ` via proxy ${info.proxy}` : ''})`;
   const hints: string[] = [];
 
   if (code === 'ENOTFOUND' || /ENOTFOUND|getaddrinfo/i.test(raw)) {
     hints.push(
       info.proxy
         ? 'The proxy could not resolve the host, or DNS is blocked. Check the host in DATABASE_URL.'
-        : 'DNS could not resolve the host. If this machine reaches the internet through an HTTPS proxy, set HTTPS_PROXY: the WebSocket is then tunnelled through it (the ws library ignores the variable on its own).',
+        : info.driver === 'neon-http'
+          ? 'DNS could not resolve the host. If this machine reaches the internet through an HTTPS proxy, set HTTPS_PROXY: the requests are then tunnelled through it.'
+          : 'DNS could not resolve the host. If this machine reaches the internet through an HTTPS proxy, set HTTPS_PROXY: the WebSocket is then tunnelled through it (the ws library ignores the variable on its own).',
     );
   }
   if (/\b407\b|Proxy Authentication/i.test(raw)) hints.push('The proxy wants credentials: put them in HTTPS_PROXY (http://user:pass@host:port).');
+  if (info.driver === 'neon-http') {
+    if (/HTTP status 5\d\d/.test(raw)) {
+      hints.push(
+        phase === 'write'
+          ? 'A 5xx came back from the proxy or the Neon API, not from Postgres, so the outcome of the write is not known from this reply.'
+          : 'A 5xx came back from the proxy or the Neon API, not from Postgres. Wait and retry; a read changes nothing.',
+      );
+    }
+    if (/HTTP status 40[137]/.test(raw)) {
+      hints.push('A 401/403/407 came back from the proxy or the Neon API: check the credentials in DATABASE_URL, and that the egress policy allows the API host shown above on port 443.');
+    }
+  }
   if (/\b403\b/.test(raw) && info.proxy) hints.push('The proxy answered 403: the egress policy does not allow this host. Ask for it to be allow-listed; do not retry.');
   if (/Unexpected server response/i.test(raw)) {
     hints.push(
@@ -156,16 +197,23 @@ export function explainConnectError(err: unknown, info: ConnectionInfo, url: str
     hints.push('TLS verification failed. If a corporate/sandbox proxy re-signs TLS, point NODE_EXTRA_CA_CERTS at its CA bundle. Never disable verification.');
   }
   if (/ECONNRESET|socket hang up|ECONNREFUSED|ETIMEDOUT|timeout/i.test(raw) || ['ECONNRESET', 'ECONNREFUSED', 'ETIMEDOUT'].includes(code)) {
-    hints.push('The connection was refused, reset or timed out before the database answered. Check the host and port, that the proxy permits CONNECT to it on 443, and that the WebSocket upgrade is allowed.');
+    hints.push(
+      phase === 'write'
+        ? 'The connection dropped or timed out while the write was in flight, so it may or may not have been received.'
+        : info.driver === 'neon-http'
+          ? 'The connection was refused, reset or timed out before the API answered. Check the host, that the proxy permits CONNECT to it on port 443, and that nothing blocks plain HTTPS.'
+          : 'The connection was refused, reset or timed out before the database answered. Check the host and port, that the proxy permits CONNECT to it on 443, and that the WebSocket upgrade is allowed.',
+    );
   }
   if (/password authentication failed|no pg_hba|authentication/i.test(raw)) hints.push('The database rejected the credentials in DATABASE_URL.');
 
-  return [`Could not connect to ${where}: ${message}`, ...hints.map(h => `  hint: ${h}`)].join('\n');
+  const lead = phase === 'write' ? 'The write request to' : 'Could not connect to';
+  return [`${lead} ${where}: ${message}`, ...hints.map(h => `  hint: ${h}`)].join('\n');
 }
 
 export async function connect(
   url: string,
-  options: { driver?: DriverChoice; env?: NodeJS.ProcessEnv } = {},
+  options: { driver?: TxDriverChoice; env?: NodeJS.ProcessEnv } = {},
 ): Promise<DbConnection> {
   const env = options.env ?? process.env;
   const parsed = parseDatabaseUrl(url);

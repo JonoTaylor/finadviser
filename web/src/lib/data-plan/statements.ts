@@ -22,7 +22,7 @@ export interface Queryable {
   query<R extends object = Record<string, unknown>>(text: string, params?: unknown[]): Promise<QueryResult<R>>;
 }
 
-const TENANCY_COLUMNS: Record<TenancyUpdatable, { column: string; cast: string }> = {
+export const TENANCY_COLUMNS: Record<TenancyUpdatable, { column: string; cast: string }> = {
   tenantName: { column: 'tenant_name', cast: 'text' },
   endDate: { column: 'end_date', cast: 'text' },
   rentAmount: { column: 'rent_amount', cast: 'numeric' },

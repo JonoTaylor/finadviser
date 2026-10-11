@@ -108,6 +108,19 @@ export interface TaxProfileRow {
   notes: string | null;
 }
 
+/**
+ * Parts of the schema that the app's migration adds and that production may
+ * not have yet (the migration runs on the next deploy). While one is missing
+ * the loader can still dry-run: items that need it are reported as "pending
+ * migration" and everything else is planned normally. Apply refuses.
+ */
+export interface PendingMigration {
+  /** properties.letting_type does not exist yet. */
+  lettingType: boolean;
+  /** owner_tax_profiles (or one of its columns) does not exist yet. */
+  taxProfile: boolean;
+}
+
 /** Everything the planner needs from the database, read in one pass. */
 export interface DbState {
   owners: OwnerRow[];
@@ -124,6 +137,8 @@ export interface DbState {
   candidateLines: LedgerLine[];
   referencedJournals: ReferencedJournal[];
   taxProfile: TaxProfileRow | null;
+  /** Absent means the schema is fully migrated. */
+  pendingMigration?: PendingMigration;
 }
 
 export type JournalKind = 'income' | 'expense' | 'mortgage_interest';
@@ -182,6 +197,14 @@ export type Change =
       set: Partial<Omit<TenancyValues, 'startDate'>>;
       /** Every difference found, including ones the plan does not allow updating. */
       diffs: FieldDiff[];
+      /**
+       * The database's own text for each field in `set`, exactly as read
+       * (`column::text`, null for NULL). The HTTP driver's single-batch apply
+       * writes `WHERE column IS NOT DISTINCT FROM <this>`, so an edit made in
+       * the app between the read and the write makes the batch roll back
+       * instead of being overwritten.
+       */
+      before: Partial<Record<TenancyUpdatable, string | null>>;
     }
   | {
       type: 'journal_create';
@@ -235,7 +258,8 @@ export type SkipReason =
   | 'alternate_amount'
   | 'different_amount'
   | 'unchanged'
-  | 'no_updates_allowed';
+  | 'no_updates_allowed'
+  | 'pending_migration';
 
 export interface Skip {
   itemId: string;

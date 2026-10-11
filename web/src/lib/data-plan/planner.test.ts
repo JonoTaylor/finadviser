@@ -381,22 +381,32 @@ describe('planChanges: tenancies', () => {
     expect(planChanges(basePlan(), state).blocked[0].reason).toContain('cannot tell which to update');
   });
 
-  it('blocks a NEW tenancy that overlaps an existing one, including a shared boundary day', () => {
+  it('blocks a NEW tenancy that overlaps an existing one', () => {
     const state = baseState();
-    state.tenancies = [{ ...existing, id: 9, startDate: '2024-05-01', endDate: '2024-09-01' }]; // ends on the new start date
+    state.tenancies = [{ ...existing, id: 9, startDate: '2024-05-01', endDate: '2024-09-02' }]; // ends the day after the new start
     const r = planChanges(basePlan(), state);
     expect(r.blocked.find(b => b.itemId === 'example-tenancy-1')!.reason).toContain('overlaps existing #9');
     expect(changesOf(r.changes, 'tenancy_create')).toHaveLength(0);
+  });
 
-    // one day apart is fine
-    state.tenancies = [{ ...existing, id: 9, startDate: '2024-05-01', endDate: '2024-08-31' }];
+  it('allows a handover day: the existing tenancy ends on the new start date', () => {
+    const state = baseState();
+    state.tenancies = [{ ...existing, id: 9, startDate: '2024-05-01', endDate: '2024-09-01' }];
     expect(changesOf(planChanges(basePlan(), state).changes, 'tenancy_create')).toHaveLength(1);
+  });
+
+  it('treats a one-day tenancy as having rent due on its only day', () => {
+    const state = baseState();
+    // A one-day tenancy keeps its single due, so it does overlap a new
+    // tenancy covering that day.
+    state.tenancies = [{ ...existing, id: 9, startDate: '2024-10-01', endDate: '2024-10-01' }];
+    expect(planChanges(basePlan(), state).blocked.find(b => b.itemId === 'example-tenancy-1')!.reason).toContain('overlaps existing #9');
   });
 
   it('lets allowOverlap override the block', () => {
     const plan = basePlan(j => (((j.properties as Json[])[0].tenancies[0].allowOverlap) = true));
     const state = baseState();
-    state.tenancies = [{ ...existing, id: 9, startDate: '2024-05-01', endDate: '2024-09-01' }];
+    state.tenancies = [{ ...existing, id: 9, startDate: '2024-05-01', endDate: '2024-09-02' }];
     expect(changesOf(planChanges(plan, state).changes, 'tenancy_create')).toHaveLength(1);
   });
 

@@ -112,8 +112,9 @@ const tenancyItem = z
     /**
      * A NEW tenancy whose dates overlap an existing one for the same property
      * is blocked, because the rent schedule counts every tenancy and would
-     * count the overlap twice (a shared boundary day included, since end_date
-     * is inclusive). Set true only if that is really what you want.
+     * count the overlap twice. A handover day (the old tenancy ends on the day
+     * the new one starts) is not an overlap: no rent falls due on a tenancy's
+     * end date. Set true only if a real overlap is what you want.
      */
     allowOverlap: z.boolean().default(false),
     fields: z.strictObject({

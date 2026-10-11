@@ -173,12 +173,27 @@ function tenancyRowValue(row: TenancyRow, field: TenancyUpdatable): string | nul
   return normaliseTenancyValue(field, row[field]);
 }
 
+function dayBefore(isoDate: string): string {
+  const d = new Date(`${isoDate}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() - 1);
+  return d.toISOString().slice(0, 10);
+}
+
+/**
+ * Last day a tenancy can have rent fall due. Matches rent-schedule.ts: no rent
+ * falls due on end_date (the handover day) unless the tenancy is a single day,
+ * so a tenancy ending on the day the next one starts does not overlap it.
+ */
+function lastRentDay(p: { start: string; end: string | null }): string {
+  if (p.end === null) return '9999-12-31';
+  return p.end > p.start ? dayBefore(p.end) : p.end;
+}
+
 function periodsOverlap(
   a: { start: string; end: string | null },
   b: { start: string; end: string | null },
 ): boolean {
-  // The rent schedule treats end_date as inclusive for the last due date.
-  return a.start <= (b.end ?? '9999-12-31') && b.start <= (a.end ?? '9999-12-31');
+  return a.start <= lastRentDay(b) && b.start <= lastRentDay(a);
 }
 
 export function planChanges(plan: Plan, state: DbState): PlanResult {
@@ -394,7 +409,7 @@ export function planChanges(plan: Plan, state: DbState): PlanResult {
           label,
           `new tenancy ${values.startDate} to ${values.endDate ?? 'open'} overlaps existing ${overlaps
             .map(o => `#${o.id} "${o.tenantName}" (${o.startDate} to ${o.endDate ?? 'open'})`)
-            .join(', ')} at ${property.name}. The rent schedule counts every tenancy, so the overlap would be counted twice (end_date is inclusive, so a shared boundary day counts too). Fix the dates, or set allowOverlap: true on this item.`,
+            .join(', ')} at ${property.name}. The rent schedule counts every tenancy, so the overlap would be counted twice (a handover day, where one tenancy ends as the next starts, is not an overlap). Fix the dates, or set allowOverlap: true on this item.`,
         );
         return;
       }

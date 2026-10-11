@@ -33,7 +33,7 @@ Success means accurate and reproducible figures, understandable next steps, prog
 
 Use the proposed branches as independently reviewable slices. PR1 targets `main`. Branches for PRs2–5 can be prepared in parallel once their shared-store contract is agreed, then rebase onto PR1 after it lands and target `main`. PR6 lands last after all feature contracts are available. If a temporary stacked PR is necessary, identify its parent branch and retarget it to `main` after the parent merges; do not leave a PR targeting an obsolete integration branch.
 
-Each PR description should lead with the user-visible problem and resulting behaviour, followed by relevant calculation, persistence and browser evidence. Create and attach actual GitHub PR links when the API or CLI permits it. At planning time, remote API access has returned HTTP 403; proposed branches are not proof of created PRs, and no PR number or URL should be invented. Record any blocked remote operation and continue local implementation and validation. No release record should describe an unpushed branch as deployed.
+Each PR description leads with the user-visible problem and resulting behaviour, followed by relevant calculation, persistence and browser evidence. GitHub access is now available and the actual PRs are recorded below. Remote deployment HTTP access remains blocked, so Vercel states are checked through GitHub's deployment records. A deployment status is distinct from live database, banking and model acceptance.
 
 Merge and roll out in the table's order, keeping each slice deployable. PRs2–5 do not need to wait for one another's feature implementation, but every merged slice needs its own checks. Review the complete diff before publishing. Changes to any live financial records must remain in Jono's explicit app workflows; rollout must not seed example finances into production.
 
@@ -49,3 +49,20 @@ Merge and roll out in the table's order, keeping each slice deployable. PRs2–5
 ## Follow-on work after this phase
 
 Full ledger portability and tested restore; explicit rent receipt allocation; verified and dated regional property-compliance rules; current tax-source updates; broader pension drawdown modelling; banking reconnection/recovery; accessibility and performance acceptance; monitoring and backup exercises. These remain separately scoped work until the actual records, rules and production evidence support their implementation.
+
+## Release evidence on 11 October 2026
+
+| Upgrade | Actual PR | Merged production commit and deployment |
+| --- | --- | --- |
+| Personal context and workspace storage | [#63](https://github.com/JonoTaylor/finadviser/pull/63) | `524d9ef` · [Vercel production](https://finadviser-gyv6gobw5-jonotaylors-projects.vercel.app) · successful deployment status |
+| Debt records and repayment comparisons | [#64](https://github.com/JonoTaylor/finadviser/pull/64) | `d23af58` · [Vercel production](https://finadviser-7s5mpssvs-jonotaylors-projects.vercel.app) · successful deployment status |
+| Holdings, allocation and known fees | [#65](https://github.com/JonoTaylor/finadviser/pull/65) | `92c0602` · [Vercel production](https://finadviser-ej500s5np-jonotaylors-projects.vercel.app) · successful deployment status |
+| Property rent reconciliation and obligations | [#66](https://github.com/JonoTaylor/finadviser/pull/66) | `fd2b93a` · [Vercel production](https://finadviser-rn2v4ttho-jonotaylors-projects.vercel.app) · successful deployment status |
+| DC, DB and State Pension inventory | [#67](https://github.com/JonoTaylor/finadviser/pull/67) | `c9f1c6b` · [Vercel production](https://finadviser-h987bja7g-jonotaylors-projects.vercel.app) · successful deployment status |
+| Adviser integration, saved actions, reviews and planning export | [#68](https://github.com/JonoTaylor/finadviser/pull/68) | This document accompanies that release; consult its GitHub/Vercel deployment record for the final published commit and state. |
+
+Every code slice was validated in an isolated checkout before merging. Full suite counts progressed through 734, 793, 835, 876 and 923 tests; the integrated sixth release passed **1,005 tests in 85 files**, including the enabled disposable PostgreSQL integration fixtures with no skipped tests. Its production build and TypeScript check passed. ESLint reported zero errors and 41 existing warnings.
+
+Independent review corrected a repayment forecast that stopped during temporary balance growth, portfolio fee aggregation rounding, pension-calculator wording and spending-action category fingerprint collisions. Desktop and 390px browser checks covered explicit owner selection, unavailable storage, CRUD, invalid inputs, save failures, stale revisions, preserved notes, server-only snapshot metrics, exports and mobile navigation. Intercepted persistence requests were synthetic; no example records were written to production.
+
+Direct deployment HTTP checks remain blocked by the environment proxy. Live database read/save/reload, bank synchronisation and adviser provider calls remain unverified. No new schema migration is required for these workspaces; the existing `app_settings` store is reused. Unknown personal facts remain inputs for Jono to confirm in My context.

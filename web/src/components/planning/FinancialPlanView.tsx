@@ -51,7 +51,7 @@ export default function FinancialPlanView({ initialSection = 'overview' }: { ini
           <Typography variant="body2" sx={{ mt: 1, maxWidth: 740 }}>See what comes in, what goes out, and what to do next. Bring your spending, investments, properties and retirement into one picture.</Typography>
         </Box>
         <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
-          <Button variant="outlined" component={Link} href="/pensions">Retirement planner</Button>
+          <Button variant="outlined" component={Link} href="/review">My next steps</Button><Button variant="outlined" component={Link} href="/pensions">Retirement planner</Button>
           <Button variant="contained" component={Link} href="/chat" endIcon={<ArrowForwardRoundedIcon />}>Discuss my plan</Button>
         </Stack>
       </Stack>
@@ -87,7 +87,7 @@ export default function FinancialPlanView({ initialSection = 'overview' }: { ini
           <Grid size={{ xs: 12, sm: 6, lg: 3 }}><Metric label="Monthly cash surplus" value={money(plan.cashflow.monthlySurplus)} detail="Average across the last 3 completed months" tint={softTokens.mint.main} /></Grid>
           <Grid size={{ xs: 12, sm: 6, lg: 3 }}><Metric label="Monthly spending" value={money(plan.cashflow.monthlySpending)} detail="Net of refunds; transfers excluded" tint={softTokens.lemon.main} /></Grid>
           <Grid size={{ xs: 12, sm: 6, lg: 3 }}><Metric label="Recorded net worth" value={money(plan.balanceSheet.netWorth)} detail={plan.balanceSheet.missingPropertyValuations ? `${plan.balanceSheet.missingPropertyValuations} property valuations missing` : 'Known assets less recorded debts · household'} tint={softTokens.lavender.main} /></Grid>
-          <Grid size={{ xs: 12, sm: 6, lg: 3 }}><Metric label="Estimated emergency coverage" value={plan.emergencyFund.coverageMonths === null ? 'Add essential costs' : `${plan.emergencyFund.coverageMonths.toFixed(1)} months`} detail="Cash estimate; excludes pensions and property" tint={softTokens.peach.main} /></Grid>
+          <Grid size={{ xs: 12, sm: 6, lg: 3 }}><Metric label={plan.emergencyFund.isEstimate ? "Estimated emergency coverage" : "Emergency coverage"} value={plan.emergencyFund.coverageMonths === null ? 'Add essential costs' : `${plan.emergencyFund.coverageMonths.toFixed(1)} months`} detail={plan.emergencyFund.isEstimate ? "Cash estimate; confirm accessibility in My context" : "Using your confirmed cash-access settings"} tint={softTokens.peach.main} /></Grid>
         </Grid>
 
         <Tabs value={section} onChange={(_event, value: Section) => setSection(value)} variant="scrollable" scrollButtons="auto" aria-label="Financial planning sections" sx={{ mb: 3, borderBottom: 1, borderColor: 'divider' }}>
@@ -175,7 +175,7 @@ function ProfileForm({ profile, example, onExampleChange, onSaved }: { profile: 
 function ReserveCard({ plan }: { plan: FinancialPlan }) {
   const reserve = plan.emergencyFund;
   const progress = reserve.targetAmount && reserve.cashAvailable !== null ? Math.max(0, Math.min(100, reserve.cashAvailable / reserve.targetAmount * 100)) : 0;
-  return <Card><CardContent><Typography variant="h6">Your financial breathing room</Typography><Typography sx={{ fontFamily: serifFamily, fontSize: '2rem', my: 1 }}>{money(reserve.cashAvailable)}</Typography><Typography variant="body2">Estimated accessible cash</Typography><LinearProgress variant="determinate" value={progress} aria-label="Emergency fund target progress" sx={{ height: 8, borderRadius: 4, my: 2 }} /><Typography variant="body2">{reserve.targetAmount === null ? 'Add your essential costs to estimate a reserve target.' : `${money(reserve.targetAmount)} target · ${reserve.targetMonths} months of essential costs`}</Typography>{reserve.shortfall !== null && reserve.shortfall > 0 && <Typography variant="body2" sx={{ mt: 1 }}>{money(reserve.shortfall)} to reach your chosen target</Typography>}<Typography variant="caption" sx={{ display: 'block', mt: 2 }}>{reserve.basis}</Typography></CardContent></Card>;
+  return <Card><CardContent><Typography variant="h6">Your financial breathing room</Typography><Typography sx={{ fontFamily: serifFamily, fontSize: '2rem', my: 1 }}>{money(reserve.cashAvailable)}</Typography><Typography variant="body2">{reserve.isEstimate ? "Estimated accessible cash" : "Recorded cash with confirmed accessibility"}</Typography><LinearProgress variant="determinate" value={progress} aria-label="Emergency fund target progress" sx={{ height: 8, borderRadius: 4, my: 2 }} /><Typography variant="body2">{reserve.targetAmount === null ? 'Add your essential costs to estimate a reserve target.' : `${money(reserve.targetAmount)} target · ${reserve.targetMonths} months of essential costs`}</Typography>{reserve.shortfall !== null && reserve.shortfall > 0 && <Typography variant="body2" sx={{ mt: 1 }}>{money(reserve.shortfall)} to reach your chosen target</Typography>}<Typography variant="caption" sx={{ display: 'block', mt: 2 }}>{reserve.basis}</Typography></CardContent></Card>;
 }
 
 function SpendingSection({ plan, example, onRefresh }: { plan: FinancialPlan; example: boolean; onRefresh: () => void }) {

@@ -23,6 +23,7 @@ import {
   listPropertyExpenseCategories,
 } from '@/lib/properties/property-expense-link';
 import { categorizeBatch } from './claude-client';
+import { readFinanceWorkspaceEvidence } from './finance-workspace';
 
 /**
  * Plain JSON-Schema tool definition. claude-client.ts wraps each entry
@@ -56,6 +57,7 @@ const updateSavingsProgressInputSchema = z.object({
   goal_id: savingsGoalPatchSchema.shape.id,
   current_amount: budgetBodySchema.shape.monthlyLimit,
 }).strict();
+const financeWorkspaceInputSchema = z.object({}).strict();
 
 // -------------------------------------------------------------------
 // Tool definitions (JSON-Schema; provider-agnostic)
@@ -388,6 +390,17 @@ export const TOOL_DEFINITIONS: Tool[] = [
     },
   },
   {
+    name: 'get_finance_workspace',
+    description:
+      'Read-only overview of the same saved personal context, debt terms, investment holdings and fees, property operations, pension schemes, review actions and household planning evidence used by the app. Returns bounded records with total counts, explicit unavailable feature states, data gaps and snapshot comparisons. Unknown amounts stay null. Action completion and intended savings are not proof of resolved risks or realised savings; snapshot changes are not investment returns. Does not change any records or call an external financial provider.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {},
+      required: [],
+      additionalProperties: false,
+    },
+  },
+  {
     name: 'get_financial_plan',
     description:
       'Read the same deterministic household financial plan used by the planning workspace. Returns completed-month spending and merchant comparisons, recurring-payment candidates, accessible cash, emergency reserve, property cashflow and concentration, saved retirement inputs, ordered actions, calculation methodology and data coverage. Unknown inputs remain null; recorded balances are not proof of all assets or debts. Read-only: does not change balances, holdings, budgets or goals.',
@@ -660,6 +673,7 @@ export const TOOL_LABELS: Record<string, string> = {
   get_debt_summary: 'Analysing debt position',
   get_income_expense_summary: 'Calculating income & expenses',
   get_financial_plan: 'Building your financial plan',
+  get_finance_workspace: 'Reading your finance workspace',
   get_financial_health_check: 'Running financial health check',
   remember: 'Saving to memory',
   list_memories: 'Reading memory',
@@ -721,6 +735,12 @@ export async function executeTool(
       return executeGetIncomeExpenseSummary(input);
     case 'get_financial_plan':
       return executeGetFinancialPlan();
+    case 'get_finance_workspace': {
+      if (!financeWorkspaceInputSchema.safeParse(input).success) {
+        return { error: 'The finance workspace overview is read-only and accepts no input fields.' };
+      }
+      return readFinanceWorkspaceEvidence();
+    }
     case 'get_financial_health_check':
       return executeGetFinancialHealthCheck();
     case 'remember':

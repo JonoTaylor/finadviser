@@ -28,6 +28,7 @@ import SavingsRoundedIcon from '@mui/icons-material/SavingsRounded';
 import PersonOutlineRoundedIcon from '@mui/icons-material/PersonOutlineRounded';
 import CreditCardRoundedIcon from '@mui/icons-material/CreditCardRounded';
 import PieChartRoundedIcon from '@mui/icons-material/PieChartRounded';
+import ChecklistRoundedIcon from '@mui/icons-material/ChecklistRounded';
 import useMediaQuery from '@mui/material/useMediaQuery';
 import { useTheme } from '@mui/material/styles';
 import { softTokens, serifFamily } from '@/theme/theme';
@@ -37,6 +38,7 @@ const DRAWER_WIDTH = 240;
 
 const navItems = [
   { label: 'Dashboard',    href: '/',              icon: <DashboardRoundedIcon /> },
+  { label: 'My next steps', href: '/review',        icon: <ChecklistRoundedIcon /> },
   { label: 'Financial plan', href: '/plan',       icon: <ExploreRoundedIcon /> },
   { label: 'My context', href: '/profile',        icon: <PersonOutlineRoundedIcon /> },
   { label: 'Spending',     href: '/spending',      icon: <ShowChartRoundedIcon /> },
@@ -184,7 +186,7 @@ export default function Sidebar({ children }: { children: React.ReactNode }) {
         sx={{
           flexGrow: 1,
           p: { xs: 2, sm: 3, md: 5 },
-          pt: isMobile ? 7 : undefined,
+          pt: { xs: 8, sm: 8, md: 5 },
           width: isMobile ? '100%' : `calc(100% - ${DRAWER_WIDTH}px)`,
         }}
       >

@@ -27,6 +27,7 @@ import FlagRoundedIcon from '@mui/icons-material/FlagRounded';
 import SavingsRoundedIcon from '@mui/icons-material/SavingsRounded';
 import PersonOutlineRoundedIcon from '@mui/icons-material/PersonOutlineRounded';
 import CreditCardRoundedIcon from '@mui/icons-material/CreditCardRounded';
+import PieChartRoundedIcon from '@mui/icons-material/PieChartRounded';
 import useMediaQuery from '@mui/material/useMediaQuery';
 import { useTheme } from '@mui/material/styles';
 import { softTokens, serifFamily } from '@/theme/theme';
@@ -45,6 +46,7 @@ const navItems = [
   { label: 'Import',       href: '/import',        icon: <FileUploadRoundedIcon /> },
   { label: 'Properties',   href: '/properties',    icon: <HomeWorkRoundedIcon /> },
   { label: 'Investments',  href: '/investments',   icon: <TrendingUpRoundedIcon /> },
+  { label: 'Holdings & fees', href: '/portfolio',  icon: <PieChartRoundedIcon /> },
   { label: 'Pensions',     href: '/pensions',      icon: <SavingsRoundedIcon /> },
   { label: 'Documents',    href: '/documents',     icon: <FolderRoundedIcon /> },
   { label: 'AI Chat',      href: '/chat',          icon: <AutoAwesomeRoundedIcon /> },

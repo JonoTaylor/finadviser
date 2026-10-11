@@ -70,7 +70,7 @@ export default function InvestmentsPage() {
         </Stack>
       </Box>
 
-      <Stack direction="row" gap={1} flexWrap="wrap" sx={{ mb: 3 }}><Button component={Link} href="/plan" variant="outlined">Review my wealth plan</Button><Button component={Link} href="/pensions" variant="outlined">Model my retirement</Button></Stack>
+      <Stack direction="row" gap={1} flexWrap="wrap" sx={{ mb: 3 }}><Button component={Link} href="/portfolio" variant="contained">Holdings, allocation &amp; fees</Button><Button component={Link} href="/plan" variant="outlined">Review my wealth plan</Button><Button component={Link} href="/pensions" variant="outlined">Model my retirement</Button></Stack>
       {error && <Alert severity="warning" sx={{ mb: 3 }}>Your investment balances could not be loaded. No zero balances have been substituted.</Alert>}
       {ownersError && <Alert severity="warning" sx={{ mb: 3 }}>Account owners could not be loaded. Reconnect your accounts before adding an investment.</Alert>}
       {investments && <Card sx={{ mb: 3 }}><CardContent><Stack direction={{ xs: 'column', sm: 'row' }} gap={4}>{[

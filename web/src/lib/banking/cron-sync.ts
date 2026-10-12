@@ -19,6 +19,7 @@
 import { syncConnection, reconcileTransfersForRun } from './sync';
 import { bankingRepo, type ConnectionRow, type ConnectionStatus } from './repo';
 import { tipRepo } from '@/lib/repos';
+import { deferredCategorization, processSavedTransactions, type IngestionCategorization } from '@/lib/import/processing-hook';
 
 const DAY_MS = 86_400_000;
 const EXPIRING_WINDOW_DAYS = 7;
@@ -31,10 +32,13 @@ export interface CronSummary {
   becameExpired: number;
   /** Number of transfer pairs auto-merged at the end of this cron run. */
   transfersMerged: number;
+  /** Optional processing never changes the already-recorded bank sync outcomes. */
+  categorization: IngestionCategorization;
   errors: Array<{ connectionId: number; provider: string; message: string }>;
 }
 
 export async function runDailySync(): Promise<CronSummary> {
+  const startedAt = Date.now();
   const connections = await bankingRepo.listConnections();
   const summary: CronSummary = {
     total: connections.length,
@@ -43,6 +47,7 @@ export async function runDailySync(): Promise<CronSummary> {
     becameExpiring: 0,
     becameExpired: 0,
     transfersMerged: 0,
+    categorization: deferredCategorization('not_run'),
     errors: [],
   };
 
@@ -132,11 +137,27 @@ export async function runDailySync(): Promise<CronSummary> {
   // different cron iterations. Passes NULL so the function scans
   // all unmerged journals; the function itself filters out
   // already-flagged / already-grouped rows so it's idempotent.
+  let transfersReconciled = false;
   try {
     summary.transfersMerged = await reconcileTransfersForRun(null, 3);
+    transfersReconciled = true;
   } catch (e) {
     console.error('[cron] reconcileTransfersForRun failed:', e);
   }
+
+  const processingBudget = Math.min(12_000, 55_000 - (Date.now() - startedAt));
+  summary.categorization = !transfersReconciled
+    ? deferredCategorization('transfer_reconciliation_failed')
+    : processingBudget < 2_000
+      ? deferredCategorization('time_budget_exhausted')
+      : await processSavedTransactions({
+        // Continue processing older imports and earlier syncs even on a
+        // day with no new transactions. Pending review stays excluded.
+        source: 'scheduled',
+        limit: 50,
+        modelTimeoutMs: Math.min(8_000, processingBudget),
+        deadlineMs: processingBudget,
+      });
 
   return summary;
 }

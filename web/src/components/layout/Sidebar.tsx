@@ -32,6 +32,7 @@ import PersonOutlineRoundedIcon from '@mui/icons-material/PersonOutlineRounded';
 import CreditCardRoundedIcon from '@mui/icons-material/CreditCardRounded';
 import PieChartRoundedIcon from '@mui/icons-material/PieChartRounded';
 import ChecklistRoundedIcon from '@mui/icons-material/ChecklistRounded';
+import AutoFixHighRoundedIcon from '@mui/icons-material/AutoFixHighRounded';
 import useMediaQuery from '@mui/material/useMediaQuery';
 import { useTheme } from '@mui/material/styles';
 import { designTokens } from '@/theme/theme';
@@ -42,6 +43,7 @@ const DRAWER_WIDTH = 248;
 const navigationColour = { background: designTokens.nav, text: designTokens.navText, muted: designTokens.navMuted, accent: '#5EEAD4' };
 const icons: Record<string, ReactNode> = {
   '/': <DashboardRoundedIcon />,
+  '/data': <AutoFixHighRoundedIcon />,
   '/review': <ChecklistRoundedIcon />,
   '/plan': <ExploreRoundedIcon />,
   '/spending': <ShowChartRoundedIcon />,

@@ -3,6 +3,7 @@ export const navigationGroups = [
     label: 'Overview',
     items: [
       { label: 'Dashboard', href: '/' },
+      { label: 'Data assistant', href: '/data' },
       { label: 'My next steps', href: '/review' },
       { label: 'Financial plan', href: '/plan' },
     ],

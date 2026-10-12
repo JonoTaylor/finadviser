@@ -1,6 +1,7 @@
 'use client';
 
-import { useRef, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
+import { buildCategoryLabels } from '@/components/data/categoryLabels';
 import {
   Dialog,
   DialogTitle,
@@ -18,6 +19,7 @@ import {
 interface Category {
   id: number;
   name: string;
+  parentId?: number | null;
 }
 
 export default function CategoryEditDialog({
@@ -36,15 +38,16 @@ export default function CategoryEditDialog({
   onSave: (categoryId: number, createRule: boolean) => Promise<void>;
 }) {
   const [selected, setSelected] = useState<Category | null>(null);
-  const [createRule, setCreateRule] = useState(true);
+  const [createRule, setCreateRule] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const writing = useRef(false);
+  const categoryLabels = useMemo(() => buildCategoryLabels(categories), [categories]);
 
   const handleEnter = () => {
     const cat = currentCategoryId ? categories.find(c => c.id === currentCategoryId) ?? null : null;
     setSelected(cat);
-    setCreateRule(true);
+    setCreateRule(false);
     setError('');
   };
 
@@ -76,7 +79,7 @@ export default function CategoryEditDialog({
           options={categories}
           disabled={saving}
           isOptionEqualToValue={(option, value) => option.id === value.id}
-          getOptionLabel={(o) => o.name}
+          getOptionLabel={(o) => categoryLabels.get(o.id) ?? o.name}
           value={selected}
           onChange={(_, val) => setSelected(val)}
           renderInput={(params) => <TextField {...params} label="Category" />}
@@ -92,9 +95,10 @@ export default function CategoryEditDialog({
                 disabled={saving}
               />
             }
-            label="Create rule for future transactions"
+            label="Remember for matching transactions"
           />
         )}
+        {description && <Typography variant="caption" component="p" sx={{ mt: 0.5 }}>Reuses this reviewed category for an exact match in the same account context.</Typography>}
       </DialogContent>
       <DialogActions>
         <Button onClick={onClose} disabled={saving}>Cancel</Button>

@@ -4,7 +4,8 @@ import type { RawTransaction } from '@/lib/types';
 export async function categorizeTransactions(
   transactions: RawTransaction[],
 ): Promise<RawTransaction[]> {
-  const rules = await categoryRepo.getRules();
+  const rules = (await categoryRepo.getRules()).slice()
+    .sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0) || (a.id ?? 0) - (b.id ?? 0));
 
   for (const txn of transactions) {
     if (txn.isDuplicate) continue;
@@ -21,13 +22,17 @@ export async function categorizeTransactions(
 
 export function matchRule(
   description: string,
-  rules: Array<{ pattern: string; categoryId: number; matchType: string | null }>,
+  rules: Array<{ pattern: string; categoryId: number; matchType: string | null; source?: string | null }>,
 ): number | null {
   const descLower = description.toLowerCase();
 
   for (const rule of rules) {
     const pattern = rule.pattern.toLowerCase();
     const matchType = rule.matchType ?? 'contains';
+
+    // Legacy AI-generated rules were never confirmed by the user.
+    // A guess must not silently become an instruction for new imports.
+    if (rule.source === 'ai') continue;
 
     if (matchType === 'exact' && descLower === pattern) {
       return rule.categoryId;

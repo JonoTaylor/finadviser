@@ -2,6 +2,10 @@ import { NextResponse } from 'next/server';
 import { GoCardlessApiError, GoCardlessAuthError, GoCardlessRateLimitError } from '@/lib/banking/gocardless';
 import { bankingRepo } from '@/lib/banking/repo';
 import { syncConnection, reconcileTransfersForRun } from '@/lib/banking/sync';
+import { deferredCategorization, processSavedTransactions } from '@/lib/import/processing-hook';
+
+export const maxDuration = 60;
+export const runtime = 'nodejs';
 
 /**
  * POST /api/banking/connections/[id]/sync
@@ -16,7 +20,9 @@ import { syncConnection, reconcileTransfersForRun } from '@/lib/banking/sync';
  * (401 -> 503 with reauth prompt, 429 -> 429 with retry-after).
  */
 export async function POST(_req: Request, { params }: { params: Promise<{ id: string }> }) {
+  const startedAt = Date.now();
   let runId: number | null = null;
+  let syncFinished = false;
   try {
     const { id } = await params;
     const connectionId = parseInt(id, 10);
@@ -45,7 +51,12 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
       txnsAdded: outcome.txnsAdded,
       txnsUpdated: outcome.txnsUpdated,
     });
-    await bankingRepo.markSynced(connectionId);
+    syncFinished = true;
+    try {
+      await bankingRepo.markSynced(connectionId);
+    } catch {
+      console.warn('Connection timestamp could not be updated after a successful sync.');
+    }
 
     // Reconcile transfers right after the sync. Scope to journals
     // touched by this run plus their date neighbours so we don't
@@ -53,15 +64,36 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
     // reconciler error is non-fatal (the sync itself succeeded;
     // surface the count anyway).
     let transfersMerged = 0;
+    let transfersReconciled = false;
     try {
       transfersMerged = await reconcileTransfersForRun(runId, 3);
+      transfersReconciled = true;
     } catch (e) {
       console.error('reconcileTransfersForRun failed after manual sync:', e);
     }
 
-    return NextResponse.json({ syncRunId: runId, transfersMerged, ...outcome });
+    const processingBudget = Math.min(15_000, 55_000 - (Date.now() - startedAt));
+    const categorization = !transfersReconciled
+      ? deferredCategorization('transfer_reconciliation_failed')
+      : processingBudget < 2_000
+        ? deferredCategorization('time_budget_exhausted')
+        : await processSavedTransactions({
+          journalIds: outcome.journalIds,
+          source: 'bank-sync',
+          limit: 50,
+          modelTimeoutMs: Math.min(10_000, processingBudget),
+          deadlineMs: processingBudget,
+        });
+
+    return NextResponse.json({
+      syncRunId: runId,
+      transfersMerged,
+      txnsAdded: outcome.txnsAdded,
+      txnsUpdated: outcome.txnsUpdated,
+      categorization,
+    });
   } catch (err) {
-    if (runId !== null) {
+    if (runId !== null && !syncFinished) {
       const msg = err instanceof Error ? err.message : 'unknown error';
       await bankingRepo.finishSyncRun(runId, { status: 'error', txnsAdded: 0, txnsUpdated: 0, errorMessage: msg }).catch(() => {});
     }

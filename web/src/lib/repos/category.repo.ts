@@ -110,7 +110,9 @@ export const categoryRepo = {
     const db = getDb();
     const [row] = await db
       .update(categorizationRules)
-      .set(data)
+      // This method is used by the user's rule editor. An explicit edit
+      // approves a legacy AI rule instead of leaving it permanently ignored.
+      .set({ ...data, source: 'user' })
       .where(eq(categorizationRules.id, id))
       .returning();
     return row;

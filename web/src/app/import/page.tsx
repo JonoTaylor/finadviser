@@ -8,7 +8,7 @@ import {
 import ExpandMoreRoundedIcon from '@mui/icons-material/ExpandMoreRounded';
 import PageHeader from '@/components/ui/PageHeader';
 import { fetchJson } from '@/lib/http/client';
-import useSWR from 'swr';
+import useSWR, { useSWRConfig } from 'swr';
 import FileUploadStep from '@/components/import/FileUploadStep';
 import ConfigStep from '@/components/import/ConfigStep';
 import PreviewTable from '@/components/import/PreviewTable';
@@ -16,6 +16,9 @@ import ImportProgress from '@/components/import/ImportProgress';
 import BackfillMetadataCard from '@/components/import/BackfillMetadataCard';
 import { consumeNdjsonImport } from '@/lib/import/stream-client';
 import type { ProgressEvent } from '@/lib/import/stream';
+import type { ProcessedImportResult } from '@/lib/import/import-pipeline';
+import ImportProcessingSummary from '@/components/data/ImportProcessingSummary';
+import { isFinancialDataKey } from '@/components/data/useDataProcessing';
 
 type ImportAccount = Parameters<typeof ConfigStep>[0]['accounts'][number];
 type BankConfigs = Parameters<typeof ConfigStep>[0]['bankConfigs'];
@@ -36,6 +39,7 @@ const CSV_STEPS = ['Upload File', 'Configure', 'Preview & Import'];
 const PDF_STEPS = ['Upload File', 'Preview & Import'];
 
 export default function ImportPage() {
+  const { mutate: refreshFinancialData } = useSWRConfig();
   const [activeStep, setActiveStep] = useState(0);
   const [file, setFile] = useState<File | null>(null);
   const [fileType, setFileType] = useState<'csv' | 'pdf'>('csv');
@@ -52,7 +56,7 @@ export default function ImportPage() {
   const [previewing, setPreviewing] = useState(false);
   const [importing, setImporting] = useState(false);
   const [progress, setProgress] = useState<ProgressEvent | null>(null);
-  const [result, setResult] = useState<{ importedCount: number; duplicateCount: number; totalCount: number } | null>(null);
+  const [result, setResult] = useState<ProcessedImportResult | null>(null);
   const [error, setError] = useState('');
 
   const { data: bankConfigs, error: configsError, isLoading: configsLoading, mutate: mutateConfigs } = useSWR('/api/import/bank-configs', configsFetcher, { shouldRetryOnError: false });
@@ -140,19 +144,20 @@ export default function ImportPage() {
             body: JSON.stringify({ csvContent, bankConfig, accountName }),
           };
 
-      const data = await consumeNdjsonImport<{ importedCount: number; duplicateCount: number; totalCount: number }>(
+      const data = await consumeNdjsonImport<ProcessedImportResult>(
         '/api/import/confirm',
         init,
         setProgress,
       );
       setResult(data);
+      void refreshFinancialData(isFinancialDataKey);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Import failed');
     } finally {
       setImporting(false);
       setProgress(null);
     }
-  }, [fileType, csvContent, bankConfig, accountName, preview]);
+  }, [fileType, csvContent, bankConfig, accountName, preview, refreshFinancialData]);
 
   const handleReset = () => {
     setActiveStep(0);
@@ -190,6 +195,7 @@ export default function ImportPage() {
             <Typography>Imported: {result.importedCount}</Typography>
             <Typography>Duplicates skipped: {result.duplicateCount}</Typography>
             <Typography>Total rows: {result.totalCount}</Typography>
+            <ImportProcessingSummary processing={result.categorization} />
             <Button variant="contained" sx={{ mt: 2 }} onClick={handleReset}>
               Import Another
             </Button>

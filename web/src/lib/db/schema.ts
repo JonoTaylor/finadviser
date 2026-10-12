@@ -11,8 +11,11 @@ import {
   uuid,
   customType,
   jsonb,
+  check,
+  index,
   type AnyPgColumn,
 } from 'drizzle-orm/pg-core';
+import { sql } from 'drizzle-orm';
 
 // Custom Postgres BYTEA mapped to Buffer in/out. Drizzle pg-core doesn't
 // ship a binary type and Neon's HTTP driver serialises parameters as
@@ -117,6 +120,39 @@ export const journalEntries = pgTable('journal_entries', {
   transferReviewDismissedAt: timestamp('transfer_review_dismissed_at'),
   createdAt: timestamp('created_at').notNull().defaultNow(),
 });
+
+// Categorisation evidence is separate from the ledger; no money is booked here.
+export const transactionCategorizations = pgTable('transaction_categorizations', {
+  journalEntryId: integer('journal_entry_id').primaryKey().references(() => journalEntries.id, { onDelete: 'cascade' }),
+  snapshotHash: text('snapshot_hash').notNull(),
+  contextKey: text('context_key').notNull(),
+  categoryId: integer('category_id').references(() => categories.id),
+  confidence: numeric('confidence', { precision: 5, scale: 4 }),
+  reason: text('reason').notNull(),
+  source: text('source').notNull(),
+  status: text('status').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, table => [
+  check('transaction_categorizations_confidence_check', sql`${table.confidence} BETWEEN 0 AND 1`),
+  check('transaction_categorizations_source_check', sql`${table.source} IN ('rule', 'learned', 'ai', 'user')`),
+  check('transaction_categorizations_status_check', sql`${table.status} IN ('applied', 'needs_review', 'reviewed', 'dismissed')`),
+  index('transaction_categorizations_review_idx').on(table.status, table.journalEntryId),
+]);
+
+export const categorizationLearning = pgTable('categorization_learning', {
+  contextKey: text('context_key').primaryKey(),
+  categoryId: integer('category_id').notNull().references(() => categories.id),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const categorizationProcessingLease = pgTable('categorization_processing_lease', {
+  id: integer('id').primaryKey(),
+  token: uuid('token').notNull(),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, table => [check('categorization_processing_lease_singleton_check', sql`${table.id} = 1`)]);
 
 export type TransferKind =
   | 'statement_payment'

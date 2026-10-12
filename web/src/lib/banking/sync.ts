@@ -16,9 +16,6 @@
  *   - Pending -> settled status flip on re-sync. Today we ingest both
  *     and the dedup keeps us idempotent, but a status field on
  *     journal_entries to flip "pending" rows is deferred to PR D.
- *   - AI categorisation pass. Inserts go into the system "Bank" /
- *     "Uncategorized Income/Expense" accounts and the user can pick
- *     up the categorisation pass via /chat as before.
  *   - Cutover-with-backfill collision detection against historical
  *     manual CSV entries. Today the sync starts from
  *     provider_account.cutover_date forward; the backfill option is
@@ -43,6 +40,8 @@ const RESYNC_OVERLAP_DAYS = 7;
 export interface SyncOutcome {
   txnsAdded: number;
   txnsUpdated: number;  // 0 in PR B; reserved for the pending->settled flip
+  /** Newly inserted journals, for processing only after transfer reconciliation. */
+  journalIds: number[];
 }
 
 export async function syncConnection(connectionId: number, syncRunId: number): Promise<SyncOutcome> {
@@ -54,10 +53,11 @@ export async function syncConnection(connectionId: number, syncRunId: number): P
 
   const providerAccounts = await bankingRepo.listProviderAccounts(connectionId);
   if (providerAccounts.length === 0) {
-    return { txnsAdded: 0, txnsUpdated: 0 };
+    return { txnsAdded: 0, txnsUpdated: 0, journalIds: [] };
   }
 
   let totalAdded = 0;
+  const journalIds: number[] = [];
 
   const todayIso = format(new Date(), 'yyyy-MM-dd');
   const sinceIsoFromConnection = conn.lastSyncedAt
@@ -86,12 +86,17 @@ export async function syncConnection(connectionId: number, syncRunId: number): P
     });
 
     for (const txn of txns) {
-      const inserted = await ingestTransaction(txn, pa.accountId, syncRunId);
-      if (inserted) totalAdded += 1;
+      const insertedId = await ingestTransaction(txn, pa.accountId, syncRunId);
+      if (insertedId !== null) {
+        totalAdded += 1;
+        // Bound the follow-up scope during an initial large sync. The
+        // remainder stays eligible for the scheduled global pass.
+        if (journalIds.length < 2_000) journalIds.push(insertedId);
+      }
     }
   }
 
-  return { txnsAdded: totalAdded, txnsUpdated: 0 };
+  return { txnsAdded: totalAdded, txnsUpdated: 0, journalIds };
 }
 
 /**
@@ -123,8 +128,8 @@ export async function reconcileTransfersForRun(syncRunId: number | null, windowD
 
 /**
  * Idempotent insert of a single aggregator transaction via the
- * `ingest_bank_transaction` Postgres function. Returns true if a
- * new journal_entry was created, false if `provider_txn_id` was
+ * `ingest_bank_transaction` Postgres function. Returns its journal ID if a
+ * new journal_entry was created, null if `provider_txn_id` was
  * already on file (no-op).
  *
  * Double-entry shape: amount > 0 (money in) credits the asset
@@ -136,7 +141,7 @@ async function ingestTransaction(
   txn: AggregatorTransaction,
   internalAccountId: number,
   syncRunId: number,
-): Promise<boolean> {
+): Promise<number | null> {
   const db = getDb();
 
   // Decimal for the sign check too, matching the rest of this
@@ -174,8 +179,13 @@ async function ingestTransaction(
         ${JSON.stringify(txn.raw)}::jsonb
       )
   `);
-  if (result.rows.length === 0) return false;
-  return Boolean(result.rows[0].was_inserted);
+  const row = result.rows[0];
+  if (!row?.was_inserted) return null;
+  const journalId = Number(row.journal_id);
+  if (!Number.isSafeInteger(journalId) || journalId <= 0) {
+    throw new Error('Bank ingestion returned an invalid journal ID');
+  }
+  return journalId;
 }
 
 // ── Contra-account lookup with module-level caching ────────────────

@@ -19,6 +19,7 @@ import PlanningSnapshotCard from '@/components/dashboard/PlanningSnapshotCard';
 import DashboardCardHeader from '@/components/dashboard/DashboardCardHeader';
 import PageHeader from '@/components/ui/PageHeader';
 import { fetchJson } from '@/lib/http/client';
+import DataProcessingCard from '@/components/data/DataProcessingCard';
 
 export default function DashboardPage() {
   const [now] = useState(() => new Date());
@@ -44,6 +45,7 @@ export default function DashboardPage() {
       <Grid size={{ xs: 12, sm: 6, lg: 3 }}>
         {loadingSpending ? <MetricLoading /> : spendingError ? <MetricUnavailable title="Monthly spending" detail="Monthly spending is unavailable." /> : <MonthlySpendingCard spending={spending ?? []} />}
       </Grid>
+      <Grid size={{ xs: 12 }}><DataProcessingCard /></Grid>
       <Grid size={{ xs: 12 }}><PlanningSnapshotCard /></Grid>
       <Grid size={{ xs: 12, md: 7 }}>
         {loadingSpending ? <Skeleton variant="rounded" height={340} sx={{ borderRadius: '8px' }} /> : spendingError ? <MetricUnavailable title="Category activity" detail="Spending categories are unavailable." /> : <TopCategoriesCard spending={spending ?? []} />}

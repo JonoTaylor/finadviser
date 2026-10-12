@@ -5,6 +5,14 @@ import { categorizeTransactions } from './categorizer';
 import { accountRepo, journalRepo, fingerprintRepo, importBatchRepo, transactionMetadataRepo } from '@/lib/repos';
 import { getBankConfig } from '@/lib/config/bank-configs';
 import type { RawTransaction, ImportResult } from '@/lib/types';
+import { deferredCategorization, processSavedTransactions, type IngestionCategorization } from './processing-hook';
+import { reconcileTransfersForRun } from '@/lib/banking/sync';
+
+export interface ProcessedImportResult extends ImportResult {
+  categorization: IngestionCategorization & { preclassifiedCount: number };
+}
+
+type OnCategorization = (total: number) => void;
 
 export async function previewImport(
   csvContent: string,
@@ -31,7 +39,8 @@ export async function executeImport(
   bankConfigName: string,
   accountName: string,
   onProgress?: (processed: number, total: number) => void,
-): Promise<ImportResult> {
+  onCategorization?: OnCategorization,
+): Promise<ProcessedImportResult> {
   const config = getBankConfig(bankConfigName);
   if (!config) throw new Error(`Unknown bank config: ${bankConfigName}`);
 
@@ -39,23 +48,22 @@ export async function executeImport(
 
   let transactions = await parseCSV(csvContent, config);
   transactions = await checkDuplicates(transactions, account.id);
-  transactions = await categorizeTransactions(transactions);
 
-  return importTransactions(transactions, account.id, bankConfigName, 'upload.csv', onProgress);
+  return importTransactions(transactions, account.id, bankConfigName, 'upload.csv', onProgress, onCategorization);
 }
 
 export async function executeImportFromParsed(
   parsedTransactions: RawTransaction[],
   accountName: string,
   onProgress?: (processed: number, total: number) => void,
-): Promise<ImportResult> {
+  onCategorization?: OnCategorization,
+): Promise<ProcessedImportResult> {
   const account = await accountRepo.getOrCreate(accountName, 'ASSET');
 
   // Check duplicates against existing data
-  let transactions = await checkDuplicates(parsedTransactions, account.id);
-  transactions = await categorizeTransactions(transactions);
+  const transactions = await checkDuplicates(parsedTransactions, account.id);
 
-  return importTransactions(transactions, account.id, 'pdf', 'upload.pdf', onProgress);
+  return importTransactions(transactions, account.id, 'pdf', 'upload.pdf', onProgress, onCategorization);
 }
 
 // Chunk size for bulk inserts. Postgres' parameter limit (~65k) is way
@@ -71,7 +79,9 @@ async function importTransactions(
   bankConfig: string,
   filename: string,
   onProgress?: (processed: number, total: number) => void,
-): Promise<ImportResult> {
+  onCategorization?: OnCategorization,
+): Promise<ProcessedImportResult> {
+  const startedAt = Date.now();
   // Create import batch
   const batch = await importBatchRepo.create({
     filename,
@@ -93,6 +103,7 @@ async function importTransactions(
   const total = nonDup.length;
   const duplicates = transactions.length - nonDup.length;
   let imported = 0;
+  const processingIds: number[] = [];
 
   // Emit a 0/total event at the start so the UI shows a determinate
   // bar from the moment saving begins, not after the first chunk.
@@ -135,7 +146,9 @@ async function importTransactions(
           date: txn.date,
           description: txn.description,
           reference: txn.reference,
-          categoryId: txn.suggestedCategoryId,
+          // Preview suggestions are not confirmations. All new journals
+          // go through the same context-aware, audited processing service.
+          categoryId: null,
           importBatchId: batch.id,
         },
         entries: [
@@ -146,6 +159,14 @@ async function importTransactions(
     });
 
     const journalIds = await journalRepo.createEntriesBulk(items);
+
+    for (let j = 0; j < chunk.length; j += 1) {
+      if (processingIds.length < 2_000) {
+        // Bound the scope, as well as the model pass. Any remainder is
+        // still in the persistent queue and the daily processing pass.
+        processingIds.push(journalIds[j]);
+      }
+    }
 
     await fingerprintRepo.createMany(
       chunk.map((txn, j) => ({
@@ -190,10 +211,42 @@ async function importTransactions(
 
   await importBatchRepo.updateCounts(batch.id, imported, duplicates);
 
+  // Keep this awaited: unawaited work can be discarded when a Vercel
+  // function completes. The optional pass must never undo a saved import.
+  onCategorization?.(imported);
+  let transfersReconciled = imported === 0;
+  let reconciliationDeferredReason = 'transfer_reconciliation_failed';
+  const remainingImportBudget = () => 295_000 - (Date.now() - startedAt);
+  if (imported > 0 && remainingImportBudget() >= 15_000) {
+    try {
+      // Imported rows have no sync-run ID. Use the existing idempotent
+      // cross-account sweep before classifying a card or bank movement.
+      await reconcileTransfersForRun(null, 3);
+      transfersReconciled = true;
+    } catch {
+      console.warn('[import] Saved transactions await transfer reconciliation.');
+    }
+  } else if (imported > 0) {
+    reconciliationDeferredReason = 'time_budget_exhausted';
+  }
+  const processingBudget = Math.min(15_000, remainingImportBudget());
+  const categorization = processingBudget < 2_000
+    ? deferredCategorization('time_budget_exhausted')
+    : !transfersReconciled
+      ? deferredCategorization(reconciliationDeferredReason)
+      : await processSavedTransactions({
+        journalIds: processingIds,
+        source: 'import',
+        limit: 50,
+        modelTimeoutMs: Math.min(10_000, processingBudget),
+        deadlineMs: processingBudget,
+      });
+
   return {
     batchId: batch.id,
     importedCount: imported,
     duplicateCount: duplicates,
     totalCount: transactions.length,
+    categorization: { ...categorization, preclassifiedCount: 0 },
   };
 }

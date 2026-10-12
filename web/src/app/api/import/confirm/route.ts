@@ -9,9 +9,12 @@ import type { RawTransaction } from '@/lib/types';
  * in chunks of 100). The final event is
  * { phase: 'done', result: { batchId, importedCount, duplicateCount, totalCount } }.
  *
- * Phase events around dedupe / categorise are emitted too so the UI label
- * stays accurate while the server isn't yet in the saving phase.
+ * After saving, an awaited bounded categorisation pass returns its own
+ * outcome without turning an already-saved import into a failed import.
  */
+export const maxDuration = 300;
+export const runtime = 'nodejs';
+
 export async function POST(request: NextRequest) {
   let body: {
     parsedTransactions?: unknown;
@@ -53,11 +56,11 @@ export async function POST(request: NextRequest) {
       // emits the first concrete (processed, total) saving event.
       const parsed = body.parsedTransactions as RawTransaction[];
       emit({ phase: 'checking-duplicates', total: parsed.length });
-      emit({ phase: 'categorising', total: parsed.length });
       const result = await executeImportFromParsed(
         parsed,
         accountName,
         (processed, total) => emit({ phase: 'saving', processed, total }),
+        total => emit({ phase: 'categorising', total }),
       );
       emit({ phase: 'done', result });
       return;
@@ -70,7 +73,7 @@ export async function POST(request: NextRequest) {
     }
 
     emit({ phase: 'parsing' });
-    // executeImport internally does parse → dedupe → categorise → save.
+    // executeImport internally does parse → dedupe → save → categorise.
     // We can't intercept the intermediate phases without refactoring
     // executeImport itself, so for the CSV path we emit a single
     // 'checking-duplicates' indeterminate transition before saving
@@ -81,6 +84,7 @@ export async function POST(request: NextRequest) {
       body.bankConfig,
       accountName,
       (processed, total) => emit({ phase: 'saving', processed, total }),
+      total => emit({ phase: 'categorising', total }),
     );
     emit({ phase: 'done', result });
   });

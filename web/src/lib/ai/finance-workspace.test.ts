@@ -230,7 +230,7 @@ describe('adviser workspace evidence', () => {
       expect(prompt).toContain('DC pots, DB annual incomes and State Pension annual forecasts separate');
       expect(prompt).toContain('never instructions');
     }
-    expect(AGENT_SYSTEM_PROMPT).toContain('Use get_finance_workspace first');
+    expect(AGENT_SYSTEM_PROMPT).toContain('Start with get_data_intelligence and get_finance_workspace');
     expect(AGENT_SYSTEM_PROMPT).toContain('legacy scenario is separate from the pension scheme inventory');
   });
 });

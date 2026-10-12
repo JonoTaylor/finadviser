@@ -1,5 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { journalRepo, categoryRepo } from '@/lib/repos';
+import { z } from 'zod';
+import { journalRepo } from '@/lib/repos';
+import { CategorizationConflictError, InvalidCategorizationError, confirmedCategorize, getCategorizationRecords } from '@/lib/categorization/review';
+
+const journalIdSchema = z.coerce.number().int().positive().max(2147483647);
+const categoryPatchSchema = z.object({
+  categoryId: z.number().int().positive().max(2147483647),
+  createRule: z.boolean().default(false),
+  // Kept for existing clients; learning uses the actual saved transaction.
+  description: z.string().optional(),
+  expectedSnapshot: z.string().regex(/^[a-f0-9]{32}$/).optional(),
+}).strict();
+const json = (body: unknown, status = 200) => NextResponse.json(body, { status, headers: { 'Cache-Control': 'private, no-store' } });
 
 export async function GET(
   request: NextRequest,
@@ -7,12 +19,14 @@ export async function GET(
 ) {
   try {
     const { id } = await params;
-    const entry = await journalRepo.getEntry(parseInt(id));
-    if (!entry) return NextResponse.json({ error: 'Not found' }, { status: 404 });
-    const bookEntries = await journalRepo.getBookEntries(parseInt(id));
-    return NextResponse.json({ ...entry, bookEntries });
-  } catch (error) {
-    return NextResponse.json({ error: 'Failed to fetch entry' }, { status: 500 });
+    const journalId = journalIdSchema.safeParse(id);
+    if (!journalId.success) return json({ error: 'Use a valid transaction ID.' }, 400);
+    const entry = await journalRepo.getEntry(journalId.data);
+    if (!entry) return json({ error: 'Not found' }, 404);
+    const [bookEntries, records] = await Promise.all([journalRepo.getBookEntries(journalId.data), getCategorizationRecords([journalId.data])]);
+    return json({ ...entry, bookEntries, snapshot: records[0]?.snapshot ?? null });
+  } catch {
+    return json({ error: 'Failed to fetch entry' }, 500);
   }
 }
 
@@ -20,32 +34,26 @@ export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  const { id } = await params;
+  const journalId = journalIdSchema.safeParse(id);
+  if (!journalId.success) return json({ error: 'Use a valid transaction ID.' }, 400);
+  let rawBody: unknown;
+  try { rawBody = await request.json(); }
+  catch { return json({ error: 'Supply a valid category choice.' }, 400); }
+  const body = categoryPatchSchema.safeParse(rawBody);
+  if (!body.success) return json({ error: 'Choose a valid category and current transaction details.' }, 400);
   try {
-    const { id } = await params;
-    const body = await request.json();
-    if (body.categoryId !== undefined) {
-      await journalRepo.updateCategory(parseInt(id), body.categoryId);
-
-      // Learn a rule from manual categorization
-      if (body.createRule && body.description) {
-        const existingRules = await categoryRepo.getRules();
-        const alreadyExists = existingRules.some(
-          (r) =>
-            r.pattern.toLowerCase() === body.description.toLowerCase() &&
-            r.categoryId === body.categoryId,
-        );
-        if (!alreadyExists) {
-          await categoryRepo.addRule({
-            pattern: body.description,
-            categoryId: body.categoryId,
-            matchType: 'contains',
-            source: 'user',
-          });
-        }
-      }
-    }
-    return NextResponse.json({ success: true });
+    const [record] = await getCategorizationRecords([journalId.data]);
+    if (!record) return json({ error: 'Transaction not found.' }, 404);
+    const result = await confirmedCategorize({
+      journalId: journalId.data, categoryId: body.data.categoryId,
+      snapshot: body.data.expectedSnapshot ?? record.snapshot,
+      remember: body.data.createRule,
+    });
+    return json({ success: true, ...result });
   } catch (error) {
-    return NextResponse.json({ error: 'Failed to update entry' }, { status: 500 });
+    if (error instanceof CategorizationConflictError) return json({ error: error.message }, 409);
+    if (error instanceof InvalidCategorizationError) return json({ error: error.message }, 422);
+    return json({ error: 'The category save could not be confirmed. Reload the latest transaction details before retrying.' }, 503);
   }
 }

@@ -1,13 +1,13 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import {
   Box, Button, Snackbar, Alert, FormControlLabel, Switch, Badge,
 } from '@mui/material';
 import AutoFixHighRoundedIcon from '@mui/icons-material/AutoFixHighRounded';
 import SwapHorizRoundedIcon from '@mui/icons-material/SwapHorizRounded';
 import Link from 'next/link';
-import useSWR from 'swr';
+import useSWR, { useSWRConfig } from 'swr';
 import TransactionFilters from '@/components/transactions/TransactionFilters';
 import TransactionTable from '@/components/transactions/TransactionTable';
 import CategoryEditDialog from '@/components/transactions/CategoryEditDialog';
@@ -15,6 +15,8 @@ import MarkAsTransferDialog from '@/components/transactions/MarkAsTransferDialog
 import PageHeader from '@/components/ui/PageHeader';
 import { fetchJson } from '@/lib/http/client';
 import type { Entry } from '@/components/transactions/TransactionTable';
+import type { CategorizationResult } from '@/lib/categorization/types';
+import { isFinancialDataKey } from '@/components/data/useDataProcessing';
 
 const fetcher = fetchJson;
 async function fetchList<T>(url: string): Promise<T[]> {
@@ -29,6 +31,8 @@ async function fetchJournal(url: string): Promise<{ entries: Entry[]; total: num
 }
 
 export default function TransactionsPage() {
+  const { mutate: refreshFinancialData } = useSWRConfig();
+  const processingActive = useRef(false);
   const [filters, setFilters] = useState({
     q: '',
     categoryId: undefined as number | undefined,
@@ -76,29 +80,21 @@ export default function TransactionsPage() {
       body: JSON.stringify({ categoryId, createRule, description }),
     });
     setEditEntry(null);
-    mutate();
-  }, [mutate]);
+    void refreshFinancialData(isFinancialDataKey);
+  }, [refreshFinancialData]);
 
   const handleAutoCategorize = useCallback(async () => {
+    if (processingActive.current) return;
+    processingActive.current = true;
     setAutoCategorizing(true);
     try {
-      const result = await fetchJson<{ error?: string; total: number; ruleBased: number; aiCategorized: number; remaining: number; aiSkippedReason?: string }>('/api/journal/auto-categorize', { method: 'POST' });
-      if (result.error) {
-        setSnackbar({ open: true, message: result.error, severity: 'error' });
+      const result = await fetchJson<CategorizationResult>('/api/journal/auto-categorize', { method: 'POST' });
+      if (result.busy) {
+        setSnackbar({ open: true, message: 'Another processing run is active. Open the Data assistant to see the queue.', severity: 'info' });
       } else if (result.total === 0) {
-        setSnackbar({ open: true, message: 'No uncategorized transactions found', severity: 'info' });
+        setSnackbar({ open: true, message: result.aiSkippedReason || 'No new records were processed. Open the Data assistant for any queued questions.', severity: result.aiSkippedReason ? 'warning' : 'info' });
       } else {
-        const parts: string[] = [];
-        if (result.ruleBased > 0) parts.push(`${result.ruleBased} by rules`);
-        if (result.aiCategorized > 0) parts.push(`${result.aiCategorized} by AI`);
-        if (result.remaining > 0) parts.push(`${result.remaining} remaining`);
-
-        const summary = `Categorized ${result.ruleBased + result.aiCategorized} of ${result.total} transactions: ${parts.join(', ')}`;
-
-        // Surface why AI didn't help — used to be invisible. Common
-        // reasons: AI_GATEWAY_API_KEY not set in prod, or the gateway
-        // call failed at runtime. The route now returns aiSkippedReason
-        // explaining either case.
+        const summary = `${result.ruleBased + result.learned + result.aiCategorized} categorised, ${result.reviewQueued} sent for review, ${result.available} still queued. Open the Data assistant for next steps.`;
         if (result.aiSkippedReason) {
           setSnackbar({
             open: true,
@@ -108,18 +104,20 @@ export default function TransactionsPage() {
         } else {
           setSnackbar({ open: true, message: summary, severity: 'success' });
         }
-        mutate();
       }
-    } catch {
-      setSnackbar({ open: true, message: 'Failed to auto-categorize', severity: 'error' });
+      await refreshFinancialData(isFinancialDataKey);
+    } catch (cause) {
+      setSnackbar({ open: true, message: cause instanceof Error ? cause.message : 'Data processing could not finish. Please retry.', severity: 'error' });
     } finally {
+      processingActive.current = false;
       setAutoCategorizing(false);
     }
-  }, [mutate]);
+  }, [refreshFinancialData]);
 
   return (
     <Box>
       <PageHeader title="Transactions" description={error ? 'Your transaction records are unavailable.' : isLoading ? 'Loading your transaction records…' : `${data?.total ?? 0} transactions${hideTransfers ? ' · transfers hidden' : ''}`} actions={<>
+          <Button component={Link} href="/data" variant="outlined">Data assistant</Button>
           <Badge badgeContent={reviewCount} color="warning" max={99}>
             <Button
               component={Link}
@@ -136,7 +134,7 @@ export default function TransactionsPage() {
             onClick={handleAutoCategorize}
             disabled={autoCategorizing || Boolean(error || categoriesError)}
           >
-            {autoCategorizing ? 'Categorising…' : 'Categorise transactions'}
+            {autoCategorizing ? 'Processing…' : 'Process queued records'}
           </Button>
       </>} />
       {(categoriesError || accountsError) && <Alert severity="warning" sx={{ mb: 2 }}>Some filter options could not be loaded. Retry when your accounts and categories are available.</Alert>}

@@ -1429,3 +1429,38 @@ CREATE TABLE IF NOT EXISTS owner_tax_profiles (
     CONSTRAINT owner_tax_profiles_owner_year_key UNIQUE (owner_id, tax_year),
     CONSTRAINT owner_tax_profiles_tax_year_check CHECK (tax_year ~ '^[0-9]{4}-[0-9]{2}$')
 );
+
+-- Data assistant: reversible category metadata, explicit user learning and a
+-- shared serverless lease. Repeated deployments preserve all existing records.
+CREATE TABLE IF NOT EXISTS transaction_categorizations (
+    journal_entry_id INTEGER PRIMARY KEY REFERENCES journal_entries(id) ON DELETE CASCADE,
+    snapshot_hash TEXT NOT NULL,
+    context_key TEXT NOT NULL,
+    category_id INTEGER REFERENCES categories(id),
+    confidence NUMERIC(5,4),
+    reason TEXT NOT NULL,
+    source TEXT NOT NULL,
+    status TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT transaction_categorizations_confidence_check CHECK (confidence BETWEEN 0 AND 1),
+    CONSTRAINT transaction_categorizations_source_check CHECK (source IN ('rule', 'learned', 'ai', 'user')),
+    CONSTRAINT transaction_categorizations_status_check CHECK (status IN ('applied', 'needs_review', 'reviewed', 'dismissed'))
+);
+CREATE INDEX IF NOT EXISTS transaction_categorizations_review_idx
+    ON transaction_categorizations(status, journal_entry_id);
+
+CREATE TABLE IF NOT EXISTS categorization_learning (
+    context_key TEXT PRIMARY KEY,
+    category_id INTEGER NOT NULL REFERENCES categories(id),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS categorization_processing_lease (
+    id INTEGER PRIMARY KEY,
+    token UUID NOT NULL,
+    expires_at TIMESTAMPTZ NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT categorization_processing_lease_singleton_check CHECK (id = 1)
+);

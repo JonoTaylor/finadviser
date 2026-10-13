@@ -5,6 +5,7 @@ import {
   Box,
   Card,
   CardContent,
+  Chip,
   Grid,
   Slider,
   Stack,
@@ -28,6 +29,12 @@ export interface SellVsHoldPanelProps {
   annualMortgageInterest: Decimal;
   defaultSalePrice: Decimal;
   sellingCosts: Decimal;
+  /**
+   * Name of the product whose rate is driving the hold-path interest.
+   * Surfaced as a chip so users can see whether the projection reflects
+   * a candidate switch or the current on-file rate.
+   */
+  leadingProductLabel: string | null;
 }
 
 export default function SellVsHoldPanel({
@@ -35,6 +42,7 @@ export default function SellVsHoldPanel({
   annualMortgageInterest,
   defaultSalePrice,
   sellingCosts,
+  leadingProductLabel,
 }: SellVsHoldPanelProps) {
   const [equityReturnPct, setEquityReturnPct] = useState(6);
   const [propertyGrowthPct, setPropertyGrowthPct] = useState(2);
@@ -74,9 +82,23 @@ export default function SellVsHoldPanel({
     <Box>
       <Card sx={{ mb: 2 }}>
         <CardContent>
-          <Typography variant="h6" gutterBottom>
-            Sell vs hold
-          </Typography>
+          <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 0.5 }}>
+            <Typography variant="h6">Sell vs hold</Typography>
+            {leadingProductLabel ? (
+              <Chip
+                size="small"
+                variant="outlined"
+                color="primary"
+                label={`Hold rate from: ${leadingProductLabel}`}
+              />
+            ) : (
+              <Chip
+                size="small"
+                variant="outlined"
+                label="Hold rate from: current on-file mortgage"
+              />
+            )}
+          </Stack>
           <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
             Hold path: property grows, after-tax rental cash flow accumulates
             and compounds at the equity return. Sell path: net proceeds flow

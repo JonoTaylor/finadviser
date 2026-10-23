@@ -1,98 +1,57 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { z } from 'zod';
+import Decimal from 'decimal.js';
 import { recordMortgagePayments } from '@/lib/properties/mortgage-tracker';
+import { isMortgagePaymentIsoDate } from '@/lib/properties/mortgage-payment-date-review';
 import { propertyRepo } from '@/lib/repos/property.repo';
+import { accountRepo } from '@/lib/repos/account.repo';
 
-/**
- * POST /api/properties/[id]/mortgages/payments-bulk
- *
- * Body: {
- *   mortgageId: number,
- *   payerOwnerId: number,
- *   fromAccountId: number,
- *   payments: Array<{ date: string (YYYY-MM-DD), amount: string, principal?: string }>
- * }
- *
- * Idempotent across re-runs via the reference-based dedup in
- * recordMortgagePayments. Returns counts so the UI / AI tool can
- * echo back what changed without re-querying.
- */
-export async function POST(
-  request: NextRequest,
-  { params }: { params: Promise<{ id: string }> },
-) {
+const idSchema = z.number().int().positive().max(2147483647);
+const amountSchema = z.string().superRefine((value, ctx) => {
+  if (!/^\d+(?:\.\d{1,2})?$/.test(value)) {
+    ctx.addIssue({ code: 'custom', message: 'Use a non-negative decimal amount with at most two decimal places.' });
+  } else if (new Decimal(value).gte('1000000000000')) {
+    ctx.addIssue({ code: 'custom', message: 'The payment amount is too large.' });
+  }
+});
+const paymentSchema = z.object({
+  date: z.string().refine(isMortgagePaymentIsoDate, 'Use a real payment date in YYYY-MM-DD format.'),
+  amount: amountSchema,
+  principal: amountSchema.optional(),
+}).strict().superRefine((value, ctx) => {
+  if (/^\d+(?:\.\d{1,2})?$/.test(value.amount) && new Decimal(value.amount).lte(0)) {
+    ctx.addIssue({ code: 'custom', path: ['amount'], message: 'Payment amount must be positive.' });
+  }
+  if (value.principal !== undefined && /^\d+(?:\.\d{1,2})?$/.test(value.principal)
+    && /^\d+(?:\.\d{1,2})?$/.test(value.amount) && new Decimal(value.principal).gt(value.amount)) {
+    ctx.addIssue({ code: 'custom', path: ['principal'], message: 'Principal cannot exceed the payment amount.' });
+  }
+});
+const bodySchema = z.object({
+  mortgageId: idSchema, payerOwnerId: idSchema, fromAccountId: idSchema,
+  payments: z.array(paymentSchema).min(1).max(100),
+}).strict();
+
+/** Validated payments retain row-level saved/duplicate/review outcomes. */
+export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const rawId = (await params).id;
+  const propertyId = /^\d+$/.test(rawId) ? Number(rawId) : NaN;
+  const body = bodySchema.safeParse(await request.json().catch(() => null));
+  if (!idSchema.safeParse(propertyId).success || !body.success) {
+    return NextResponse.json({ error: 'Supply valid IDs and 1–100 payments with real calendar dates, positive amounts and valid principal splits.' }, { status: 400 });
+  }
   try {
-    const { id } = await params;
-    const propertyId = parseInt(id, 10);
-    if (Number.isNaN(propertyId)) {
-      return NextResponse.json({ error: 'Invalid property id' }, { status: 400 });
+    const { mortgageId, payerOwnerId, fromAccountId, payments } = body.data;
+    const [mortgages, account] = await Promise.all([propertyRepo.getMortgages(propertyId), accountRepo.getById(fromAccountId)]);
+    const mortgage = mortgages.find(item => item.id === mortgageId);
+    if (!mortgage) return NextResponse.json({ error: 'The mortgage does not belong to this property.' }, { status: 400 });
+    if (!account || account.accountType !== 'ASSET') return NextResponse.json({ error: 'Choose an existing asset account that paid the mortgage.' }, { status: 400 });
+    if (!mortgage.interestOnly && payments.some(payment => payment.principal === undefined)) {
+      return NextResponse.json({ error: 'This mortgage is not marked interest-only. Supply the confirmed principal split for every payment.' }, { status: 400 });
     }
-
-    const body = await request.json();
-    const { mortgageId, payerOwnerId, fromAccountId, payments } = body ?? {};
-
-    if (typeof mortgageId !== 'number' || typeof payerOwnerId !== 'number' || typeof fromAccountId !== 'number') {
-      return NextResponse.json(
-        { error: 'mortgageId, payerOwnerId, fromAccountId must all be numbers' },
-        { status: 400 },
-      );
-    }
-    if (!Array.isArray(payments) || payments.length === 0) {
-      return NextResponse.json({ error: 'payments must be a non-empty array' }, { status: 400 });
-    }
-
-    // Defence in depth: confirm the mortgage actually belongs to
-    // this property so a manipulated body can't cross-post.
-    const mortgages = await propertyRepo.getMortgages(propertyId);
-    if (!mortgages.find(m => m.id === mortgageId)) {
-      return NextResponse.json(
-        { error: `Mortgage ${mortgageId} does not belong to property ${propertyId}` },
-        { status: 400 },
-      );
-    }
-
-    const validatedPayments: Array<{ date: string; amount: string; principal?: string }> = [];
-    for (const p of payments) {
-      if (typeof p?.date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(p.date)) {
-        return NextResponse.json(
-          { error: `Each payment.date must be YYYY-MM-DD; got ${p?.date}` },
-          { status: 400 },
-        );
-      }
-      // Positive decimal only - mortgage payments are amounts paid,
-      // not refunds. The parser already filters Debit-direction lines
-      // and the underlying recordMortgagePayments treats negatives as
-      // errors; reject at the API boundary so a malformed body fails
-      // fast with a clear message rather than silently dropping rows.
-      if (typeof p.amount !== 'string' || !/^\d+(?:\.\d{1,2})?$/.test(p.amount)) {
-        return NextResponse.json(
-          { error: `Each payment.amount must be a positive decimal string; got ${p.amount}` },
-          { status: 400 },
-        );
-      }
-      if (p.principal !== undefined && (typeof p.principal !== 'string' || !/^\d+(?:\.\d{1,2})?$/.test(p.principal))) {
-        return NextResponse.json(
-          { error: `payment.principal, when supplied, must be a positive decimal string; got ${p.principal}` },
-          { status: 400 },
-        );
-      }
-      validatedPayments.push({ date: p.date, amount: p.amount, principal: p.principal });
-    }
-
-    const result = await recordMortgagePayments({
-      mortgageId,
-      payerOwnerId,
-      fromAccountId,
-      payments: validatedPayments,
-    });
-
-    return NextResponse.json({
-      added: result.added.length,
-      duplicates: result.duplicates.length,
-      errors: result.errors.length,
-      details: result,
-    }, { status: 201 });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : 'Failed to record bulk payments';
-    return NextResponse.json({ error: message }, { status: 500 });
+    const result = await recordMortgagePayments({ mortgageId, payerOwnerId, fromAccountId, payments });
+    return NextResponse.json({ added: result.added.length, duplicates: result.duplicates.length, errors: result.errors.length, details: result }, { status: 201 });
+  } catch {
+    return NextResponse.json({ error: 'The payment save could not be confirmed. Keep the original statement and check recorded payments before retrying.' }, { status: 503 });
   }
 }

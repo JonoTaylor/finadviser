@@ -34,22 +34,30 @@ export interface ParseResult {
   skipped: SkippedPayment[];
   /** Every chunk after splitting that didn't yield a parseable payment. */
   unparsed: string[];
+  /** Precise validation failures for callers; optional for older integrations. */
+  issues?: PaymentParseIssue[];
 }
 
-// Date regex: DD/MM/YYYY. NO \b boundaries - the user's real paste
-// runs lines together as `Credit31/03/2026` where the previous chunk
-// ends with a letter and the next starts with a digit, and \b
-// requires a transition between \w and \W (digit-after-letter is
-// \w-after-\w, i.e. NO boundary). Using a bare digit-shape match
-// handles the run-on case correctly. The ISO date validation in
-// toIsoDate filters anything that isn't a real Gregorian date.
-const DATE_RE = /(\d{1,2})\/(\d{1,2})\/(\d{4})/;
+export interface PaymentParseIssue {
+  raw: string;
+  reason: 'missing_date' | 'invalid_date' | 'missing_amount' | 'invalid_amount' | 'ambiguous_amount';
+  message: string;
+}
+
+// Match a whole token, including malformed component lengths, so a bad
+// `128/08/2026` cannot be salvaged as `28/08/2026`. Consuming matches also
+// prevent a second boundary inside `30/09/2026` at `0/09/2026`.
+// A word boundary would break the provider's `Credit31/03/2026` run-on format.
+const DATE_TOKEN_RE = /(?<![\d/])\d+(?:\/\d+){2,}(?![\d/])/g;
+const DATE_RE = /^(\d{1,2})\/(\d{1,2})\/(\d{4})(?![\d/])/;
 // Amount regex: £-prefixed only. The user's lender always emits the
 // £ symbol; if a future caller wants raw decimals they should
 // pre-process the input upstream rather than weakening the regex
 // here (a bare "1.5" elsewhere in the chunk would otherwise be
 // misread as a payment amount).
-const AMOUNT_RE = /£\s*([\d,]+(?:\.\d{1,2})?)/;
+// Consume the complete numeric token before validating it: matching only
+// two decimal places would silently turn `£1,382.365` into `£1,382.36`.
+const AMOUNT_RE = /£\s*([+\-−]?\d[\d,.]*)/;
 
 /**
  * Convert DD/MM/YYYY components to YYYY-MM-DD ISO date. Returns null
@@ -83,8 +91,8 @@ function toIsoDate(d: string, m: string, y: string): string | null {
  * on unparseable or non-positive input.
  */
 function normaliseAmount(raw: string): string | null {
-  const stripped = raw.replace(/[£,\s]/g, '');
-  if (!/^\d+(?:\.\d{1,2})?$/.test(stripped)) return null;
+  if (!/^(?:\d+|\d{1,3}(?:,\d{3})+)(?:\.\d{1,2})?$/.test(raw)) return null;
+  const stripped = raw.replace(/,/g, '');
   let dec: Decimal;
   try {
     dec = new Decimal(stripped);
@@ -97,43 +105,60 @@ function normaliseAmount(raw: string): string | null {
 
 /**
  * Split the input on date boundaries so each emitted chunk starts
- * with a DD/MM/YYYY token. Handles the "Credit31/03/2026" run-on
- * case from the user's paste using a bare digit-shape lookahead
- * (no \b - see DATE_RE comment above for why \b doesn't match
- * between letter and digit).
+ * with a complete date-shaped token. Iterate consuming matches instead of
+ * splitting on an overlapping lookahead, which can cut a two-digit day
+ * in half. Preserve malformed rows and any non-date preamble for review.
  */
 function splitOnDates(input: string): string[] {
   const trimmed = input.replace(/\s+/g, ' ').trim();
   if (!trimmed) return [];
-  return trimmed.split(/(?=\d{1,2}\/\d{1,2}\/\d{4})/).map(s => s.trim()).filter(Boolean);
+  const starts = Array.from(trimmed.matchAll(DATE_TOKEN_RE), match => match.index);
+  if (starts.length === 0) return [trimmed];
+  const chunks = starts[0] > 0 ? [trimmed.slice(0, starts[0]).trim()] : [];
+  for (let index = 0; index < starts.length; index += 1) {
+    chunks.push(trimmed.slice(starts[index], starts[index + 1]).trim());
+  }
+  return chunks.filter(Boolean);
 }
 
 /**
  * Parse a single chunk like "31/12/2025 Receipt £1,382.36 Credit"
  * into one of: valid payment, explicitly-skipped row, or unparsed.
  */
-function parseChunk(chunk: string): ParsedPayment | SkippedPayment | null {
+function parseChunk(chunk: string): ParsedPayment | SkippedPayment | PaymentParseIssue {
+  const issue = (reason: PaymentParseIssue['reason'], message: string): PaymentParseIssue => ({ raw: chunk, reason, message });
   const dateMatch = chunk.match(DATE_RE);
-  if (!dateMatch) return null;
+  if (!dateMatch) return issue(/^\d+\//.test(chunk) ? 'invalid_date' : 'missing_date', 'Use a complete UK date in DD/MM/YYYY format.');
   const iso = toIsoDate(dateMatch[1], dateMatch[2], dateMatch[3]);
-  if (!iso) return null;
-
-  const amountMatch = chunk.match(AMOUNT_RE);
-  if (!amountMatch) return null;
-  const amount = normaliseAmount(amountMatch[1]);
-  if (!amount) return null;
+  if (!iso) return issue('invalid_date', 'The date is not a valid Gregorian calendar date.');
 
   const lower = chunk.toLowerCase();
+  const skipReason = lower.includes('rejected') ? 'rejected' : lower.includes('debit') ? 'debit' : null;
+  const currencyCount = chunk.match(/£/g)?.length ?? 0;
+  if (currencyCount === 0) return issue('missing_amount', 'Include one £-prefixed payment amount.');
+  if (currencyCount > 1) return issue('ambiguous_amount', 'The row contains more than one £ amount; identify the payment amount before booking.');
+  const amountMatch = chunk.match(AMOUNT_RE);
+  if (!amountMatch) return issue('invalid_amount', 'Use a positive payment amount with valid thousands separators and at most two decimal places.');
+  const negative = /[-−]\s*£|\(\s*£/.test(chunk) || /^[\-−]/.test(amountMatch[1])
+    || /^\s*\)/.test(chunk.slice((amountMatch.index ?? 0) + amountMatch[0].length));
+  const afterAmount = chunk.slice((amountMatch.index ?? 0) + amountMatch[0].length);
+  if ((!skipReason && negative) || /^\s+(?:\d|[.,]\d)/.test(afterAmount)
+    || /^[eE][+\-]?\d|^[/+\-−_%]/.test(afterAmount)) {
+    return issue('invalid_amount', 'The amount is negative or uses an unsupported numeric format; it has not been booked.');
+  }
+  const amount = normaliseAmount(skipReason ? amountMatch[1].replace(/^[\-−]/, '') : amountMatch[1]);
+  if (!amount) return issue('invalid_amount', 'Use a positive payment amount with valid thousands separators and at most two decimal places.');
+
   // Order matters: check 'rejected' before 'receipt' since the
   // chunk could in theory contain both substrings.
-  if (lower.includes('rejected')) {
+  if (skipReason === 'rejected') {
     return { date: iso, amount, raw: chunk, reason: 'rejected' } satisfies SkippedPayment;
   }
   // Direction: a Debit line on a regular Receipt row is unusual;
   // typically Receipt + Credit. If we see Debit on something that
   // ISN'T already flagged rejected, treat as a refund / reversal
   // and skip rather than booking a negative interest expense.
-  if (lower.includes('debit')) {
+  if (skipReason === 'debit') {
     return { date: iso, amount, raw: chunk, reason: 'debit' } satisfies SkippedPayment;
   }
   return { date: iso, amount, raw: chunk } satisfies ParsedPayment;
@@ -148,11 +173,13 @@ export function parseMortgagePayments(input: string): ParseResult {
   const valid: ParsedPayment[] = [];
   const skipped: SkippedPayment[] = [];
   const unparsed: string[] = [];
+  const issues: PaymentParseIssue[] = [];
 
   for (const chunk of splitOnDates(input)) {
     const result = parseChunk(chunk);
-    if (!result) {
+    if ('message' in result) {
       unparsed.push(chunk);
+      issues.push(result);
       continue;
     }
     if ('reason' in result) {
@@ -162,5 +189,5 @@ export function parseMortgagePayments(input: string): ParseResult {
     }
   }
 
-  return { valid, skipped, unparsed };
+  return { valid, skipped, unparsed, issues };
 }

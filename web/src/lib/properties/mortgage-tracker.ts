@@ -2,8 +2,26 @@ import Decimal from 'decimal.js';
 import { accountRepo, journalRepo, propertyRepo } from '@/lib/repos';
 import { getDb, schema } from '@/lib/db';
 import { sql, inArray } from 'drizzle-orm';
+import { isValidCalendarDate } from './mortgage-rate-validation';
 
 const { journalEntries } = schema;
+
+export interface MortgagePaymentError {
+  date: string;
+  amount: string;
+  message: string;
+  /** A review condition, never proof that an earlier payment was entered incorrectly. */
+  code?: 'possible_legacy_date' | 'payment_record_mismatch';
+  existingJournalId?: number;
+  existingDate?: string;
+}
+
+/** The old parser could drop a day digit; a matching earlier payment needs review. */
+function possibleLegacyPaymentDate(date: string): string | null {
+  const match = /^(\d{4}-\d{2}-)(\d{2})$/.exec(date);
+  if (!match || Number(match[2]) < 10 || Number(match[2]) > 31 || match[2][1] === '0') return null;
+  return `${match[1]}0${match[2][1]}`;
+}
 
 export async function recordMortgagePayment(params: {
   mortgageId: number;
@@ -146,14 +164,14 @@ export async function recordMortgagePayments(params: {
    *  numeric when the row already exists in journal_entries from a
    *  prior import. */
   duplicates: Array<{ date: string; amount: string; existingJournalId: number | null }>;
-  errors: Array<{ date: string; amount: string; message: string }>;
+  errors: MortgagePaymentError[];
 }> {
   const { mortgageId, payerOwnerId, fromAccountId, payments } = params;
   const db = getDb();
 
   const added: Array<{ journalId: number; date: string; amount: string }> = [];
   const duplicates: Array<{ date: string; amount: string; existingJournalId: number | null }> = [];
-  const errors: Array<{ date: string; amount: string; message: string }> = [];
+  const errors: MortgagePaymentError[] = [];
 
   if (payments.length === 0) {
     return { added, duplicates, errors };
@@ -192,20 +210,32 @@ export async function recordMortgagePayments(params: {
   // bound positionally, which works on every driver.
   const buildRef = (date: string, amountFixed: string) =>
     `mortgage_payment:${mortgageId}:${date}:${amountFixed}`;
-  // refs is guaranteed non-empty here: the function early-returns
-  // when payments.length === 0 (above), and refs is 1:1 with payments.
-  const refs = payments.map(p => buildRef(p.date, new Decimal(p.amount).toFixed(2)));
-  const existingRows = await db
-    .select({ id: journalEntries.id, reference: journalEntries.reference })
+  // Check intended dates and earlier-parser candidate dates together. A
+  // malformed amount is reported per row below, not thrown by this lookup.
+  const refs = new Set<string>();
+  for (const payment of payments) {
+    try {
+      const amount = new Decimal(payment.amount).toFixed(2);
+      refs.add(buildRef(payment.date, amount));
+      const legacyDate = possibleLegacyPaymentDate(payment.date);
+      if (legacyDate) refs.add(buildRef(legacyDate, amount));
+    } catch { /* Per-row validation below reports the invalid amount. */ }
+  }
+  const existingRows = refs.size === 0 ? [] : await db
+    .select({ id: journalEntries.id, reference: journalEntries.reference, date: journalEntries.date, propertyId: journalEntries.propertyId })
     .from(journalEntries)
-    .where(inArray(journalEntries.reference, refs));
-  const existingByRef = new Map<string, number>();
+    .where(inArray(journalEntries.reference, [...refs]));
+  const existingByRef = new Map<string, typeof existingRows>();
   for (const r of existingRows) {
     // Nullish-only check: an empty-string reference is technically
     // valid (the column allows it) and should still index, but our
     // build_ref always produces a non-empty key so in practice we
     // only ever skip explicit nulls. Using != null is precise.
-    if (r.reference != null) existingByRef.set(r.reference, r.id);
+    if (r.reference != null) {
+      const records = existingByRef.get(r.reference) ?? [];
+      records.push(r);
+      existingByRef.set(r.reference, records);
+    }
   }
 
   // Build the journal items in memory first; defer the DB writes
@@ -228,6 +258,10 @@ export async function recordMortgagePayments(params: {
   }> = [];
 
   for (const p of payments) {
+    if (!isValidCalendarDate(p.date)) {
+      errors.push({ date: p.date, amount: p.amount, message: 'payment date must be a real YYYY-MM-DD calendar date' });
+      continue;
+    }
     // Wrap Decimal parsing in try so a single malformed row records
     // an error instead of aborting the whole bulk run. The API
     // boundary already enforces /^\d+(?:\.\d{1,2})?$/ but the bulk
@@ -254,7 +288,7 @@ export async function recordMortgagePayments(params: {
       });
       continue;
     }
-    if (principalDec.isNegative()) {
+    if (!principalDec.isFinite() || principalDec.isNegative()) {
       errors.push({
         date: p.date,
         amount: p.amount,
@@ -274,9 +308,29 @@ export async function recordMortgagePayments(params: {
 
     const amountFixed = totalDec.toFixed(2);
     const reference = buildRef(p.date, amountFixed);
-    const dupId = existingByRef.get(reference);
-    if (dupId !== undefined) {
-      duplicates.push({ date: p.date, amount: amountFixed, existingJournalId: dupId });
+    const exactRecords = existingByRef.get(reference);
+    if (exactRecords) {
+      const existing = exactRecords[0];
+      if (exactRecords.length !== 1 || existing.date !== p.date || existing.propertyId !== propertyId) {
+        errors.push({
+          date: p.date, amount: amountFixed, code: 'payment_record_mismatch',
+          existingJournalId: existing.id, existingDate: existing.date,
+          message: 'The payment reference already exists, but its recorded date, property or number of journals needs review. No new payment was added and no existing entry was changed.',
+        });
+      } else {
+        duplicates.push({ date: p.date, amount: amountFixed, existingJournalId: existing.id });
+      }
+      continue;
+    }
+    const legacyDate = possibleLegacyPaymentDate(p.date);
+    const legacyRecords = legacyDate ? existingByRef.get(buildRef(legacyDate, amountFixed)) : undefined;
+    if (legacyRecords) {
+      const existing = legacyRecords[0];
+      errors.push({
+        date: p.date, amount: amountFixed, code: 'possible_legacy_date',
+        existingJournalId: existing.id, existingDate: existing.date,
+        message: `A payment for the same mortgage and amount is recorded on ${existing.date} (journal ${existing.id}). An earlier parser could have dropped the first digit of the intended day, but these may also be separate genuine payments. Review the statement and existing entry before retrying; no new payment was added and no date was changed.`,
+      });
       continue;
     }
     // Intra-batch dedup: a single pasted list can contain the same

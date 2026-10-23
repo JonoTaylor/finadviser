@@ -1,4 +1,5 @@
 import Decimal from 'decimal.js';
+import { knownProfileFields } from './tax-profile-write';
 import { findMatches, isMortgageInterestLine, type Match } from './matching';
 import { decimalEquals, formatGbp } from './money';
 import {
@@ -757,7 +758,7 @@ export function planChanges(plan: Plan, state: DbState): PlanResult {
       }
       const planned = money2(it.value);
       const current = existing?.values[it.field];
-      if (existing && decimalEquals(current, planned)) {
+      if (existing && knownProfileFields(existing).includes(it.field) && decimalEquals(current, planned)) {
         skip(it.id, label, 'unchanged', `already ${formatGbp(planned)}`);
         continue;
       }
@@ -796,6 +797,7 @@ export function planChanges(plan: Plan, state: DbState): PlanResult {
       ownerName: owner!.name,
       taxYear: plan.taxYear,
       existed: existing !== null,
+      expectedRevision: existing?.revision ?? 0,
       set,
       previous: existing ? previous : null,
       notes,

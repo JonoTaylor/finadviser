@@ -441,6 +441,7 @@ describe('planChanges: owner tax profile', () => {
       ...over,
     },
     notes: null as string | null,
+    revision: 1, knownFields: null,
   });
 
   it('creates the row with only the included fields when none exists', () => {
@@ -460,6 +461,20 @@ describe('planChanges: owner tax profile', () => {
     expect(p.set).toEqual({ employmentIncome: '30000.00' });
     expect(p.previous).toEqual({ employmentIncome: '25000.00' });
     expect('dividends' in p.set).toBe(false);
+  });
+
+  it('confirms an included zero instead of skipping an unknown storage default', () => {
+    const state = baseState();
+    state.taxProfile = profile({});
+    const plan = basePlan(json => {
+      const section = json.ownerTaxProfile as Json;
+      section.items[0].value = '0.00';
+    });
+    const first = changesOf(planChanges(plan, state).changes, 'tax_profile')[0];
+    expect(first.set).toEqual({ employmentIncome: '0.00' });
+    expect(first.expectedRevision).toBe(1);
+    state.taxProfile.knownFields = ['employmentIncome'];
+    expect(changesOf(planChanges(plan, state).changes, 'tax_profile')[0].set).toEqual({});
   });
 
   it('does nothing when the profile already matches, notes block included', () => {

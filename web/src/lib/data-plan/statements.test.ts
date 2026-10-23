@@ -93,10 +93,12 @@ describe('applyChange SQL', () => {
     const c = allChanges().find(x => x.type === 'tax_profile')!;
     await applyChange(q, c);
     const text = calls[0].text;
-    expect(text).toContain('ON CONFLICT (owner_id, tax_year) DO UPDATE SET');
-    expect(text).toContain('employment_income = EXCLUDED.employment_income');
+    expect(text).toContain('ON CONFLICT (owner_id, tax_year) DO NOTHING');
+    expect(text).toContain('known_fields, field_sources, revision');
+    expect(c).toHaveProperty('expectedRevision', 0);
+    expect(text).toContain('employment_income');
     expect(text).not.toContain('dividends');
-    expect(text).toContain('updated_at = now()');
+    expect(text).toContain("'source', 'user'");
   });
 
   it('updates a tenancy by id AND property AND start date, only the planned columns', async () => {

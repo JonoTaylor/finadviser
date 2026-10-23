@@ -123,7 +123,7 @@ describe('assembleState', () => {
       { id: 20, name: '2 Sample Street', letting_type: 'rent_a_room' },
     ],
     tenancies: [{ id: '3', property_id: 10, tenant_name: 'Pat', start_date: '2024-09-01', end_date: null, rent_amount: '1000.00', rent_frequency: 'monthly', deposit_amount: null, notes: null }],
-    taxProfile: [{ employment_income: '25000.00', paye_tax_paid: '0.00', self_employment_income: '0.00', savings_interest: '0.00', dividends: '0.00', other_income: '0.00', property_losses_brought_forward: '0.00', finance_costs_brought_forward: '0.00', notes: null }],
+    taxProfile: [{ revision: 1, known_fields: null, employment_income: '25000.00', paye_tax_paid: '0.00', self_employment_income: '0.00', savings_interest: '0.00', dividends: '0.00', other_income: '0.00', property_losses_brought_forward: '0.00', finance_costs_brought_forward: '0.00', notes: null }],
   });
 
   it('maps rows, converting ids to numbers and keeping money as text', () => {

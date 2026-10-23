@@ -1,4 +1,5 @@
 import { emptyProfileValues } from './schema';
+import { knownProfileFields } from './tax-profile-write';
 import type { Change, DbState, LedgerLine, TaxProfileRow, TenancyRow } from './types';
 
 /**
@@ -110,8 +111,12 @@ export function simulateChanges(state: DbState, changes: readonly Change[]): DbS
           taxYear: change.taxYear,
           values: emptyProfileValues(),
           notes: null,
+          revision: 0,
+          knownFields: [],
         };
+        base.knownFields = [...new Set([...knownProfileFields(base), ...Object.keys(change.set)])] as TaxProfileRow['knownFields'];
         Object.assign(base.values, change.set);
+        base.revision += 1;
         if (change.notes !== null) base.notes = change.notes;
         next.taxProfile = base;
         break;

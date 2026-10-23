@@ -233,17 +233,19 @@ describe('write guards', () => {
         ownerId: 1,
         taxYear: '2025-26',
         values: { employmentIncome: '25000.00', payeTaxPaid: '0.00', selfEmploymentIncome: '0.00', savingsInterest: '0.00', dividends: '0.00', otherIncome: '0.00', propertyLossesBroughtForward: '0.00', financeCostsBroughtForward: '0.00' },
-        notes: 'My own note.',
+        notes: 'My own note.', revision: 1, knownFields: null,
       };
       state.taxProfile = row;
       const c = findChange(planChanges(basePlan(), state).changes, 'tax_profile');
       expect(c.existed).toBe(true);
       const s = writeFor(c);
-      expect(s.text).toContain('DO UPDATE SET employment_income = EXCLUDED.employment_income, notes = EXCLUDED.notes, updated_at = now()');
-      expect(s.text).toContain('WHERE owner_tax_profiles.employment_income::text IS NOT DISTINCT FROM $5::text');
-      expect(s.text).toContain('AND owner_tax_profiles.notes IS NOT DISTINCT FROM $6::text');
-      expect(s.text).not.toContain('dividends');
-      expect(s.params.slice(0, 6)).toEqual([1, '2025-26', '30000.00', c.notes, '25000.00', 'My own note.']);
+      expect(s.text).toContain('UPDATE owner_tax_profiles SET employment_income = $3::numeric, notes = $4::text');
+      expect(s.text).toContain('AND revision = $5::integer');
+      expect(s.text).toContain('revision = owner_tax_profiles.revision + 1');
+      expect(s.text).toContain('known_fields =');
+      expect(s.text).toContain('field_sources =');
+      expect(s.text).not.toContain('dividends =');
+      expect(s.params.slice(0, 6)).toEqual([1, '2025-26', '30000.00', c.notes, 1, '["employmentIncome"]']);
     });
   });
 });

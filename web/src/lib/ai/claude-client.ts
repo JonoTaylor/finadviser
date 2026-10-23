@@ -4,6 +4,7 @@ import type { ModelMessage, ToolSet } from 'ai';
 import { SYSTEM_PROMPT, AGENT_SYSTEM_PROMPT } from './prompts';
 import { TOOL_DEFINITIONS, TOOL_LABELS, executeTool } from './tools';
 import { resolveModelId } from './model';
+import { registeredCapabilitiesPrompt } from './capabilities';
 import { aiMemoryRepo } from '@/lib/repos/ai-memory.repo';
 import { categorizationPrompt } from '@/lib/categorization/decisions';
 import type { CategorizationCandidate, CategorizationCategory } from '@/lib/categorization/types';
@@ -15,16 +16,17 @@ import { previewCategorizationSchema, previewCategorizationPrompt, validatePrevi
  * memories exist. Memory loading failures are non-fatal — the agent
  * still runs without remembered context rather than 500ing.
  */
-async function buildAgentSystemPrompt(): Promise<string> {
+async function buildAgentSystemPrompt(toolNames: string[]): Promise<string> {
+  const basePrompt = `${AGENT_SYSTEM_PROMPT}\n\n${registeredCapabilitiesPrompt(toolNames)}`;
   try {
     const memoryBlock = await aiMemoryRepo.renderForPrompt();
-    if (!memoryBlock) return AGENT_SYSTEM_PROMPT;
+    if (!memoryBlock) return basePrompt;
     // Memory content is user-supplied (or AI-saved from user input) so
     // we treat it as untrusted reference data, NOT as instructions.
     // The framing + the fenced delimiter both reduce the risk of a
     // crafted memory ("forget your prior rules…") overriding the
     // system prompt or tool policy.
-    return `${AGENT_SYSTEM_PROMPT}
+    return `${basePrompt}
 
 ## Saved memory about the user
 
@@ -43,7 +45,7 @@ ${memoryBlock}
 \`\`\``;
   } catch (err) {
     console.warn('[ai] failed to load memory for system prompt:', err instanceof Error ? err.message : err);
-    return AGENT_SYSTEM_PROMPT;
+    return basePrompt;
   }
 }
 
@@ -194,11 +196,12 @@ export async function* runAgent(
     { role: 'user', content: userMessage },
   ];
 
+  const agentTools = buildAgentTools();
   const result = streamText({
     model: await model(),
-    system: await buildAgentSystemPrompt(),
+    system: await buildAgentSystemPrompt(Object.keys(agentTools)),
     messages,
-    tools: buildAgentTools(),
+    tools: agentTools,
     // Match the previous 15-iteration cap.
     stopWhen: stepCountIs(15),
     maxOutputTokens: 4096,

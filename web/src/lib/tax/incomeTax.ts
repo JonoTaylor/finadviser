@@ -15,8 +15,10 @@
  * the personal allowance is used up by non-property income first and the
  * stack order is the same either way.
  *
- * Not modelled: Gift Aid and pension relief (so adjusted net income equals
- * total income), the marriage allowance, blind person's allowance, the
+ * Gross relief-at-source pension contributions reduce adjusted net income
+ * and extend both tax-band limits. Net-pay and salary-sacrifice deductions
+ * must already have been removed from the supplied employment income.
+ * Not modelled: Gift Aid, the marriage allowance, blind person's allowance, the
  * High Income Child Benefit Charge, National Insurance, and anything
  * Scottish. Tax is rounded to the penny per band; HMRC's own software
  * truncates some intermediate figures to whole pounds, so a Self Assessment
@@ -63,6 +65,8 @@ export interface IncomeTaxInputs {
   /** Finance costs for this year that S.24 restricts to basic-rate relief. */
   financeCostsThisYear: Decimal.Value;
   financeCostsBroughtForward: Decimal.Value;
+  /** Gross, relievable personal pension contributions paid using relief at source. */
+  reliefAtSourcePensionGross?: Decimal.Value;
 }
 
 export interface TaxRow {
@@ -102,6 +106,8 @@ export interface PersonalAllowanceResult {
 
 export interface IncomeTaxResult {
   totalIncome: Decimal;
+  adjustedNetIncome: Decimal;
+  reliefAtSourcePensionGross: Decimal;
   layerIncome: Record<IncomeLayer, Decimal>;
   layerTaxable: Record<IncomeLayer, Decimal>;
   personalAllowance: PersonalAllowanceResult;
@@ -158,6 +164,14 @@ function pct(value: Decimal): string {
 
 export function computeIncomeTax(inputs: IncomeTaxInputs): IncomeTaxResult {
   const { rates } = inputs;
+  const reliefAtSourcePensionGross = nonNegativeMoney(inputs.reliefAtSourcePensionGross, 'Gross relief-at-source pension contributions');
+  // ITA 2007 s10/s13 and s58: relief at source extends band limits and
+  // reduces ANI; it is not deducted from taxable employment income again.
+  const effectiveRates: TaxRateTable = {
+    ...rates,
+    basicRateLimit: rates.basicRateLimit.plus(reliefAtSourcePensionGross),
+    additionalRateThreshold: rates.additionalRateThreshold.plus(reliefAtSourcePensionGross),
+  };
 
   const layerIncome: Record<IncomeLayer, Decimal> = {
     non_savings: nonNegativeMoney(inputs.nonSavingsIncome, 'Non-savings income'),
@@ -175,6 +189,7 @@ export function computeIncomeTax(inputs: IncomeTaxInputs): IncomeTaxResult {
     .plus(layerIncome.property)
     .plus(layerIncome.savings)
     .plus(layerIncome.dividends);
+  const adjustedNetIncome = Decimal.max(totalIncome.minus(reliefAtSourcePensionGross), 0);
 
   const lines: BreakdownLine[] = [];
   const addLine = (text: string, amount: Decimal | null = null) =>
@@ -188,11 +203,17 @@ export function computeIncomeTax(inputs: IncomeTaxInputs): IncomeTaxResult {
   );
 
   // Personal allowance, tapered by £1 for every £2 of income over £100,000.
-  const pa = personalAllowanceFor(totalIncome, rates);
+  if (reliefAtSourcePensionGross.gt(0)) {
+    addLine(
+      `Gross relief-at-source pension contributions ${formatCurrency(reliefAtSourcePensionGross)} reduce adjusted net income to ${formatCurrency(adjustedNetIncome)} and extend the basic and higher-rate band limits by the same amount.`,
+      adjustedNetIncome,
+    );
+  }
+  const pa = personalAllowanceFor(adjustedNetIncome, rates);
   if (pa.taperReduction.gt(0)) {
     addLine(
       `Personal allowance ${formatCurrency(pa.standard)} reduced by ${formatCurrency(pa.taperReduction)} ` +
-        `(income is ${formatCurrency(totalIncome.minus(rates.personalAllowanceTaperThreshold))} over ` +
+        `(${reliefAtSourcePensionGross.gt(0) ? 'adjusted net income' : 'income'} is ${formatCurrency(adjustedNetIncome.minus(rates.personalAllowanceTaperThreshold))} over ` +
         `${formatCurrency(rates.personalAllowanceTaperThreshold)}, losing £1 for every £2) to ${formatCurrency(pa.effective)}.`,
       pa.effective,
     );
@@ -229,7 +250,7 @@ export function computeIncomeTax(inputs: IncomeTaxInputs): IncomeTaxResult {
   };
   const pushTaxed = (layer: IncomeLayer, income: Decimal, ratePcts: RatePctSet) => {
     if (income.lte(0)) return;
-    for (const part of splitAcrossBands(income, cursor, rates)) {
+    for (const part of splitAcrossBands(income, cursor, effectiveRates)) {
       const ratePct = rateFor(ratePcts, part.band);
       rows.push({
         layer,
@@ -253,9 +274,9 @@ export function computeIncomeTax(inputs: IncomeTaxInputs): IncomeTaxResult {
   const startingUsed = Decimal.min(layerTaxable.savings, startingRoom);
   pushNilRate('savings', 'starting_rate', startingUsed);
 
-  const psaAmount = totalTaxable.lte(rates.basicRateLimit)
+  const psaAmount = totalTaxable.lte(effectiveRates.basicRateLimit)
     ? rates.personalSavingsAllowance.basic
-    : totalTaxable.lte(rates.additionalRateThreshold)
+    : totalTaxable.lte(effectiveRates.additionalRateThreshold)
       ? rates.personalSavingsAllowance.higher
       : rates.personalSavingsAllowance.additional;
   const psaUsed = Decimal.min(layerTaxable.savings.minus(startingUsed), psaAmount);
@@ -339,6 +360,8 @@ export function computeIncomeTax(inputs: IncomeTaxInputs): IncomeTaxResult {
 
   return {
     totalIncome,
+    adjustedNetIncome,
+    reliefAtSourcePensionGross,
     layerIncome,
     layerTaxable,
     personalAllowance: { ...pa, used: allowanceUsed },

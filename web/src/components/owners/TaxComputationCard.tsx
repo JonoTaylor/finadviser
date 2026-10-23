@@ -8,12 +8,10 @@ import {
   AccordionSummary,
   Alert,
   Box,
-  Button,
   Card,
   CardContent,
   Chip,
   Divider,
-  InputAdornment,
   MenuItem,
   Select,
   Skeleton,
@@ -23,37 +21,15 @@ import {
   TableCell,
   TableHead,
   TableRow,
-  TextField,
   Typography,
 } from '@mui/material';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
-import SaveIcon from '@mui/icons-material/Save';
 import { formatCurrency } from '@/lib/utils/formatting';
 import type { OwnerTaxComputationResult, OwnerTaxProfile } from '@/lib/repos/owner-tax.repo';
+import TaxProfileEditor from './TaxProfileEditor';
 
 // The API returns every figure already worked out (and 2dp-formatted) on
 // the server; this card only formats and displays, it never does tax maths.
-
-type FormField =
-  | 'employmentIncome'
-  | 'payeTaxPaid'
-  | 'selfEmploymentIncome'
-  | 'savingsInterest'
-  | 'dividends'
-  | 'otherIncome'
-  | 'propertyLossesBroughtForward'
-  | 'financeCostsBroughtForward';
-
-const FORM_FIELDS: Array<{ name: FormField; label: string; help?: string }> = [
-  { name: 'employmentIncome', label: 'Employment income', help: 'Gross pay for the year' },
-  { name: 'payeTaxPaid', label: 'PAYE tax paid', help: 'Tax already deducted' },
-  { name: 'selfEmploymentIncome', label: 'Self-employment profit' },
-  { name: 'otherIncome', label: 'Other income', help: 'Pensions, etc.' },
-  { name: 'savingsInterest', label: 'Savings interest' },
-  { name: 'dividends', label: 'Dividends', help: 'e.g. from your own company' },
-  { name: 'propertyLossesBroughtForward', label: 'Property losses brought forward' },
-  { name: 'financeCostsBroughtForward', label: 'Finance costs brought forward', help: 'Unrelieved S.24 mortgage interest' },
-];
 
 const LETTING_LABEL = { standard: 'Standard letting', rent_a_room: 'Rent-a-room (in own home)' } as const;
 const TREATMENT_LABEL = {
@@ -104,7 +80,11 @@ function SectionHeading({ children }: { children: React.ReactNode }) {
   return <Typography variant="subtitle2" sx={{ mt: 3, mb: 1 }}>{children}</Typography>;
 }
 
-export default function TaxComputationCard({ ownerId, year }: { ownerId: number | string; year: string }) {
+export default function TaxComputationCard(props: { ownerId: number | string; year: string }) {
+  return <TaxComputationContent key={`${props.ownerId}:${props.year}`} {...props} />;
+}
+
+function TaxComputationContent({ ownerId, year }: { ownerId: number | string; year: string }) {
   const computationKey = `/api/owners/${ownerId}/tax-computation?year=${encodeURIComponent(year)}`;
   const profileKey = `/api/owners/${ownerId}/tax-profile?year=${encodeURIComponent(year)}`;
 
@@ -112,42 +92,9 @@ export default function TaxComputationCard({ ownerId, year }: { ownerId: number 
     computationKey,
     getJson,
   );
-  const { data: profile, mutate: mutateProfile } = useSWR<OwnerTaxProfile>(profileKey, getJson);
+  const { data: profile } = useSWR<OwnerTaxProfile>(profileKey, getJson);
 
-  // Only the fields the user has typed into; everything else shows the
-  // saved value. Avoids copying server data into state with an effect.
-  const [draft, setDraft] = useState<Partial<Record<FormField | 'notes', string>>>({});
-  const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
-  const [savedNote, setSavedNote] = useState(false);
-
-  const dirty = Object.keys(draft).length > 0;
-  const valueOf = (name: FormField | 'notes'): string => {
-    if (draft[name] !== undefined) return draft[name] as string;
-    if (!profile) return '';
-    if (name === 'notes') return profile.notes ?? '';
-    return profile[name];
-  };
-
-  const handleSave = async () => {
-    if (!profile) return;
-    setSaving(true);
-    setFormError(null);
-    setSavedNote(false);
-    try {
-      const payload: Record<string, string> = {};
-      for (const f of FORM_FIELDS) payload[f.name] = valueOf(f.name) || '0';
-      payload.notes = valueOf('notes');
-      await sendJson(profileKey, 'PUT', payload);
-      setDraft({});
-      setSavedNote(true);
-      await Promise.all([mutateProfile(), mutateComputation()]);
-    } catch (e) {
-      setFormError(e instanceof Error ? e.message : 'Failed to save tax profile');
-    } finally {
-      setSaving(false);
-    }
-  };
 
   const handleLettingType = async (propertyId: number, lettingType: string) => {
     setFormError(null);
@@ -165,6 +112,7 @@ export default function TaxComputationCard({ ownerId, year }: { ownerId: number 
         <CardContent>
           <Typography variant="h6" gutterBottom>Tax computation</Typography>
           <Skeleton variant="rounded" height={240} />
+          <TaxProfileEditor ownerId={ownerId} year={year} onSaved={async () => { await mutateComputation(); }} />
         </CardContent>
       </Card>
     );
@@ -175,11 +123,14 @@ export default function TaxComputationCard({ ownerId, year }: { ownerId: number 
         <CardContent>
           <Typography variant="h6" gutterBottom>Tax computation</Typography>
           <Alert severity="error">{error?.message ?? 'Failed to load tax computation'}</Alert>
+          <TaxProfileEditor ownerId={ownerId} year={year} onSaved={async () => { await mutateComputation(); }} />
         </CardContent>
       </Card>
     );
   }
 
+  const payeKnown = Boolean(profile?.knownFields?.includes('payeTaxPaid'));
+  const balanceKnown = payeKnown && typeof data.estimatedBalancePayable === 'string';
   const sa = data.selfAssessment;
   const poa = sa.paymentsOnAccount;
   const fc = data.financeCosts;
@@ -199,6 +150,7 @@ export default function TaxComputationCard({ ownerId, year }: { ownerId: number 
             <Typography variant="caption" color="text.secondary">
               Tax year {data.taxYear} · {data.rates.taxYear} rates, England/Wales/NI
             </Typography>
+            {data.estimateOnly && <Chip size="small" variant="outlined" color="warning" label={data.profileComplete ? "Scenario · estimated inputs" : "Scenario · incomplete profile"} />}
             {data.rates.provisional && <Chip size="small" color="warning" label="Provisional rates" />}
             {data.rates.assumed && <Chip size="small" color="warning" label="Rates assumed" />}
           </Stack>
@@ -207,6 +159,9 @@ export default function TaxComputationCard({ ownerId, year }: { ownerId: number 
         <Alert severity="info" sx={{ mb: 2 }}>
           {data.disclaimer} Figures use {data.owner.name}&apos;s share of each property and the tax profile below.
         </Alert>
+        {data.estimateOnly && <Alert severity="info" sx={{ mb: 2 }}>
+          These amounts illustrate the recorded inputs. They are not a confirmed tax bill. Complete the tax profile and check the property&apos;s full-year rent, expenses and mortgage interest before relying on the estimate.
+        </Alert>}
         {data.warnings.map(w => (
           <Alert key={w} severity="warning" sx={{ mb: 1 }}>{w}</Alert>
         ))}
@@ -218,11 +173,22 @@ export default function TaxComputationCard({ ownerId, year }: { ownerId: number 
           divider={<Divider flexItem orientation="vertical" />}
           sx={{ mt: 2 }}
         >
-          <Figure label="Tax attributable to rental income" value={data.taxOnRentalIncome.amount} bold />
+          <Figure label={data.estimateOnly ? "Illustrative tax on rental income" : "Tax attributable to rental income"} value={data.taxOnRentalIncome.amount} bold />
           <Figure label="Total income tax" value={data.incomeTax.liability} />
-          <Figure label="PAYE already paid" value={sa.payeTaxPaid} />
-          <Figure label={sa.isRefund ? 'Overpaid (repayment)' : `Balance due by ${sa.deadline}`} value={sa.isRefund ? sa.refundDue : sa.amountDue} bold />
+          {balanceKnown ? <>
+            <Figure label="PAYE already paid" value={sa.payeTaxPaid} />
+            <Figure label={sa.isRefund ? 'Overpaid (repayment)' : `Estimated balance by ${sa.deadline}`} value={sa.isRefund ? sa.refundDue : sa.amountDue} bold />
+          </> : <Box>
+            <Typography variant="caption" color="text.secondary">Self Assessment balance</Typography>
+            <Typography fontWeight={600}>{payeKnown ? 'More information needed' : 'PAYE tax paid is unknown'}</Typography>
+            <Typography variant="caption" color="text.secondary">{payeKnown ? 'Complete the tax profile to assess the balance.' : 'Add your PAYE figure to estimate the balance.'}</Typography>
+          </Box>}
         </Stack>
+
+        {data.profileGaps?.length > 0 && <Alert severity="info" sx={{ mt: 2 }}>
+          <Typography variant="body2" fontWeight={600}>Missing from this year&apos;s tax profile</Typography>
+          <Box component="ul" sx={{ my: 0.5, pl: 2.5 }}>{data.profileGaps.map(gap => <li key={gap}>{gap}</li>)}</Box>
+        </Alert>}
 
         {/* ---- Property profit and method ---- */}
         <SectionHeading>Property profit</SectionHeading>
@@ -292,6 +258,7 @@ export default function TaxComputationCard({ ownerId, year }: { ownerId: number 
           Personal allowance {formatCurrency(data.incomeTax.personalAllowance.effective)}
           {data.incomeTax.personalAllowance.tapered && ` (reduced by ${formatCurrency(data.incomeTax.personalAllowance.taperReduction)} for income over £100,000)`}.
           Total income {formatCurrency(data.income.total)}.
+          {data.income.adjustedNetIncome !== undefined && ` Adjusted net income ${formatCurrency(data.income.adjustedNetIncome)}.`}
         </Typography>
         {data.incomeTax.rows.length === 0 ? (
           <Typography variant="body2" color="text.secondary">No taxable income after allowances.</Typography>
@@ -334,6 +301,10 @@ export default function TaxComputationCard({ ownerId, year }: { ownerId: number 
 
         {/* ---- Self Assessment ---- */}
         <SectionHeading>Self Assessment and payments on account</SectionHeading>
+        {!balanceKnown ? <Alert severity="info">
+          {payeKnown ? `Some tax inputs for ${data.taxYear} are missing or estimated.` : `Your PAYE tax paid has not been confirmed for ${data.taxYear}.`} A balance, refund or payments on account cannot be established from these records yet.
+          The Self Assessment deadline for this year is {sa.deadline}.
+        </Alert> : <>
         <Typography variant="body2" sx={{ mb: 1 }}>
           {sa.isRefund
             ? `Income tax is ${formatCurrency(data.incomeTax.liability)} and PAYE paid is ${formatCurrency(sa.payeTaxPaid)}, so a repayment of ${formatCurrency(sa.refundDue)} is likely.`
@@ -357,6 +328,8 @@ export default function TaxComputationCard({ ownerId, year }: { ownerId: number 
             </TableBody>
           </Table>
         )}
+
+        </>}
 
         {/* ---- MTD ---- */}
         <SectionHeading>Making Tax Digital</SectionHeading>
@@ -402,47 +375,8 @@ export default function TaxComputationCard({ ownerId, year }: { ownerId: number 
           </>
         )}
 
-        {/* ---- Tax profile form ---- */}
-        <SectionHeading>Tax profile for {data.taxYear}</SectionHeading>
-        <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-          Things the ledger can&apos;t know. Enter whole-year figures for {data.owner.name}.
-          {!data.profileSaved && ' Nothing has been saved for this year yet.'}
-        </Typography>
-        <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, 1fr)', md: 'repeat(4, 1fr)' }, gap: 2 }}>
-          {FORM_FIELDS.map(f => (
-            <TextField
-              key={f.name}
-              size="small"
-              label={f.label}
-              helperText={f.help}
-              value={valueOf(f.name)}
-              onChange={e => setDraft(d => ({ ...d, [f.name]: e.target.value }))}
-              disabled={!profile}
-              slotProps={{
-                input: { startAdornment: <InputAdornment position="start">£</InputAdornment> },
-                htmlInput: { inputMode: 'decimal' },
-              }}
-            />
-          ))}
-        </Box>
-        <TextField
-          size="small"
-          label="Notes"
-          fullWidth
-          multiline
-          minRows={2}
-          sx={{ mt: 2 }}
-          value={valueOf('notes')}
-          onChange={e => setDraft(d => ({ ...d, notes: e.target.value }))}
-          disabled={!profile}
-        />
         {formError && <Alert severity="error" sx={{ mt: 2 }}>{formError}</Alert>}
-        <Stack direction="row" spacing={2} alignItems="center" sx={{ mt: 2 }}>
-          <Button variant="contained" size="small" startIcon={<SaveIcon />} onClick={handleSave} disabled={!dirty || saving || !profile}>
-            {saving ? 'Saving…' : 'Save and recalculate'}
-          </Button>
-          {savedNote && !dirty && <Typography variant="caption" color="success.main">Saved</Typography>}
-        </Stack>
+        <TaxProfileEditor ownerId={ownerId} year={year} ownerName={data.owner.name} onSaved={async () => { await mutateComputation(); }} />
 
         {/* ---- Working ---- */}
         <Accordion disableGutters variant="outlined" sx={{ mt: 3 }}>
@@ -452,7 +386,7 @@ export default function TaxComputationCard({ ownerId, year }: { ownerId: number 
           <AccordionDetails>
             <Table size="small">
               <TableBody>
-                {data.breakdown.map((line, i) => (
+                {data.breakdown.filter(line => balanceKnown || line.section !== 'Self Assessment').map((line, i) => (
                   <TableRow key={i}>
                     <TableCell sx={{ whiteSpace: 'nowrap', color: 'text.secondary', verticalAlign: 'top' }}>{line.section}</TableCell>
                     <TableCell>{line.text}</TableCell>

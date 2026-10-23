@@ -16,6 +16,7 @@ import {
   type AnyPgColumn,
 } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
+import type { TaxMoneyField, TaxProfileFacts, TaxFieldSource } from '@/lib/tax/profileFacts';
 
 // Custom Postgres BYTEA mapped to Buffer in/out. Drizzle pg-core doesn't
 // ship a binary type and Neon's HTTP driver serialises parameters as
@@ -532,6 +533,10 @@ export const ownerTaxProfiles = pgTable('owner_tax_profiles', {
   propertyLossesBroughtForward: numeric('property_losses_brought_forward', { precision: 14, scale: 2 }).notNull().default('0'),
   financeCostsBroughtForward: numeric('finance_costs_brought_forward', { precision: 14, scale: 2 }).notNull().default('0'),
   notes: text('notes'),
+  facts: jsonb('facts').$type<Partial<TaxProfileFacts>>().notNull().default({}),
+  knownFields: jsonb('known_fields').$type<TaxMoneyField[]>(),
+  fieldSources: jsonb('field_sources').$type<Record<string, TaxFieldSource>>().notNull().default({}),
+  revision: integer('revision').notNull().default(1),
   createdAt: timestamp('created_at').notNull().defaultNow(),
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
 }, (table) => [

@@ -3,20 +3,25 @@ import { createElement } from 'react';
 import { renderToString } from 'react-dom/server';
 import { SWRConfig } from 'swr';
 import TaxComputationCard from './TaxComputationCard';
+import type { OwnerTaxProfile } from '@/lib/repos/owner-tax.repo';
+import { emptyTaxProfileFacts, taxMoneyFields } from '@/lib/tax/profileFacts';
 import { computeOwnerTax, type PropertyLetting } from '@/lib/tax/ownerTaxComputation';
 
-const PROFILE = {
+const PROFILE: OwnerTaxProfile = {
   ownerId: 1, taxYear: '2025-26', employmentIncome: '12570.00', payeTaxPaid: '0.00', selfEmploymentIncome: '0.00',
   savingsInterest: '0.00', dividends: '0.00', otherIncome: '0.00', propertyLossesBroughtForward: '0.00',
   financeCostsBroughtForward: '0.00', notes: null, saved: true, updatedAt: '2026-10-01T10:00:00.000Z',
+  legacyProfile: false, revision: 1, knownFields: [...taxMoneyFields], facts: emptyTaxProfileFacts, fieldSources: {},
 };
 
-function render(properties: PropertyLetting[], taxYear = '2025-26') {
-  const computation = computeOwnerTax({ taxYear, properties, profile: PROFILE });
+function render(properties: PropertyLetting[], taxYear = '2025-26', profileOverrides: Partial<OwnerTaxProfile> = {}, estimateOnly = false) {
+  const profile = { ...PROFILE, ...profileOverrides, taxYear };
+  const computation = computeOwnerTax({ taxYear, properties, profile });
   const payload = {
     ...computation,
     owner: { id: 1, name: 'Emily Pun' },
-    profileSaved: true,
+    profileSaved: profile.saved,
+    profileGaps: [], profileComplete: !estimateOnly, estimateOnly, estimatedBalancePayable: estimateOnly ? null : computation.selfAssessment.amountDue,
     properties: properties.map((p, i) => ({
       propertyId: i + 1, propertyName: p.name, lettingType: p.lettingType, allocationPct: '50.0000',
       rentARoomShared: Boolean(p.rentARoomShared), grossIncome: String(p.grossIncome),
@@ -25,7 +30,7 @@ function render(properties: PropertyLetting[], taxYear = '2025-26') {
   };
   const fallback = {
     [`/api/owners/1/tax-computation?year=${taxYear}`]: payload,
-    [`/api/owners/1/tax-profile?year=${taxYear}`]: { ...PROFILE, taxYear },
+    [`/api/owners/1/tax-profile?year=${taxYear}`]: profile,
   };
   const html = renderToString(
     createElement(SWRConfig, { value: { fallback } }, createElement(TaxComputationCard, { ownerId: 1, year: taxYear })),
@@ -104,4 +109,23 @@ describe('TaxComputationCard', () => {
     expect(html).not.toContain('all lettings pooled');
     expect(html).not.toContain('Method and rent-a-room treatment');
   });
+  it('keeps unknown PAYE distinct from zero and hides payment instructions including the working', () => {
+    const html = render([FRANCIS], '2025-26', { knownFields: ['employmentIncome'] }, true);
+    expect(html).toContain('PAYE tax paid is unknown');
+    expect(html).toContain('not a confirmed tax bill');
+    expect(html).toContain('Scenario · incomplete profile');
+    expect(html).not.toContain('Payment on account 1');
+    expect(html).not.toContain('PAYE already paid £0.00');
+    expect(html).not.toContain('Balance due by');
+  });
+
+  it('shows saved salary and pension facts without assuming a contribution method', () => {
+    const html = render([FRANCIS], '2025-26', { facts: { ...emptyTaxProfileFacts, baseSalary: '95000.00', bonusPercent: 30, bonusIsEstimate: true, employeePensionPercent: 8, employerPensionPercent: 8 } }, true);
+    expect(html).toContain('95000.00');
+    expect(html).toContain('Employer pension contribution');
+    expect(html).toContain('Pension tax treatment');
+    expect(html).toContain('A pension percentage alone does not establish tax relief');
+    expect(html).toContain('Tax profile · 2025-26');
+  });
+
 });

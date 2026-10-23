@@ -23,6 +23,7 @@
  */
 
 import Decimal from 'decimal.js';
+import { ClientError } from '@/lib/errors';
 import { formatCurrency } from '@/lib/utils/formatting';
 import type { BreakdownLine } from './breakdown';
 import {
@@ -65,6 +66,11 @@ export interface OwnerTaxProfileInput {
   otherIncome: Decimal.Value;
   propertyLossesBroughtForward: Decimal.Value;
   financeCostsBroughtForward: Decimal.Value;
+  /** Gross annual employee contribution; employer contributions never go here. */
+  pensionAnnualAmount?: Decimal.Value | null;
+  pensionMethod?: 'salary_sacrifice' | 'net_pay' | 'relief_at_source' | 'unknown';
+  /** Prevents deducting pension twice when P60 taxable pay is entered. */
+  employmentIncomeBasis?: 'gross_before_pension' | 'taxable_pay_after_pension' | 'unknown';
 }
 
 export interface OwnerTaxInputs {
@@ -137,6 +143,15 @@ export interface OwnerTaxComputation {
     savings: string;
     dividends: string;
     total: string;
+    adjustedNetIncome?: string;
+  };
+  pension?: {
+    method: NonNullable<OwnerTaxProfileInput['pensionMethod']>;
+    employmentIncomeBasis: NonNullable<OwnerTaxProfileInput['employmentIncomeBasis']>;
+    annualEmployeeAmount: string | null;
+    employmentDeduction: string;
+    reliefAtSourceGross: string;
+    applied: boolean;
   };
   property: {
     method: PropertyMethod;
@@ -308,7 +323,44 @@ export function computeOwnerTax(inputs: OwnerTaxInputs): OwnerTaxComputation {
   const payeTaxPaid = nonNegativeMoney(profile.payeTaxPaid, 'PAYE tax paid');
   const lossesBroughtForward = nonNegativeMoney(profile.propertyLossesBroughtForward, 'Property losses brought forward');
   const financeBroughtForward = nonNegativeMoney(profile.financeCostsBroughtForward, 'Finance costs brought forward');
-  const nonSavings = employment.plus(selfEmployment).plus(otherIncome);
+  const pensionAmountKnown = profile.pensionAnnualAmount !== undefined && profile.pensionAnnualAmount !== null;
+  const pensionAmount = nonNegativeMoney(profile.pensionAnnualAmount, 'Annual gross employee pension contribution');
+  const pensionMethod = profile.pensionMethod ?? 'unknown';
+  const employmentIncomeBasis = profile.employmentIncomeBasis ?? 'unknown';
+  const pensionSpecified = pensionAmountKnown || profile.pensionMethod !== undefined;
+  const pensionWarnings: string[] = [];
+  let employmentDeduction = new Decimal(0);
+  let reliefAtSourceGross = new Decimal(0);
+  let pensionApplied = false;
+  if (!pensionAmountKnown && pensionMethod !== 'unknown') {
+    pensionWarnings.push('No annual employee pension amount is confirmed, so no additional pension relief has been assumed.');
+  }
+  if (pensionAmountKnown) {
+    if (pensionMethod === 'relief_at_source') {
+      reliefAtSourceGross = pensionAmount;
+      pensionApplied = true;
+    } else if (pensionMethod === 'salary_sacrifice' || pensionMethod === 'net_pay') {
+      if (employmentIncomeBasis === 'gross_before_pension') {
+        if (pensionAmount.gt(employment)) {
+          throw new ClientError('The annual pension deduction cannot exceed gross employment income');
+        }
+        employmentDeduction = pensionAmount;
+        pensionApplied = true;
+      } else if (employmentIncomeBasis === 'taxable_pay_after_pension') {
+        // P60 taxable pay has already received the deduction. Its tax/ANI
+        // effect is in employment income, so no further reduction is made.
+        pensionApplied = true;
+      } else if (pensionAmount.gt(0)) {
+        pensionWarnings.push('Pension relief has not been assumed: confirm whether employment income is gross before pension or taxable pay after pension deductions.');
+      }
+    } else if (pensionAmount.gt(0)) {
+      pensionWarnings.push('Pension relief has not been assumed: confirm salary sacrifice, net pay or relief at source. An employee contribution percentage alone does not establish its tax treatment.');
+    }
+    if (pensionApplied && pensionAmount.gt(0)) {
+      pensionWarnings.push('Pension treatment assumes the recorded gross employee contribution qualifies for relief. Earnings limits, annual allowance, carry-forward and any annual allowance charge are not assessed. Employer matching is not an employee income-tax deduction.');
+    }
+  }
+  const nonSavings = employment.minus(employmentDeduction).plus(selfEmployment).plus(otherIncome);
 
   const runScenario = (method: PropertyMethod, treatment: RentARoomTreatment | null): Scenario => {
     const property = computePropertyIncome({
@@ -326,6 +378,7 @@ export function computeOwnerTax(inputs: OwnerTaxInputs): OwnerTaxComputation {
       dividends,
       financeCostsThisYear: property.financeCostsClaimed,
       financeCostsBroughtForward: financeBroughtForward,
+      reliefAtSourcePensionGross: reliefAtSourceGross,
     });
     return { property, tax };
   };
@@ -427,6 +480,7 @@ export function computeOwnerTax(inputs: OwnerTaxInputs): OwnerTaxComputation {
     dividends,
     financeCostsThisYear: 0,
     financeCostsBroughtForward: 0,
+    reliefAtSourcePensionGross: reliefAtSourceGross,
   });
   const taxOnRental = Decimal.max(chosen.tax.liability.minus(withoutProperty.liability), 0);
 
@@ -474,7 +528,7 @@ export function computeOwnerTax(inputs: OwnerTaxInputs): OwnerTaxComputation {
   });
 
   // ---- Warnings ----
-  const warnings: string[] = [];
+  const warnings: string[] = [...pensionWarnings];
   if (ratesAssumed) {
     warnings.push(`No rate table exists for ${taxYear}; ${rates.taxYear} rates were used instead. Treat the figures as a rough guide.`);
   }
@@ -515,6 +569,11 @@ export function computeOwnerTax(inputs: OwnerTaxInputs): OwnerTaxComputation {
     `Tax year ${taxYear} (6 April ${startYear} to 5 April ${startYear + 1}), ${rates.taxYear} rates for England, Wales and Northern Ireland${ratesAssumed ? ' (assumed)' : ''}${rates.provisional ? ', provisional' : ''}.`,
   );
   add('Inputs', `Employment income ${formatCurrency(employment)}, self-employment ${formatCurrency(selfEmployment)}, other income ${formatCurrency(otherIncome)}.`, nonSavings);
+  if (employmentDeduction.gt(0)) {
+    add('Pension', `Employee ${pensionMethod === 'salary_sacrifice' ? 'salary sacrifice' : 'net-pay pension deduction'} ${formatCurrency(employmentDeduction)} has been removed from gross employment income once; employment income used is ${formatCurrency(employment.minus(employmentDeduction))}.`, employmentDeduction);
+  } else if (pensionApplied && employmentIncomeBasis === 'taxable_pay_after_pension' && pensionMethod !== 'relief_at_source') {
+    add('Pension', 'Employment income is already taxable pay after pension deductions; no second pension deduction is made.');
+  }
   add('Inputs', `Savings interest ${formatCurrency(savings)}, dividends ${formatCurrency(dividends)}.`);
   add('Inputs', `Tax already paid through PAYE ${formatCurrency(payeTaxPaid)}.`, payeTaxPaid);
   for (const p of inputs.properties) {
@@ -571,7 +630,18 @@ export function computeOwnerTax(inputs: OwnerTaxInputs): OwnerTaxComputation {
       savings: fixed2(savings),
       dividends: fixed2(dividends),
       total: fixed2(chosen.tax.totalIncome),
+      adjustedNetIncome: fixed2(chosen.tax.adjustedNetIncome),
     },
+    ...(pensionSpecified ? {
+      pension: {
+        method: pensionMethod,
+        employmentIncomeBasis,
+        annualEmployeeAmount: pensionAmountKnown ? fixed2(pensionAmount) : null,
+        employmentDeduction: fixed2(employmentDeduction),
+        reliefAtSourceGross: fixed2(reliefAtSourceGross),
+        applied: pensionApplied,
+      },
+    } : {}),
     property: {
       method,
       methodReason,

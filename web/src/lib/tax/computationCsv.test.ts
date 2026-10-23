@@ -70,3 +70,61 @@ describe('taxComputationCsv', () => {
     expect(last[1]).toContain('not tax advice');
   });
 });
+
+describe('taxComputationCsv: persisted profile readiness', () => {
+  function exportRows(overrides: {
+    profileGaps?: string[]; estimateOnly?: boolean; profileComplete?: boolean;
+    payeTaxPaidKnown?: boolean; estimatedBalancePayable?: string | null;
+  }) {
+    return Papa.parse<string[]>(taxComputationCsv({ ...emily(), ...overrides }), { skipEmptyLines: true }).data;
+  }
+
+  it('exports missing PAYE and settlement amounts as unknown, including detailed working', () => {
+    const rows = exportRows({
+      profileGaps: ['PAYE tax paid has not been confirmed (including whether it is zero).'],
+      estimateOnly: true, profileComplete: false, payeTaxPaidKnown: false, estimatedBalancePayable: null,
+    });
+    const summary = new Map(rows.filter(r => r[0] === 'Summary').map(r => [r[1], r[2]]));
+    expect(summary.get('Calculation status')).toContain('incomplete tax profile');
+    expect(summary.get('Tax already paid through PAYE — unknown')).toBe('');
+    expect(summary.get('Self Assessment balance — unknown: incomplete or estimated profile')).toBe('');
+    expect(summary.get('Payments on account — unknown: incomplete or estimated profile')).toBe('');
+    expect(summary.has('Balance due through Self Assessment by 2027-01-31')).toBe(false);
+    expect(rows.some(r => r[1].startsWith('Payment on account 1'))).toBe(false);
+    expect(rows.some(r => r[0].startsWith('Self Assessment'))).toBe(false);
+    expect(rows.some(r => r[1].startsWith('Tax already paid through PAYE £0.00'))).toBe(false);
+    expect(rows).toContainEqual(['Profile gaps', 'PAYE tax paid has not been confirmed (including whether it is zero).', '']);
+    expect(summary.get('Tax attributable to rental income (scenario)')).toBe('1160.00');
+    expect(rows.some(r => r[0] === 'Income tax (scenario)')).toBe(true);
+  });
+
+  it('preserves explicit zero PAYE while withholding settlement when other profile inputs are unknown', () => {
+    const rows = exportRows({
+      profileGaps: ['Savings interest has not been confirmed.'],
+      estimateOnly: true, profileComplete: false, payeTaxPaidKnown: true, estimatedBalancePayable: null,
+    });
+    expect(rows).toContainEqual(['Summary', 'Tax already paid through PAYE', '0.00']);
+    expect(rows.some(r => r[1].startsWith('Balance due through Self Assessment'))).toBe(false);
+    expect(rows.some(r => r[1].startsWith('Payment on account 1'))).toBe(false);
+  });
+
+  it('labels an estimated complete profile as a scenario rather than a confirmed payment', () => {
+    const rows = exportRows({
+      profileGaps: [], estimateOnly: true, profileComplete: true,
+      payeTaxPaidKnown: true, estimatedBalancePayable: null,
+    });
+    expect(rows.find(r => r[1] === 'Calculation status')?.[2]).toContain('estimated or unconfirmed inputs');
+    expect(rows.some(r => r[1].startsWith('Balance due through Self Assessment'))).toBe(false);
+    expect(rows).toContainEqual(['Summary', 'Income tax liability (scenario)', '1160.00']);
+  });
+
+  it('retains settlement figures for a complete profile with confirmed inputs', () => {
+    const rows = exportRows({
+      profileGaps: [], estimateOnly: false, profileComplete: true,
+      payeTaxPaidKnown: true, estimatedBalancePayable: '1160.00',
+    });
+    expect(rows).toContainEqual(['Summary', 'Balance due through Self Assessment by 2027-01-31', '1160.00']);
+    expect(rows).toContainEqual(['Summary', 'Payment on account 1 due 2027-01-31', '580.00']);
+    expect(rows.some(r => r[0] === 'Self Assessment')).toBe(true);
+  });
+});

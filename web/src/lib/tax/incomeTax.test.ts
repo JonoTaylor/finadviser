@@ -274,3 +274,37 @@ describe('computeIncomeTax: breakdown lines', () => {
     expect(last.amount).toBe('1886.00');
   });
 });
+
+describe('computeIncomeTax: gross relief-at-source pension contributions', () => {
+  it('restores the personal allowance from adjusted net income while keeping gross pay in income', () => {
+    const r = calc({ nonSavingsIncome: 123500, reliefAtSourcePensionGross: 7600 });
+    expect(fx(r.totalIncome)).toBe('123500.00');
+    expect(fx(r.adjustedNetIncome)).toBe('115900.00');
+    expect(fx(r.personalAllowance.effective)).toBe('4620.00');
+    // Basic band is extended from £37,700 to £45,300; the contribution
+    // also received £1,520 basic-rate relief inside the pension scheme.
+    expect(fx(r.liability)).toBe('38492.00');
+    expect(r.rows.map(row => [row.kind, fx(row.income)])).toEqual([
+      ['basic', '45300.00'], ['higher', '73580.00'],
+    ]);
+  });
+
+  it('extends the additional-rate threshold as well as the basic-rate limit', () => {
+    const r = calc({ nonSavingsIncome: 150000, reliefAtSourcePensionGross: 30000 });
+    expect(fx(r.adjustedNetIncome)).toBe('120000.00');
+    expect(fx(r.personalAllowance.effective)).toBe('2570.00');
+    expect(r.rows.some(row => row.kind === 'additional')).toBe(false);
+    expect(fx(r.liability)).toBe('45432.00');
+  });
+
+  it('uses the extended bands when deciding the personal savings allowance', () => {
+    const r = calc({ nonSavingsIncome: 60000, savingsInterest: 500, reliefAtSourcePensionGross: 11000 });
+    expect(r.rows.find(row => row.kind === 'personal_savings_allowance')?.income.toFixed(2)).toBe('500.00');
+    expect(r.rows.some(row => row.layer === 'savings' && row.tax.gt(0))).toBe(false);
+  });
+
+  it('rejects invalid relief-at-source amounts', () => {
+    expect(() => calc({ reliefAtSourcePensionGross: -1 })).toThrow(ClientError);
+    expect(() => calc({ reliefAtSourcePensionGross: 'not money' })).toThrow(ClientError);
+  });
+});

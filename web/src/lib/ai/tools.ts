@@ -8,7 +8,11 @@ import { recordMortgagePayments } from '@/lib/properties/mortgage-tracker';
 import { parseMortgagePayments } from '@/lib/properties/mortgage-payment-parser';
 import { formatCurrency } from '@/lib/utils/formatting';
 import { londonTodayIso } from '@/lib/dates/today';
-import { currentTaxYear } from '@/lib/tax/ukTaxYear';
+import { parseTaxYearLabel } from '@/lib/tax/ukTaxYear';
+import { ownerTaxProfilePatchSchema, TaxProfileConflictError } from '@/lib/tax/profileFacts';
+import { FINANCIAL_CONTEXT_KEY, contextSchema, loadFinancialContext } from '@/lib/finance-context';
+import { WorkspaceConflictError, writeWorkspace } from '@/lib/finance-workspace/store';
+import { AI_MEMORY_MAX_CONTENT_LENGTH } from './memory-constants';
 import { loadPlanningInput } from '@/lib/planning/load';
 import { buildFinancialPlan } from '@/lib/planning/engine';
 import type { FinancialPlan } from '@/lib/planning/types';
@@ -58,6 +62,35 @@ const updateSavingsProgressInputSchema = z.object({
   current_amount: budgetBodySchema.shape.monthlyLimit,
 }).strict();
 const financeWorkspaceInputSchema = z.object({}).strict();
+const explicitTaxYearSchema = z.string().trim().refine(value => {
+  try { parseTaxYearLabel(value); return true; } catch { return false; }
+}, 'Supply a valid, explicitly confirmed UK tax year such as 2026-27.');
+const ownerTaxProfileReadInputSchema = z.object({
+  owner_id: z.number().int().positive(),
+  tax_year: explicitTaxYearSchema,
+}).strict();
+const ownerTaxComputationInputSchema = z.object({
+  owner_id: z.number().int().positive().optional(),
+  owner_name: z.string().trim().min(1).max(200).optional(),
+  tax_year: explicitTaxYearSchema,
+}).strict();
+// The model cannot label its own write as a direct user edit. Validate the
+// patch again with the complete shared schema before the repository write.
+const aiTaxProfilePatchSchema = z.object(ownerTaxProfilePatchSchema.shape).omit({ source: true }).strict();
+const ownerTaxProfileUpdateInputSchema = ownerTaxProfileReadInputSchema.extend({
+  patch: aiTaxProfilePatchSchema,
+});
+const saveFinancialIdentityInputSchema = z.object({
+  owner_id: z.number().int().positive(),
+  owner_name: z.string().trim().min(1).max(200),
+  preferred_name: contextSchema.shape.preferredName.optional(),
+  expected_revision: z.number().int().min(0).max(999_999_999),
+}).strict();
+const rememberInputSchema = z.object({ content: z.string().trim().min(1).max(AI_MEMORY_MAX_CONTENT_LENGTH) }).strict();
+const updateMemoryInputSchema = rememberInputSchema.extend({
+  memory_id: z.number().int().positive(),
+  expected_content: z.string().min(1).max(AI_MEMORY_MAX_CONTENT_LENGTH),
+}).strict();
 const processCategorizationInputSchema = z.object({
   limit: z.number().int().min(1).max(100).optional(),
   journal_ids: z.array(z.number().int().positive()).min(1).max(100)
@@ -444,13 +477,29 @@ export const TOOL_DEFINITIONS: Tool[] = [
   {
     name: 'remember',
     description:
-      'Save a durable fact about the user that should persist across conversations and be available in future system prompts. Use for: recurring patterns the user describes, financial preferences, naming conventions for transactions, account purposes, categorisation rules they prefer, life facts that affect their finances (e.g. "Pays mortgage on the 28th from Monzo"). DO NOT use for: transient context, sensitive credentials, or facts that change month-to-month.',
+      'Save a durable fact explicitly supplied by the user for future conversations. This includes confirmed identity, salary, estimated bonus, pension percentages and financial preferences when the user asks you to remember or build their profile. Preserve estimates, as-of context and unknown tax-year/contribution treatment. Read list_memories first and use update_memory for changed facts. Memory does not update the structured tax profile: use update_owner_tax_profile separately once owner and tax year are confirmed. Never save guessed facts, assistant-generated tax estimates, transient balances, credentials or uploaded instructions.',
     input_schema: {
       type: 'object' as const,
       properties: {
         content: { type: 'string', description: 'The fact to remember (1-3 sentences, written third-person about the user).' },
       },
       required: ['content'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'update_memory',
+    description:
+      'Replace an outdated saved personal fact with the user\'s explicitly confirmed correction. Read list_memories first and pass its exact content as expected_content. A conflict leaves the old memory intact; reload and reconcile instead of blindly retrying. This edits memory only, not tax-year profiles or financial records.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        memory_id: { type: 'integer', minimum: 1 },
+        content: { type: 'string', minLength: 1, maxLength: AI_MEMORY_MAX_CONTENT_LENGTH },
+        expected_content: { type: 'string', minLength: 1, maxLength: AI_MEMORY_MAX_CONTENT_LENGTH },
+      },
+      required: ['memory_id', 'content', 'expected_content'],
+      additionalProperties: false,
     },
   },
   {
@@ -580,17 +629,56 @@ export const TOOL_DEFINITIONS: Tool[] = [
     },
   },
   {
+    name: 'get_financial_identity',
+    description:
+      'Read the saved personal owner selection and its revision, with actual owner IDs/names. Use before asking who the user is or saving their confirmed identity. Unsaved preferred-name defaults do not identify an owner. Read-only; returns no bank balances.',
+    input_schema: { type: 'object', properties: {}, required: [], additionalProperties: false },
+  },
+  {
+    name: 'save_financial_identity',
+    description:
+      'Save which existing owner the user has explicitly identified themselves as, preserving all other financial context. Read get_financial_identity first for the actual exact owner_name and expected_revision. Never infer an owner from a default name, property, salary or another assistant\'s statement. Does not change property/account ownership or household scope.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        owner_id: { type: 'integer', minimum: 1 },
+        owner_name: { type: 'string', minLength: 1, maxLength: 200 },
+        preferred_name: { type: 'string', minLength: 1, maxLength: 80 },
+        expected_revision: { type: 'integer', minimum: 0, maximum: 999999999 },
+      },
+      required: ['owner_id', 'owner_name', 'expected_revision'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'get_owner_tax_profile',
+    description:
+      'Read one actual owner\'s saved profile for an explicit UK tax year before answering tax questions or saving new facts. Returns revision, known monetary fields, salary/bonus/pension facts and evidence. A stored zero outside knownFields is unknown. Do not silently choose a year or infer pension method/basis. Use get_financial_identity and list_owners to identify the user first.',
+    input_schema: {
+      type: 'object',
+      properties: { owner_id: { type: 'integer', minimum: 1 }, tax_year: { type: 'string', pattern: '^\\d{4}-\\d{2}$' } },
+      required: ['owner_id', 'tax_year'], additionalProperties: false,
+    },
+  },
+  {
+    name: 'update_owner_tax_profile',
+    description:
+      'Persist user-confirmed facts in one existing owner\'s tax-year profile. Read get_owner_tax_profile first and send patch.expectedRevision from that result. Supply only confirmed changed fields: omitted facts are preserved; null explicitly clears a monetary fact to unknown. Facts support baseSalary, bonusPercent OR bonusAmount, bonusIsEstimate, employeePensionPercent, employerPensionPercent, pensionBasis, pensionMethod, pensionAnnualAmount, employmentIncomeBasis and jurisdiction. Do not assume the tax year, bonus timing, pension tax method or percentage basis; never invent PAYE paid as zero or deduct employer matching. Memory is separate. Recompute the SAME owner/year after success; disclose gaps and estimates.',
+    input_schema: z.toJSONSchema(ownerTaxProfileUpdateInputSchema, { io: 'input' }) as Tool['input_schema'],
+  },
+  {
     name: 'get_owner_tax_computation',
     description:
-      'Estimate one owner\'s UK income tax for a tax year with their rental income worked through in full: property profit at their ownership share (actual expenses vs the £1,000 property allowance, whichever is cheaper), rent-a-room relief for properties let in the owner\'s own home (all of an owner\'s rent-a-room lettings share ONE limit; the exempt, alternative or normal method is chosen by the lowest final tax), the Section 24 mortgage-interest tax reducer, tax by band, the Self Assessment balance after PAYE, payments on account, "tax attributable to rental income", and Making Tax Digital status. Uses the owner\'s saved tax profile (salary, PAYE paid, dividends, losses brought forward) for that year. Use for "how much tax will Emily pay on her rental income for 2025-26?". It is an estimate: always say it is not tax advice and should be checked with an accountant, and mention any warnings it returns (for example a missing tax profile or provisional rates). Identify the owner by owner_name (case-insensitive, unambiguous fragment) or owner_id.',
+      'Estimate one owner\'s income tax using England/Wales/Northern Ireland rules for an explicitly confirmed tax year. Includes owner-share property profit, expenses versus the property allowance, pooled rent-a-room relief, Section 24 finance-cost relief, personal-allowance taper, Self Assessment and payments-on-account scenarios. taxOnRentalIncome is incremental total tax with versus without property; never replace it with profit times a headline rate. Read get_owner_tax_profile first and save user-confirmed facts with update_owner_tax_profile. estimateOnly/profileGaps identify incomplete assumptions and suppress the balance-payable estimate when the profile is incomplete. Recorded property data may also be incomplete. Scottish rules are unsupported. Always mention returned warnings and that this is not tax advice. Identify owner by owner_id or unambiguous owner_name. Never silently change tax years.',
     input_schema: {
       type: 'object' as const,
       properties: {
         owner_name: { type: 'string', description: 'Owner name or an unambiguous fragment (e.g. "Emily"). Use list_owners if unsure.' },
         owner_id: { type: 'number', description: 'Owner id. Alternative to owner_name.' },
-        tax_year: { type: 'string', description: 'UK tax year label such as "2025-26" (6 April to 5 April). Defaults to the current tax year.' },
+        tax_year: { type: 'string', description: 'Explicitly intended UK tax year label such as "2025-26" (6 April to 5 April). Ask when missing or contradictory; no default year is selected.' },
       },
-      required: [],
+      required: ['tax_year'],
+      additionalProperties: false,
     },
   },
   {
@@ -727,6 +815,10 @@ export const TOOL_LABELS: Record<string, string> = {
   update_investment_balance: 'Updating investment balance',
   tag_account_owner: 'Tagging account owner',
   list_owners: 'Listing owners',
+  get_financial_identity: 'Reading your saved identity',
+  save_financial_identity: 'Saving your identity',
+  get_owner_tax_profile: 'Reading your tax profile',
+  update_owner_tax_profile: 'Saving your tax profile',
   get_owner_tax_computation: 'Computing owner tax',
   list_property_expense_categories: 'Loading property-expense categories',
   tag_property_expense: 'Tagging property expense',
@@ -764,6 +856,7 @@ export const TOOL_LABELS: Record<string, string> = {
   get_data_intelligence: 'Checking data coverage and missing information',
   get_financial_health_check: 'Running financial health check',
   remember: 'Saving to memory',
+  update_memory: 'Updating memory',
   list_memories: 'Reading memory',
   forget: 'Removing from memory',
 };
@@ -841,6 +934,8 @@ export async function executeTool(
       return executeGetFinancialHealthCheck();
     case 'remember':
       return executeRemember(input);
+    case 'update_memory':
+      return executeUpdateMemory(input);
     case 'list_memories':
       return executeListMemories();
     case 'forget':
@@ -855,6 +950,14 @@ export async function executeTool(
       return executeTagAccountOwner(input);
     case 'list_owners':
       return executeListOwners();
+    case 'get_financial_identity':
+      return executeGetFinancialIdentity(input);
+    case 'save_financial_identity':
+      return executeSaveFinancialIdentity(input);
+    case 'get_owner_tax_profile':
+      return executeGetOwnerTaxProfile(input);
+    case 'update_owner_tax_profile':
+      return executeUpdateOwnerTaxProfile(input);
     case 'get_owner_tax_computation':
       return executeGetOwnerTaxComputation(input);
     case 'list_property_expense_categories':
@@ -1069,15 +1172,28 @@ async function executeBulkAddMortgagePayments(input: Record<string, unknown>) {
 // -------------------------------------------------------------------
 
 async function executeRemember(input: Record<string, unknown>) {
-  const content = input.content;
-  if (typeof content !== 'string') {
-    return { error: 'content must be a string' };
-  }
+  const parsed = rememberInputSchema.safeParse(input);
+  if (!parsed.success) return { error: 'Supply only a non-empty content string within the memory length limit.' };
+  const { content } = parsed.data;
   try {
+    const existing = (await aiMemoryRepo.list()).find(memory => memory.content.trim().toLowerCase() === content.toLowerCase());
+    if (existing) return { id: existing.id, content: existing.content, source: existing.source, alreadySaved: true };
     const memory = await aiMemoryRepo.add(content, 'ai');
     return { id: memory.id, content: memory.content, source: memory.source };
-  } catch (e) {
-    return { error: e instanceof Error ? e.message : 'Failed to save memory' };
+  } catch {
+    return { error: 'Memory could not be saved. No successful save has been confirmed.', status: 'unavailable' };
+  }
+}
+
+async function executeUpdateMemory(input: Record<string, unknown>) {
+  const parsed = updateMemoryInputSchema.safeParse(input);
+  if (!parsed.success) return { error: 'Supply a valid memory_id, content and the exact expected_content from list_memories.' };
+  try {
+    const memory = await aiMemoryRepo.update(parsed.data.memory_id, parsed.data.content, parsed.data.expected_content, 'ai');
+    if (!memory) return { status: 'conflict', error: 'This memory changed or was deleted. Read list_memories and reconcile the current fact; no update was saved.' };
+    return { id: memory.id, content: memory.content, source: memory.source, updated: true };
+  } catch {
+    return { status: 'unavailable', error: 'Memory could not be updated. No successful save has been confirmed.' };
   }
 }
 
@@ -1793,10 +1909,87 @@ async function executeListOwners() {
   return owners.map(o => ({ id: o.id, name: o.name }));
 }
 
+async function executeGetFinancialIdentity(input: Record<string, unknown>) {
+  if (!financeWorkspaceInputSchema.safeParse(input).success) return { error: 'This identity lookup accepts no input fields.' };
+  try {
+    const [context, owners] = await Promise.all([loadFinancialContext(), propertyRepo.listOwners()]);
+    return {
+      revision: context.revision,
+      saved: context.revision > 0,
+      preferredName: context.revision > 0 ? context.data.preferredName : null,
+      selectedOwner: context.revision > 0 && owners.some(owner => owner.id === context.data.ownerId)
+        ? { id: context.data.ownerId, name: owners.find(owner => owner.id === context.data.ownerId)!.name } : null,
+      owners: owners.map(owner => ({ id: owner.id, name: owner.name })),
+      basis: 'Only a saved explicit owner selection identifies the user. Preferred names and unsaved defaults do not establish ownership or change household scope.',
+    };
+  } catch {
+    return { status: 'unavailable', error: 'Saved identity could not be read. Do not infer an owner from defaults or names.' };
+  }
+}
+
+async function executeSaveFinancialIdentity(input: Record<string, unknown>) {
+  const parsed = saveFinancialIdentityInputSchema.safeParse(input);
+  if (!parsed.success) return { error: 'Supply the actual owner_id, exact owner_name and expected_revision from get_financial_identity.' };
+  try {
+    const [context, owners] = await Promise.all([loadFinancialContext(), propertyRepo.listOwners()]);
+    if (context.revision !== parsed.data.expected_revision) throw new WorkspaceConflictError();
+    const owner = owners.find(owner => owner.id === parsed.data.owner_id);
+    if (!owner || owner.name.toLowerCase() !== parsed.data.owner_name.toLowerCase()) {
+      return { status: 'rejected', error: 'The supplied owner ID and exact name do not match an existing owner. Read get_financial_identity again.' };
+    }
+    const saved = await writeWorkspace(FINANCIAL_CONTEXT_KEY, contextSchema, {
+      ...context.data, ownerId: owner.id,
+      ...(parsed.data.preferred_name === undefined ? {} : { preferredName: parsed.data.preferred_name }),
+    }, parsed.data.expected_revision);
+    return { saved: true, revision: saved.revision, selectedOwner: { id: owner.id, name: owner.name }, preferredName: saved.data.preferredName };
+  } catch (error) {
+    if (error instanceof WorkspaceConflictError) return { status: 'conflict', error: 'Your personal context changed. Read get_financial_identity again and reconcile before saving; no identity change was saved.' };
+    return { status: 'unavailable', error: 'Your identity could not be saved. No successful save has been confirmed.' };
+  }
+}
+
+async function executeGetOwnerTaxProfile(input: Record<string, unknown>) {
+  const parsed = ownerTaxProfileReadInputSchema.safeParse(input);
+  if (!parsed.success) return { error: 'Supply a positive owner_id and an explicit valid tax_year (YYYY-YY). No year has been assumed.' };
+  try {
+    const owner = await propertyRepo.getOwner(parsed.data.owner_id);
+    if (!owner) return { status: 'rejected', error: 'The requested owner does not exist. Read list_owners.' };
+    const profile = await ownerTaxRepo.getProfile(owner.id, parsed.data.tax_year);
+    return { owner: { id: owner.id, name: owner.name }, profile,
+      profileHref: `/owners/${owner.id}/tax-year/${profile.taxYear}`,
+      basis: 'knownFields distinguishes explicit monetary values from unknown stored defaults. Facts belong to this owner and tax year only; memory is separate.' };
+  } catch {
+    return { status: 'unavailable', error: 'The tax profile could not be read. No values or defaults have been assumed.' };
+  }
+}
+
+async function executeUpdateOwnerTaxProfile(input: Record<string, unknown>) {
+  const parsed = ownerTaxProfileUpdateInputSchema.safeParse(input);
+  if (!parsed.success) return { error: 'Supply an actual owner_id, explicit tax_year and a valid partial patch with expectedRevision. No tax facts have been saved.' };
+  const patch = ownerTaxProfilePatchSchema.safeParse({ ...parsed.data.patch, source: 'ai' });
+  if (!patch.success) return { error: 'The tax profile patch is empty, inconsistent or invalid. Save either a bonus percentage or amount, and preserve unknown fields.' };
+  try {
+    const owner = await propertyRepo.getOwner(parsed.data.owner_id);
+    if (!owner) return { status: 'rejected', error: 'The requested owner does not exist. No tax facts have been saved.' };
+    const profile = await ownerTaxRepo.patchProfile(owner.id, parsed.data.tax_year, patch.data);
+    return {
+      saved: true,
+      owner: { id: owner.id, name: owner.name },
+      profile,
+      profileHref: `/owners/${owner.id}/tax-year/${profile.taxYear}`,
+      nextStep: 'Recompute this same owner and tax year with get_owner_tax_computation. Saved facts can remain incomplete or estimated; do not claim a verified tax bill.',
+    };
+  } catch (error) {
+    if (error instanceof TaxProfileConflictError) return { status: 'conflict', error: 'This tax profile changed. Read get_owner_tax_profile again and reconcile before saving; no tax changes were saved.' };
+    return { status: 'unavailable', error: 'The tax profile could not be saved. No successful save has been confirmed.' };
+  }
+}
+
 async function executeGetOwnerTaxComputation(input: Record<string, unknown>) {
-  const ownerIdInput = input.owner_id;
-  const ownerNameInput = input.owner_name;
-  const taxYearInput = input.tax_year;
+  const parsed = ownerTaxComputationInputSchema.safeParse(input);
+  if (!parsed.success) return { error: 'Supply an explicit valid tax_year (YYYY-YY) and a valid owner_id or owner_name. No tax year has been assumed.' };
+  const ownerIdInput = parsed.data.owner_id;
+  const ownerNameInput = parsed.data.owner_name;
 
   const owners = await propertyRepo.listOwners();
   let owner: typeof owners[number] | undefined;
@@ -1804,6 +1997,9 @@ async function executeGetOwnerTaxComputation(input: Record<string, unknown>) {
     owner = owners.find(o => o.id === ownerIdInput);
     if (!owner) {
       return { error: `Owner ${ownerIdInput} not found. Available: ${owners.map(o => `${o.name} (id ${o.id})`).join(', ') || '(none)'}` };
+    }
+    if (ownerNameInput !== undefined && owner.name.toLowerCase() !== ownerNameInput.toLowerCase()) {
+      return { error: 'The supplied owner_id and owner_name do not identify the same exact owner. Read list_owners.' };
     }
   } else if (typeof ownerNameInput === 'string' && ownerNameInput.trim()) {
     // Exact (case-insensitive) match wins; otherwise a fragment must hit
@@ -1823,9 +2019,7 @@ async function executeGetOwnerTaxComputation(input: Record<string, unknown>) {
     return { error: 'Pass owner_name or owner_id.' };
   }
 
-  const year = typeof taxYearInput === 'string' && taxYearInput.trim()
-    ? taxYearInput.trim()
-    : currentTaxYear().label;
+  const year = parsed.data.tax_year;
 
   try {
     const c = await ownerTaxRepo.getTaxComputation({ ownerId: owner.id, year });
@@ -1838,6 +2032,10 @@ async function executeGetOwnerTaxComputation(input: Record<string, unknown>) {
       ratesAssumed: c.rates.assumed,
       ratesProvisional: c.rates.provisional,
       taxProfileSaved: c.profileSaved,
+      profileGaps: c.profileGaps,
+      estimateOnly: c.estimateOnly,
+      profileComplete: c.profileComplete,
+      estimatedBalancePayable: c.estimatedBalancePayable == null ? null : formatCurrency(c.estimatedBalancePayable),
       properties: c.properties.map(p => ({
         name: p.propertyName,
         lettingType: p.lettingType,
@@ -1884,23 +2082,32 @@ async function executeGetOwnerTaxComputation(input: Record<string, unknown>) {
       },
       incomeTax: {
         totalIncome: formatCurrency(c.income.total),
+        adjustedNetIncome: c.income.adjustedNetIncome == null ? null : formatCurrency(c.income.adjustedNetIncome),
         personalAllowance: formatCurrency(c.incomeTax.personalAllowance.effective),
         taxBeforeReductions: formatCurrency(c.incomeTax.taxBeforeReductions),
         liability: formatCurrency(c.incomeTax.liability),
       },
       taxOnRentalIncome: formatCurrency(c.taxOnRentalIncome.amount),
+      taxOnRentalIncomeBasis: 'Incremental total income tax with property income less the same income-tax calculation without property, including personal-allowance taper and the applicable finance-cost reducer. This remains a scenario when profileGaps or estimates are present.',
+      pensionTreatment: c.pension ?? null,
       selfAssessment: {
-        payeAlreadyPaid: formatCurrency(sa.payeTaxPaid),
-        balanceDue: formatCurrency(sa.balanceDue),
-        isRefund: sa.isRefund,
+        payeAlreadyPaid: c.estimateOnly ? null : formatCurrency(sa.payeTaxPaid),
+        balanceDue: c.estimateOnly ? null : formatCurrency(sa.balanceDue),
+        isRefund: c.estimateOnly ? null : sa.isRefund,
+        scenarioBalanceAfterAssumedPaye: c.payeTaxPaidKnown ? formatCurrency(sa.balanceDue) : null,
+        scenarioPayeUsed: c.payeTaxPaidKnown ? formatCurrency(sa.payeTaxPaid) : null,
+        basis: c.estimateOnly ? 'Incomplete or estimated scenario only. A reliable balance still owed has not been established.' : 'Income-tax estimate after the saved PAYE amount; other Self Assessment charges and adjustments may apply.',
         deadline: sa.deadline,
-        paymentsOnAccountRequired: sa.paymentsOnAccount.required,
-        paymentsOnAccountReason: sa.paymentsOnAccount.reason,
-        paymentsOnAccount: sa.paymentsOnAccount.instalments.map(i => ({ dueDate: i.dueDate, amount: formatCurrency(i.amount) })),
-        dueOnDeadline: formatCurrency(sa.paymentsOnAccount.dueOnDeadline),
+        paymentsOnAccountRequired: c.estimateOnly ? null : sa.paymentsOnAccount.required,
+        paymentsOnAccountReason: c.estimateOnly ? null : sa.paymentsOnAccount.reason,
+        paymentsOnAccount: c.estimateOnly ? null : sa.paymentsOnAccount.instalments.map(i => ({ dueDate: i.dueDate, amount: formatCurrency(i.amount) })),
+        dueOnDeadline: c.estimateOnly ? null : formatCurrency(sa.paymentsOnAccount.dueOnDeadline),
       },
       makingTaxDigital: c.mtd.summary,
-      breakdown: c.breakdown.map(l => `[${l.section}] ${l.text}`),
+      breakdown: c.breakdown
+        .filter(l => !c.estimateOnly || l.section !== 'Self Assessment')
+        .filter(l => c.payeTaxPaidKnown || !(l.section === 'Inputs' && l.text.startsWith('Tax already paid through PAYE ')))
+        .map(l => `[${l.section}] ${l.text}`),
     };
   } catch (e) {
     return { error: e instanceof Error ? e.message : 'Failed to compute owner tax' };

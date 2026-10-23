@@ -587,8 +587,10 @@ describe('computeOwnerTax: without rent-a-room lettings nothing changes', () => 
       expect(result.property.methods.map(m => m.rentARoom)).toEqual([null, null]);
       // ...and dropping them leaves exactly the old output.
       const old = JSON.parse(JSON.stringify(result)) as {
+        income: { adjustedNetIncome?: unknown };
         property: { rentARoomPool?: unknown; methods: Array<Record<string, unknown>> };
       };
+      delete old.income.adjustedNetIncome;
       delete old.property.rentARoomPool;
       for (const m of old.property.methods) {
         delete m.rentARoom;
@@ -710,5 +712,112 @@ describe('computeOwnerTax: output shape', () => {
 
   it('always carries the estimate-not-advice disclaimer', () => {
     expect(r.disclaimer).toContain('not tax advice');
+  });
+});
+
+describe('computeOwnerTax: pension treatment and the personal-allowance taper', () => {
+  // Illustrative full-year owner-share amounts, not a claim that these are
+  // complete ledger figures or a confirmed tax year for any live user.
+  const property = [flat(13200, 776.51, 8375.20, 'BTL illustration')];
+
+  it('preserves the remaining £820 allowance at £123,500 and includes taper in incremental BTL tax', () => {
+    const employmentOnly = run([], { employmentIncome: 123500 });
+    expect(employmentOnly.incomeTax.personalAllowance.effective).toBe('820.00');
+    const r = run(property, { employmentIncome: 123500 });
+    expect(r.income.total).toBe('135923.49');
+    expect(r.financeCosts.reducer).toBe('1675.04');
+    expect(r.taxOnRentalIncome).toEqual({
+      amount: '4161.53', liabilityWithProperty: '45693.53', liabilityWithoutProperty: '41532.00',
+    });
+    // £12,423.49 × 45% − £1,675.04 would omit £246 of allowance-taper tax.
+    expect(r.taxOnRentalIncome.amount).not.toBe('3915.53');
+  });
+
+  it.each(['net_pay', 'salary_sacrifice'] as const)('deducts a confirmed %s employee amount once from gross employment', pensionMethod => {
+    const r = run(property, {
+      employmentIncome: 123500, pensionAnnualAmount: 7600,
+      pensionMethod, employmentIncomeBasis: 'gross_before_pension',
+    });
+    expect(r.income.nonSavings).toBe('115900.00');
+    expect(r.income.adjustedNetIncome).toBe('128323.49');
+    expect(r.pension).toMatchObject({ applied: true, employmentDeduction: '7600.00', reliefAtSourceGross: '0.00' });
+    expect(r.taxOnRentalIncome).toEqual({
+      amount: '5301.53', liabilityWithProperty: '42273.53', liabilityWithoutProperty: '36972.00',
+    });
+    // Total tax falls, although more rental profit now crosses the effective
+    // 60% allowance-taper band, increasing the incremental rental figure.
+    expect(Number(r.incomeTax.liability)).toBeLessThan(45693.53);
+  });
+
+  it('does not deduct pension again from P60 taxable pay', () => {
+    const r = run(property, {
+      employmentIncome: 115900, pensionAnnualAmount: 7600,
+      pensionMethod: 'net_pay', employmentIncomeBasis: 'taxable_pay_after_pension',
+    });
+    expect(r.income.nonSavings).toBe('115900.00');
+    expect(r.pension?.employmentDeduction).toBe('0.00');
+    expect(r.incomeTax.liability).toBe('42273.53');
+  });
+
+  it('treats relief at source as ANI relief and band extension, without subtracting it from employment', () => {
+    const r = run(property, {
+      employmentIncome: 123500, pensionAnnualAmount: 7600,
+      pensionMethod: 'relief_at_source', employmentIncomeBasis: 'gross_before_pension',
+    });
+    expect(r.income.nonSavings).toBe('123500.00');
+    expect(r.income.total).toBe('135923.49');
+    expect(r.income.adjustedNetIncome).toBe('128323.49');
+    expect(r.pension).toMatchObject({ employmentDeduction: '0.00', reliefAtSourceGross: '7600.00', applied: true });
+    expect(r.taxOnRentalIncome).toEqual({
+      amount: '5301.53', liabilityWithProperty: '43793.53', liabilityWithoutProperty: '38492.00',
+    });
+  });
+
+  it('restores £4,620 of allowance at £115,900 ANI before property income', () => {
+    const r = run([], {
+      employmentIncome: 123500, pensionAnnualAmount: 7600,
+      pensionMethod: 'net_pay', employmentIncomeBasis: 'gross_before_pension',
+    });
+    expect(r.income.adjustedNetIncome).toBe('115900.00');
+    expect(r.incomeTax.personalAllowance.effective).toBe('4620.00');
+  });
+
+  it.each([
+    { pensionMethod: 'unknown' as const, employmentIncomeBasis: 'gross_before_pension' as const },
+    { pensionMethod: 'net_pay' as const, employmentIncomeBasis: 'unknown' as const },
+  ])('keeps pension relief unknown when its method or income basis is missing: %j', pensionFacts => {
+    const r = run(property, { employmentIncome: 123500, pensionAnnualAmount: 7600, ...pensionFacts });
+    expect(r.pension?.applied).toBe(false);
+    expect(r.income.nonSavings).toBe('123500.00');
+    expect(r.taxOnRentalIncome.amount).toBe('4161.53');
+    expect(r.warnings.some(warning => warning.includes('Pension relief has not been assumed'))).toBe(true);
+  });
+
+  it('does not derive a pension amount without an annual employee figure', () => {
+    const r = run(property, { employmentIncome: 123500, pensionMethod: 'net_pay', employmentIncomeBasis: 'gross_before_pension' });
+    expect(r.pension?.annualEmployeeAmount).toBeNull();
+    expect(r.pension?.applied).toBe(false);
+    expect(r.warnings.some(warning => warning.includes('No annual employee pension amount is confirmed'))).toBe(true);
+  });
+
+  it('rejects an employee deduction larger than gross employment instead of offsetting other income', () => {
+    expect(() => run([], {
+      employmentIncome: 1000, otherIncome: 50000, pensionAnnualAmount: 2000,
+      pensionMethod: 'salary_sacrifice', employmentIncomeBasis: 'gross_before_pension',
+    })).toThrow(ClientError);
+  });
+
+  it('recomputes the S.24 adjusted-income cap and carry-forward after net-pay deductions', () => {
+    const r = run([flat(10000, 2000, 8000)], {
+      employmentIncome: 20000, pensionAnnualAmount: 10000,
+      pensionMethod: 'net_pay', employmentIncomeBasis: 'gross_before_pension',
+    });
+    // After pension: £10,000 employment + £8,000 property − £12,570 PA.
+    // S.24 can relieve only £5,430, retaining £2,570 for a later year.
+    expect(r.financeCosts.limitedBy).toBe('adjusted_total_income');
+    expect(r.financeCosts.relieved).toBe('5430.00');
+    expect(r.financeCosts.reducer).toBe('1086.00');
+    expect(r.financeCosts.carriedForward).toBe('2570.00');
+    expect(r.incomeTax.liability).toBe('0.00');
   });
 });

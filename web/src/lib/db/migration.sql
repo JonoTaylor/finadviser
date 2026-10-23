@@ -1430,6 +1430,14 @@ CREATE TABLE IF NOT EXISTS owner_tax_profiles (
     CONSTRAINT owner_tax_profiles_tax_year_check CHECK (tax_year ~ '^[0-9]{4}-[0-9]{2}$')
 );
 
+-- Partial tax profiles preserve unknown values separately from legacy NUMERIC
+-- defaults. NULL known_fields marks an older row whose zero defaults cannot
+-- establish that the user explicitly confirmed zero.
+ALTER TABLE owner_tax_profiles ADD COLUMN IF NOT EXISTS facts JSONB NOT NULL DEFAULT '{}'::jsonb;
+ALTER TABLE owner_tax_profiles ADD COLUMN IF NOT EXISTS known_fields JSONB;
+ALTER TABLE owner_tax_profiles ADD COLUMN IF NOT EXISTS field_sources JSONB NOT NULL DEFAULT '{}'::jsonb;
+ALTER TABLE owner_tax_profiles ADD COLUMN IF NOT EXISTS revision INTEGER NOT NULL DEFAULT 1;
+
 -- Data assistant: reversible category metadata, explicit user learning and a
 -- shared serverless lease. Repeated deployments preserve all existing records.
 CREATE TABLE IF NOT EXISTS transaction_categorizations (

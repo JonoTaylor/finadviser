@@ -66,6 +66,8 @@ function emilyResult() {
     ...computation,
     owner: { id: 1, name: 'Emily Pun' },
     profileSaved: true,
+    profileComplete: true, estimateOnly: false, payeTaxPaidKnown: true,
+    estimatedBalancePayable: computation.selfAssessment.amountDue, profileGaps: [],
     properties: [{
       propertyId: 10, propertyName: '249 Francis Road', lettingType: 'standard' as const, allocationPct: '50.0000',
       rentARoomShared: false, grossIncome: '10000.00', totalExpenses: '1800.00', mortgageInterest: '2400.00',
@@ -136,33 +138,55 @@ describe('get_owner_tax_computation tool', () => {
     expect(r.propertyIncome.optionsCompared.map(o => [o.option, o.used])).toEqual([['Actual expenses', true], ['Property allowance', false]]);
   });
 
-  it('accepts owner_id and defaults the year to the current tax year', async () => {
+  it('accepts owner_id and preserves the explicitly intended tax year', async () => {
     getTaxComputation.mockResolvedValue(emilyResult());
-    await executeTool('get_owner_tax_computation', { owner_id: 2 });
+    await executeTool('get_owner_tax_computation', { owner_id: 2, tax_year: '2025-26' });
     const call = getTaxComputation.mock.calls[0][0];
     expect(call.ownerId).toBe(2);
-    expect(call.year).toMatch(/^\d{4}-\d{2}$/);
+    expect(call.year).toBe('2025-26');
+  });
+
+  it('keeps a missing-PAYE calculation as a scenario and does not report a balance owed or required payments', async () => {
+    getTaxComputation.mockResolvedValue({
+      ...emilyResult(), profileComplete: false, estimateOnly: true, payeTaxPaidKnown: false,
+      estimatedBalancePayable: null, profileGaps: ['PAYE tax paid has not been confirmed (including whether it is zero).'],
+    });
+    const result = await executeTool('get_owner_tax_computation', { owner_id: 1, tax_year: '2025-26' });
+    expect(result).toMatchObject({
+      profileComplete: false, estimateOnly: true, estimatedBalancePayable: null,
+      taxOnRentalIncome: '£1,160.00',
+      selfAssessment: {
+        balanceDue: null, isRefund: null, payeAlreadyPaid: null,
+        paymentsOnAccountRequired: null, paymentsOnAccount: null, dueOnDeadline: null,
+        scenarioBalanceAfterAssumedPaye: null, scenarioPayeUsed: null, paymentsOnAccountReason: null,
+      },
+    });
+    expect((result as { taxOnRentalIncomeBasis: string }).taxOnRentalIncomeBasis).toContain('including personal-allowance taper');
+    const working = (result as { breakdown: string[] }).breakdown.join('\n');
+    expect(working).not.toContain('[Self Assessment]');
+    expect(working).not.toContain('Tax already paid through PAYE');
   });
 
   it('refuses ambiguous, unknown and missing owners without computing', async () => {
     listOwners.mockResolvedValue([...OWNERS, { id: 3, name: 'Jono Taylor Jr' }]);
-    const ambiguous = (await executeTool('get_owner_tax_computation', { owner_name: 'taylor' })) as { error: string };
+    const ambiguous = (await executeTool('get_owner_tax_computation', { owner_name: 'taylor', tax_year: '2025-26' })) as { error: string };
     expect(ambiguous.error).toContain('ambiguous');
     // An exact name still wins over a longer name that merely contains it.
     getTaxComputation.mockResolvedValue(emilyResult());
-    await executeTool('get_owner_tax_computation', { owner_name: 'Jono Taylor' });
+    await executeTool('get_owner_tax_computation', { owner_name: 'Jono Taylor', tax_year: '2025-26' });
     expect(getTaxComputation.mock.calls[0][0].ownerId).toBe(2);
 
     getTaxComputation.mockClear();
-    expect(((await executeTool('get_owner_tax_computation', { owner_name: 'nobody' })) as { error: string }).error).toContain('No owner matched');
-    expect(((await executeTool('get_owner_tax_computation', { owner_id: 99 })) as { error: string }).error).toContain('not found');
-    expect(((await executeTool('get_owner_tax_computation', {})) as { error: string }).error).toContain('owner_name or owner_id');
+    expect(((await executeTool('get_owner_tax_computation', { owner_name: 'nobody', tax_year: '2025-26' })) as { error: string }).error).toContain('No owner matched');
+    expect(((await executeTool('get_owner_tax_computation', { owner_id: 99, tax_year: '2025-26' })) as { error: string }).error).toContain('not found');
+    expect(((await executeTool('get_owner_tax_computation', { tax_year: '2025-26' })) as { error: string }).error).toContain('owner_name or owner_id');
     expect(getTaxComputation).not.toHaveBeenCalled();
   });
 
-  it('returns the repo error message (e.g. a bad tax year) instead of throwing', async () => {
+  it('rejects an invalid tax year before reading or computing', async () => {
     getTaxComputation.mockRejectedValue(new Error('Invalid tax year label: 2025 (expected YYYY-YY, e.g. 2024-25)'));
     const r = (await executeTool('get_owner_tax_computation', { owner_name: 'Emily', tax_year: '2025' })) as { error: string };
-    expect(r.error).toContain('Invalid tax year label');
+    expect(r.error).toContain('explicit valid tax_year');
+    expect(getTaxComputation).not.toHaveBeenCalled();
   });
 });

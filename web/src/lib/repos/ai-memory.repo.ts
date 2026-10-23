@@ -1,4 +1,4 @@
-import { desc, eq } from 'drizzle-orm';
+import { and, desc, eq } from 'drizzle-orm';
 import { getDb, schema } from '@/lib/db';
 import { AI_MEMORY_MAX_CONTENT_LENGTH } from '@/lib/ai/memory-constants';
 
@@ -36,6 +36,19 @@ export const aiMemoryRepo = {
       .where(eq(aiMemories.id, id))
       .returning({ id: aiMemories.id });
     return deleted.length > 0;
+  },
+
+  /** Correct a fact without a stale conversation overwriting a newer correction. */
+  async update(id: number, content: string, expectedContent: string, source: AiMemorySource = 'user'): Promise<AiMemory | null> {
+    const trimmed = content.trim();
+    if (!trimmed || trimmed.length > AI_MEMORY_MAX_CONTENT_LENGTH) {
+      throw new Error(`Memory content must be between 1 and ${AI_MEMORY_MAX_CONTENT_LENGTH} characters`);
+    }
+    const [row] = await getDb().update(aiMemories)
+      .set({ content: trimmed, source })
+      .where(and(eq(aiMemories.id, id), eq(aiMemories.content, expectedContent)))
+      .returning();
+    return row ?? null;
   },
 
   /**

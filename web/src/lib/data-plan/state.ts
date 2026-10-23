@@ -55,7 +55,7 @@ export const BASE_SCHEMA: Record<string, string[]> = {
  */
 export const MIGRATION_SCHEMA: Record<string, string[]> = {
   properties: ['letting_type'],
-  owner_tax_profiles: ['id', 'owner_id', 'tax_year', ...Object.values(PROFILE_FIELD_COLUMNS), 'notes', 'updated_at'],
+  owner_tax_profiles: ['id', 'owner_id', 'tax_year', ...Object.values(PROFILE_FIELD_COLUMNS), 'notes', 'updated_at', 'revision', 'known_fields', 'field_sources', 'facts'],
 };
 
 /** Everything the apply path needs. */
@@ -310,7 +310,7 @@ export function buildStateQueries(plan: Plan, schema: Pick<SchemaReport, 'lettin
     const cols = TAX_PROFILE_FIELDS.map(f => `${PROFILE_FIELD_COLUMNS[f]}::text AS ${PROFILE_FIELD_COLUMNS[f]}`).join(', ');
     add(
       'taxProfile',
-      `SELECT ${cols}, notes FROM owner_tax_profiles
+      `SELECT ${cols}, notes, revision, known_fields FROM owner_tax_profiles
         WHERE owner_id = (SELECT id FROM owners WHERE name = $1::text ORDER BY id LIMIT 1) AND tax_year = $2::text`,
       [plan.owner, plan.taxYear],
     );
@@ -414,6 +414,8 @@ export function assembleState(
       taxYear: plan.taxYear,
       values,
       notes: profileRow.notes === null ? null : String(profileRow.notes),
+      revision: Number(profileRow.revision),
+      knownFields: profileRow.known_fields === null ? null : profileRow.known_fields as TaxProfileRow['knownFields'],
     };
   }
 

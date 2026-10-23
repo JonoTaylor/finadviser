@@ -1,4 +1,4 @@
-import { PROFILE_FIELD_COLUMNS, type TaxProfileField } from './schema';
+import { taxProfileWriteSql } from './tax-profile-write';
 import type { Change, TenancyUpdatable } from './types';
 
 /**
@@ -119,33 +119,9 @@ export async function applyChange(q: Queryable, change: Change): Promise<void> {
     }
 
     case 'tax_profile': {
-      const fields = Object.keys(change.set) as TaxProfileField[];
-      const columns: string[] = ['owner_id', 'tax_year'];
-      const params: unknown[] = [change.ownerId, change.taxYear];
-      const casts: string[] = ['integer', 'text'];
-      const updates: string[] = [];
-      for (const f of fields) {
-        const column = PROFILE_FIELD_COLUMNS[f];
-        columns.push(column);
-        params.push(change.set[f]);
-        casts.push('numeric');
-        updates.push(`${column} = EXCLUDED.${column}`);
-      }
-      if (change.notes !== null) {
-        columns.push('notes');
-        params.push(change.notes);
-        casts.push('text');
-        updates.push('notes = EXCLUDED.notes');
-      }
-      updates.push('updated_at = now()');
-      const values = params.map((_, i) => `$${i + 1}::${casts[i]}`).join(', ');
-      const r = await q.query(
-        `INSERT INTO owner_tax_profiles (${columns.join(', ')})
-         VALUES (${values})
-         ON CONFLICT (owner_id, tax_year) DO UPDATE SET ${updates.join(', ')}
-         RETURNING id`,
-        params,
-      );
+      const params: unknown[] = [];
+      const text = taxProfileWriteSql(change, { add(value) { params.push(value); return `$${params.length}`; } });
+      const r = await q.query(text, params);
       expectOne(r.rows, `owner tax profile ${change.taxYear}`);
       return;
     }

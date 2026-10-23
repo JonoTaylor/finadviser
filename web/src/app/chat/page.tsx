@@ -25,6 +25,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import PageHeader from '@/components/ui/PageHeader';
 import { fetchJson } from '@/lib/http/client';
+import AdviserCapabilitiesStatus from '@/components/chat/AdviserCapabilities';
 
 interface Conversation { id: number; title: string | null; updatedAt: string }
 const fetcher = async (url: string): Promise<Conversation[]> => {
@@ -228,7 +229,7 @@ export default function ChatPage() {
     <Box sx={{ flexShrink: 0 }}><PageHeader title="Financial adviser" description="Make your next financial decision with a clearer picture." actions={<>
       <Button size="small" variant="outlined" startIcon={<HistoryRoundedIcon />} onClick={() => setSidebarOpen(true)}>History</Button>
       <Button size="small" variant="outlined" startIcon={<AddRoundedIcon />} onClick={handleNewChat} disabled={loading || loadingConversation !== null}>New chat</Button>
-    </>} /></Box>
+    </>} /><AdviserCapabilitiesStatus /></Box>
 
     <Drawer variant="temporary" open={sidebarOpen} onClose={() => setSidebarOpen(false)}
       sx={{ '& .MuiDrawer-paper': { width: 320, maxWidth: 'calc(100vw - 32px)', bgcolor: 'background.paper', color: 'text.primary', borderRadius: 0 } }}>

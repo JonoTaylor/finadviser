@@ -106,6 +106,8 @@ export interface TaxProfileRow {
   taxYear: string;
   values: Record<TaxProfileField, string>;
   notes: string | null;
+  revision: number;
+  knownFields: TaxProfileField[] | null;
 }
 
 /**
@@ -242,6 +244,8 @@ export type Change =
       ownerName: string;
       taxYear: string;
       existed: boolean;
+      /** Revision actually observed by the reviewed dry run; 0 for a new row. */
+      expectedRevision: number;
       set: Partial<Record<TaxProfileField, string>>;
       /** Previous values of the fields in `set` (null when the row did not exist). */
       previous: Partial<Record<TaxProfileField, string>> | null;

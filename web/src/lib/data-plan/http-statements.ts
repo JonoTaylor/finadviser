@@ -1,4 +1,4 @@
-import { PROFILE_FIELD_COLUMNS, type TaxProfileField } from './schema';
+import { taxProfileWriteSql } from './tax-profile-write';
 import { orderForApply, TENANCY_COLUMNS } from './statements';
 import type { Change, TenancyUpdatable } from './types';
 
@@ -19,7 +19,8 @@ import type { Change, TenancyUpdatable } from './types';
  *                  SELECT <add the rows w touched to the counter>
  *                Guards: INSERTs only WHERE NOT EXISTS (same reference / same
  *                tenancy start); UPDATEs only WHERE the columns still hold the
- *                values the plan was based on; tagging only WHERE
+ *                values the plan was based on (tax profiles use their saved
+ *                revision, including facts-only edits); tagging only WHERE
  *                property_id IS NULL. A guard that does not match changes
  *                zero rows; it does not error, so the batch carries on and the
  *                final check below catches it.
@@ -275,43 +276,9 @@ ${noteSql(p, count('w'), 1, label)}`;
 
 function taxProfileWrite(c: Extract<Change, { type: 'tax_profile' }>): BatchStatement {
   const p = new ParamList();
-  const fields = Object.keys(c.set) as TaxProfileField[];
-  const columns: string[] = ['owner_id', 'tax_year'];
-  const values: string[] = [`${p.add(c.ownerId)}::integer`, `${p.add(c.taxYear)}::text`];
-  const updates: string[] = [];
-  const unchanged: string[] = [];
-  for (const f of fields) {
-    const column = PROFILE_FIELD_COLUMNS[f];
-    columns.push(column);
-    values.push(`${p.add(c.set[f])}::numeric`);
-    updates.push(`${column} = EXCLUDED.${column}`);
-  }
-  if (c.notes !== null) {
-    columns.push('notes');
-    values.push(`${p.add(c.notes)}::text`);
-    updates.push('notes = EXCLUDED.notes');
-  }
-  // The optimistic guard exists only for an UPDATE of a row the plan saw; its
-  // parameters are added only then (an unreferenced parameter is an error in Postgres).
-  if (c.existed) {
-    for (const f of fields) {
-      const prev = c.previous?.[f];
-      if (prev !== undefined) unchanged.push(`owner_tax_profiles.${PROFILE_FIELD_COLUMNS[f]}::text IS NOT DISTINCT FROM ${p.add(prev)}::text`);
-    }
-    if (c.notes !== null) unchanged.push(`owner_tax_profiles.notes IS NOT DISTINCT FROM ${p.add(c.previousNotes)}::text`);
-  }
-  updates.push('updated_at = now()');
   const label = `owner tax profile ${c.ownerName} ${c.taxYear}`;
-  // No row at read time: a row appearing since is a lost race, not something to overwrite.
-  // A row at read time: update it only if the columns we overwrite still hold what the plan saw.
-  const conflict = c.existed
-    ? `ON CONFLICT (owner_id, tax_year) DO UPDATE SET ${updates.join(', ')}${unchanged.length > 0 ? `\n   WHERE ${unchanged.join('\n     AND ')}` : ''}`
-    : 'ON CONFLICT (owner_id, tax_year) DO NOTHING';
   const text = `WITH w AS (
-  INSERT INTO owner_tax_profiles (${columns.join(', ')})
-  VALUES (${values.join(', ')})
-  ${conflict}
-  RETURNING id
+  ${taxProfileWriteSql(c, p)}
 )
 ${noteSql(p, count('w'), 1, label)}`;
   return { kind: 'write', label, text, params: p.values, expected: 1, change: c };

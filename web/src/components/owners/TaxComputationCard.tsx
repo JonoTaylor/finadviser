@@ -106,44 +106,39 @@ function TaxComputationContent({ ownerId, year }: { ownerId: number | string; ye
     }
   };
 
-  if (isLoading && !data) {
-    return (
-      <Card sx={{ mb: 3 }}>
-        <CardContent>
+  // Keep the editor in one fixed tree position while computation content changes.
+  function renderComputation() {
+    if (isLoading && !data) {
+      return (
+        <>
           <Typography variant="h6" gutterBottom>Tax computation</Typography>
           <Skeleton variant="rounded" height={240} />
-          <TaxProfileEditor ownerId={ownerId} year={year} onSaved={async () => { await mutateComputation(); }} />
-        </CardContent>
-      </Card>
-    );
-  }
-  if (error || !data) {
-    return (
-      <Card sx={{ mb: 3 }}>
-        <CardContent>
+        </>
+      );
+    }
+    if (error || !data) {
+      return (
+        <>
           <Typography variant="h6" gutterBottom>Tax computation</Typography>
           <Alert severity="error">{error?.message ?? 'Failed to load tax computation'}</Alert>
-          <TaxProfileEditor ownerId={ownerId} year={year} onSaved={async () => { await mutateComputation(); }} />
-        </CardContent>
-      </Card>
-    );
-  }
+        </>
+      );
+    }
 
-  const payeKnown = Boolean(profile?.knownFields?.includes('payeTaxPaid'));
-  const balanceKnown = payeKnown && typeof data.estimatedBalancePayable === 'string';
-  const sa = data.selfAssessment;
-  const poa = sa.paymentsOnAccount;
-  const fc = data.financeCosts;
-  const roomPool = data.property.rentARoomPool;
-  const mtdColor = data.mtd.scope === 'in_scope' ? 'warning' : data.mtd.scope === 'below_threshold' ? 'success' : 'default';
-  const mtdLabel =
-    data.mtd.scope === 'in_scope' ? 'MTD ITSA mandatory'
-      : data.mtd.scope === 'below_threshold' ? 'Below MTD threshold'
-        : 'No MTD phase';
+    const payeKnown = Boolean(profile?.knownFields?.includes('payeTaxPaid'));
+    const balanceKnown = payeKnown && typeof data.estimatedBalancePayable === 'string';
+    const sa = data.selfAssessment;
+    const poa = sa.paymentsOnAccount;
+    const fc = data.financeCosts;
+    const roomPool = data.property.rentARoomPool;
+    const mtdColor = data.mtd.scope === 'in_scope' ? 'warning' : data.mtd.scope === 'below_threshold' ? 'success' : 'default';
+    const mtdLabel =
+      data.mtd.scope === 'in_scope' ? 'MTD ITSA mandatory'
+        : data.mtd.scope === 'below_threshold' ? 'Below MTD threshold'
+          : 'No MTD phase';
 
-  return (
-    <Card sx={{ mb: 3 }}>
-      <CardContent>
+    return (
+      <>
         <Stack direction={{ xs: 'column', md: 'row' }} justifyContent="space-between" alignItems={{ md: 'baseline' }} spacing={1} sx={{ mb: 1 }}>
           <Typography variant="h6">Tax computation</Typography>
           <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
@@ -376,7 +371,6 @@ function TaxComputationContent({ ownerId, year }: { ownerId: number | string; ye
         )}
 
         {formError && <Alert severity="error" sx={{ mt: 2 }}>{formError}</Alert>}
-        <TaxProfileEditor ownerId={ownerId} year={year} ownerName={data.owner.name} onSaved={async () => { await mutateComputation(); }} />
 
         {/* ---- Working ---- */}
         <Accordion disableGutters variant="outlined" sx={{ mt: 3 }}>
@@ -400,6 +394,16 @@ function TaxComputationContent({ ownerId, year }: { ownerId: number | string; ye
             </Typography>
           </AccordionDetails>
         </Accordion>
+      </>
+    );
+  }
+
+  return (
+    <Card sx={{ mb: 3 }}>
+      <CardContent>
+        <Box>{renderComputation()}</Box>
+        <TaxProfileEditor ownerId={ownerId} year={year} ownerName={data?.owner.name}
+          onSaved={async () => { await mutateComputation(); }} />
       </CardContent>
     </Card>
   );

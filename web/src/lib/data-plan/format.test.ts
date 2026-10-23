@@ -28,6 +28,12 @@ describe('changeDigest', () => {
     altered.find((c: { type: string }) => c.type === 'journal_create').amount = '301.00';
     expect(changeDigest(altered)).not.toBe(digest);
   });
+  it('requires a new review digest when the profile revision changes without a monetary change', () => {
+    const changes = planChanges(basePlan(), baseState()).changes;
+    const profile = changes.find(c => c.type === 'tax_profile')!;
+    const updated = changes.map(c => c === profile ? { ...c, expectedRevision: 9 } : c);
+    expect(changeDigest(updated)).not.toBe(changeDigest(changes));
+  });
 });
 
 describe('rendering', () => {

@@ -6,6 +6,11 @@ import { calculateEquity } from '@/lib/properties/equity-calculator';
 import { setInvestmentBalance } from '@/lib/properties/personal-net-worth';
 import { recordMortgagePayments } from '@/lib/properties/mortgage-tracker';
 import { parseMortgagePayments } from '@/lib/properties/mortgage-payment-parser';
+import {
+  previewMortgagePaymentDateCorrection, correctMortgagePaymentDate,
+  MortgageDateCorrectionConflictError, isMortgagePaymentIsoDate,
+} from '@/lib/properties/mortgage-payment-date-review';
+import { ClientError, NotFoundError } from '@/lib/errors';
 import { formatCurrency } from '@/lib/utils/formatting';
 import { londonTodayIso } from '@/lib/dates/today';
 import { parseTaxYearLabel } from '@/lib/tax/ukTaxYear';
@@ -91,6 +96,21 @@ const updateMemoryInputSchema = rememberInputSchema.extend({
   memory_id: z.number().int().positive(),
   expected_content: z.string().min(1).max(AI_MEMORY_MAX_CONTENT_LENGTH),
 }).strict();
+const mortgagePasteInputSchema = z.object({
+  property_name: z.string().trim().min(1).max(200),
+  payments_text: z.string().trim().min(1).max(50_000),
+  lender: z.string().trim().min(1).max(200).optional(),
+  payer_owner_name: z.string().trim().min(1).max(200).optional(),
+  paid_from_account_name: z.string().trim().min(1).max(200).optional(),
+}).strict();
+const mortgageDateReviewInputSchema = z.object({
+  mortgage_id: z.number().int().positive(),
+  journal_id: z.number().int().positive(),
+  correct_date: z.string().refine(isMortgagePaymentIsoDate),
+}).strict();
+const mortgageDateCorrectionInputSchema = mortgageDateReviewInputSchema.extend({
+  expected_snapshot: z.string().regex(/^[a-f0-9]{32}$/),
+});
 const processCategorizationInputSchema = z.object({
   limit: z.number().int().min(1).max(100).optional(),
   journal_ids: z.array(z.number().int().positive()).min(1).max(100)
@@ -793,7 +813,7 @@ export const TOOL_DEFINITIONS: Tool[] = [
   {
     name: 'bulk_add_mortgage_payments',
     description:
-      'Record a list of mortgage payments against a property\'s mortgage in one shot. Use when the user pastes a payment history (date + amount per row) and wants every line booked as a journal entry. The user\'s lender exports look like "31/12/2025 Receipt £1,382.36 Credit" - pass the raw paste in the `payments_text` field and the tool will parse it (Rejected Payments are skipped automatically). Idempotent across re-runs: re-pasting the same list returns duplicates rather than re-inserting. For interest-only mortgages every payment books fully as Mortgage Interest (S.24-deductible). Identify the property by name (case-insensitive substring match like "Francis" or "Hinckley"). When the property has more than one mortgage (e.g. first and second charge), the user must also pass a `lender` substring to disambiguate; the tool returns an error listing the available lenders if multiple match.',
+      'Record up to 100 user-authorised interest-only mortgage payments from the original pasted lender text (UK DD/MM/YYYY, one £ amount per row). Retains complete two-digit days, skips rejected/debit rows, and returns actual parse reasons and persisted dates. The mortgage must be marked interest-only; repayment loans need a verified principal/interest split. Exact existing references are duplicates on sequential retries. Possible records from an earlier truncated-date parser are returned for review instead of being booked again. Do not automatically change historical dates or guess a parser cause. Use get_mortgage_payment_date_review then correct_mortgage_payment_date only after the user confirms the exact statement date. Resolve the actual property, lender, payer and payment account; never guess among multiple matches.',
     input_schema: {
       type: 'object' as const,
       properties: {
@@ -804,6 +824,28 @@ export const TOOL_DEFINITIONS: Tool[] = [
         payer_owner_name: { type: 'string', description: 'Optional owner name. Defaults to the property\'s only owner when there\'s exactly one.' },
       },
       required: ['property_name', 'payments_text'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'get_mortgage_payment_date_review',
+    description: 'Read one actual mortgage payment and preview a possible correction of a historical truncated-day import. Returns the stored date, proposed statement date, amount, eligibility, and a snapshot tied to the ledger. A matching earlier day is only a candidate, not proof of an error. Read-only; no dates or money are changed.',
+    input_schema: {
+      type: 'object', properties: {
+        mortgage_id: { type: 'integer', minimum: 1 }, journal_id: { type: 'integer', minimum: 1 },
+        correct_date: { type: 'string', pattern: '^\\d{4}-\\d{2}-\\d{2}$', description: 'Exact date confirmed from the user’s original statement.' },
+      }, required: ['mortgage_id', 'journal_id', 'correct_date'], additionalProperties: false,
+    },
+  },
+  {
+    name: 'correct_mortgage_payment_date',
+    description: 'After the user explicitly confirms the exact old-to-statement-date correction shown by get_mortgage_payment_date_review, update only that eligible payment’s date and matching reference. Requires its current expected_snapshot; stale or incompatible records conflict. Never infer approval from a possible legacy match, auto-repair a repayment/principal journal, change amounts/accounts/ownership, or insert another payment. Confirm success only from the persisted result.',
+    input_schema: {
+      type: 'object', properties: {
+        mortgage_id: { type: 'integer', minimum: 1 }, journal_id: { type: 'integer', minimum: 1 },
+        correct_date: { type: 'string', pattern: '^\\d{4}-\\d{2}-\\d{2}$' },
+        expected_snapshot: { type: 'string', pattern: '^[a-f0-9]{32}$' },
+      }, required: ['mortgage_id', 'journal_id', 'correct_date', 'expected_snapshot'], additionalProperties: false,
     },
   },
 ];
@@ -828,6 +870,8 @@ export const TOOL_LABELS: Record<string, string> = {
   unmark_transfer: 'Clearing transfer flag',
   find_transfer_pair_candidates: 'Finding transfer candidates',
   bulk_add_mortgage_payments: 'Recording mortgage payments',
+  get_mortgage_payment_date_review: 'Reviewing a recorded mortgage date',
+  correct_mortgage_payment_date: 'Correcting the confirmed payment date',
   get_account_balances: 'Looking up account balances',
   search_transactions: 'Searching transactions',
   get_monthly_spending: 'Fetching spending data',
@@ -976,12 +1020,19 @@ export async function executeTool(
       return executeFindTransferPairCandidates(input);
     case 'bulk_add_mortgage_payments':
       return executeBulkAddMortgagePayments(input);
+    case 'get_mortgage_payment_date_review':
+      return executeMortgageDateReview(input);
+    case 'correct_mortgage_payment_date':
+      return executeMortgageDateCorrection(input);
     default:
       return { error: `Unknown tool: ${name}` };
   }
 }
 
 async function executeBulkAddMortgagePayments(input: Record<string, unknown>) {
+  const validated = mortgagePasteInputSchema.safeParse(input);
+  if (!validated.success) return { error: 'Supply the original payment paste and actual property name. Names are limited to 200 characters and the paste to 50,000 characters. No payments have been booked.' };
+  input = validated.data;
   const propertyName = input.property_name;
   const paymentsText = input.payments_text;
   const paidFromAccountName = input.paid_from_account_name;
@@ -1070,6 +1121,11 @@ async function executeBulkAddMortgagePayments(input: Record<string, unknown>) {
     mortgage = matched[0];
   }
 
+  if (!mortgage.interestOnly) return {
+    error: 'This paste tool records the full payment as interest. The mortgage is not marked interest-only; use a verified principal/interest split before recording it.',
+    mortgageId: mortgage.id,
+  };
+
   // Resolve payer owner. Substring match must be UNAMBIGUOUS - if a
   // fragment hits multiple owners (similar names, e.g. "John Taylor"
   // and "John Taylor Jr"), refuse to guess. Mortgage principal /
@@ -1132,11 +1188,15 @@ async function executeBulkAddMortgagePayments(input: Record<string, unknown>) {
   // Parse the paste. The parser handles the run-on / rejected /
   // skipped cases without any DB access.
   const parsed = parseMortgagePayments(paymentsText);
+  const parseIssues = (parsed.issues ?? []).slice(0, 20).map(issue => ({ ...issue, raw: issue.raw.slice(0, 500) }));
+  if (parsed.valid.length > 100) return { error: 'Import at most 100 payments at a time. No payments have been booked.', valid: parsed.valid.length, parseIssues };
   if (parsed.valid.length === 0) {
     return {
       error: 'No valid payments found in payments_text.',
       skipped: parsed.skipped.length,
       unparsed: parsed.unparsed.length,
+      parseIssues,
+      parseIssuesOmitted: Math.max(0, (parsed.issues?.length ?? 0) - parseIssues.length),
     };
   }
 
@@ -1149,22 +1209,55 @@ async function executeBulkAddMortgagePayments(input: Record<string, unknown>) {
 
   return {
     property: property.name,
+    mortgageId: mortgage.id,
     mortgage_lender: mortgage.lender,
     parsed: {
       valid: parsed.valid.length,
       skipped_rejected: parsed.skipped.filter(s => s.reason === 'rejected').length,
       skipped_debit: parsed.skipped.filter(s => s.reason === 'debit').length,
       unparsed: parsed.unparsed.length,
+      validAmount: parsed.valid.reduce((total, payment) => total.plus(payment.amount), new Decimal(0)).toFixed(2),
     },
+    parseIssues,
+    parseIssuesOmitted: Math.max(0, (parsed.issues?.length ?? 0) - parseIssues.length),
     booked: {
       added: result.added.length,
       duplicates: result.duplicates.length,
       errors: result.errors.length,
+      addedAmount: result.added.reduce((total, payment) => total.plus(payment.amount), new Decimal(0)).toFixed(2),
+      duplicateAmount: result.duplicates.reduce((total, payment) => total.plus(payment.amount), new Decimal(0)).toFixed(2),
+      unbookedAmount: result.errors.reduce((total, payment) => total.plus(payment.amount), new Decimal(0)).toFixed(2),
     },
     sample_added: result.added.slice(0, 5),
     sample_duplicates: result.duplicates.slice(0, 3),
     sample_errors: result.errors.slice(0, 3),
+    details: result,
+    nextStep: result.errors.some(error => error.code === 'possible_legacy_date' || error.code === 'payment_record_mismatch')
+      ? 'Review the actual existing journal IDs and dates before retrying those rows. A possible earlier record is not proof its date is wrong. Use get_mortgage_payment_date_review; correct it only after the user confirms the statement date.'
+      : 'Report the exact added and duplicate dates and any parse reasons. Do not invent a date-format limitation or claim unbooked rows were saved.',
   };
+}
+
+async function executeMortgageDateReview(input: Record<string, unknown>) {
+  const parsed = mortgageDateReviewInputSchema.safeParse(input);
+  if (!parsed.success) return { error: 'Supply actual mortgage_id, journal_id and a statement date in YYYY-MM-DD format.' };
+  try {
+    return await previewMortgagePaymentDateCorrection({ mortgageId: parsed.data.mortgage_id, journalId: parsed.data.journal_id, correctDate: parsed.data.correct_date });
+  } catch (error) { return { status: error instanceof ClientError || error instanceof NotFoundError ? 'rejected' : 'unavailable',
+    error: error instanceof ClientError || error instanceof NotFoundError ? error.message : 'The payment date review could not be loaded. No record has been changed.' }; }
+}
+
+async function executeMortgageDateCorrection(input: Record<string, unknown>) {
+  const parsed = mortgageDateCorrectionInputSchema.safeParse(input);
+  if (!parsed.success) return { error: 'Read the payment review and supply its current snapshot and the exact user-confirmed date. No record has been changed.' };
+  try {
+    return await correctMortgagePaymentDate({ mortgageId: parsed.data.mortgage_id, journalId: parsed.data.journal_id,
+      correctDate: parsed.data.correct_date, expectedSnapshot: parsed.data.expected_snapshot });
+  } catch (error) {
+    return { status: error instanceof MortgageDateCorrectionConflictError ? 'conflict' : 'unavailable',
+      error: error instanceof MortgageDateCorrectionConflictError || error instanceof ClientError || error instanceof NotFoundError
+        ? error.message : 'The date correction was not confirmed. Read the current payment review and reconcile it before trying again. No successful save has been reported.' };
+  }
 }
 
 // -------------------------------------------------------------------

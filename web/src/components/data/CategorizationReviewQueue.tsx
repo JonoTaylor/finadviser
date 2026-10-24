@@ -8,6 +8,7 @@ import { fetchJson } from '@/lib/http/client';
 import type { CategorizationLeg } from '@/lib/categorization/types';
 import type { ReviewItem, ReviewQueue } from '@/lib/categorization/review';
 import { buildCategoryLabels } from './categoryLabels';
+import MerchantResearchEvidence from './MerchantResearchEvidence';
 
 type ReviewAction = 'accept' | 'correct' | 'dismiss';
 function postingAmount(amount: string): string {
@@ -63,6 +64,7 @@ function ReviewRecord({ item, categories, labels, onReviewed, onReload }: { item
         <Typography variant="body2" sx={{ mb: 0.75, overflowWrap: 'anywhere' }}>{item.suggestedCategoryName ? <>Suggested category: <strong>{item.suggestedCategoryId !== null ? labels.get(item.suggestedCategoryId) ?? item.suggestedCategoryName : item.suggestedCategoryName}</strong></> : 'Choose a category; no supported match was found.'}</Typography>
         <Typography variant="body2" color="text.secondary" sx={{ overflowWrap: 'anywhere' }}>{item.reason}</Typography>
         {item.confidence !== null && <Typography variant="caption" component="p" sx={{ mt: 0.75 }}>Confidence estimate: {Math.round(item.confidence * 100)}% · An estimate, not a verified probability.</Typography>}
+        <MerchantResearchEvidence evidence={item.evidence} />
         <Box sx={{ mt: 1.5, p: 1.25, border: 1, borderColor: 'divider', bgcolor: '#F8FAFC', borderRadius: '6px' }}>
           <Typography variant="caption" component="p" sx={{ mb: 0.25 }}>Account postings · {currency ?? 'currency not recorded'} · signed amounts</Typography>
           {(financialLegs.length ? financialLegs : item.legs).map((leg, index) => <AccountPosting key={`${leg.accountId}-${index}`} leg={leg} />)}

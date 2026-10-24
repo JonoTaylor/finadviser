@@ -7,7 +7,7 @@ The Data assistant (`/data`) brings transaction processing, unresolved questions
 - New CSV/PDF imports and bank syncs await the existing transfer reconciliation before a bounded categorisation pass. Failed processing preserves the successful import or sync and reports unknown counts when a partial save cannot be confirmed.
 - The dashboard continues eligible records in up to five sequential passes while the tab is visible. The Data assistant can continue up to 100 passes, with a control to stop after the current pass. A normal time-budget boundary can continue after durable progress; unavailable models, conflicting workers and unchanged batches stop.
 - The existing daily bank-sync cron also processes the outstanding backlog, including days with no new bank transactions. Its configured Vercel schedule and `CRON_SECRET` remain prerequisites for the scheduled run.
-- Each pass considers at most 100 journals. AI receives batches of at most 25, with one shared model time budget. A database lease prevents overlapping workers; snapshot guards keep newer edits and changed transaction context.
+- Each pass considers at most 100 journals. AI starts with five-entry batches, saves each completed batch, and can retry a slow batch once as single entries. Model calls share a 20-second execution budget inside a 45-second pass; a time-budget pause leaves unprocessed records available for continuation. A database lease prevents overlapping workers; snapshot guards keep newer edits and changed transaction context.
 
 ## Categories and decisions
 
@@ -17,7 +17,15 @@ Known rules and explicitly remembered matches run first. AI suggestions meeting 
 
 Review decisions carry the current transaction snapshot. Approve or correct a category, or leave the record uncategorised. Remembering is optional and defaults off. A remembered correction applies only to the exact account, owner, direction, description, merchant and property context; it can also resolve matching records already in review. Legacy unreviewed AI rules are ignored. Explicit edits in the rule editor approve a rule as a user rule.
 
-The metadata tables are `transaction_categorizations`, `categorization_learning` and `categorization_processing_lease`. Their migration is additive and idempotent. Review and processing endpoints return private/no-store responses or no-store responses; provider errors and financial prompt bodies are not logged by the new processor.
+The metadata tables are `transaction_categorizations`, `categorization_learning` and `categorization_processing_lease`. Their migration is additive and idempotent. Review and processing endpoints return private/no-store responses or no-store responses; provider errors and financial prompt bodies are not logged by the processor.
+
+## Public merchant research
+
+When an initial AI decision needs clarification, the processor can research up to two distinct eligible merchants in a pass. Native Vercel AI Gateway Perplexity search supplies actual public titles, URLs and snippets. Only a screened merchant name (and optional coarse location) goes to search; amounts, account details, transaction dates and raw bank references do not. Personal transfers and private-looking descriptors are skipped. The adviser can also investigate an eligible transaction with the read-only `research_merchant` tool, which selects its merchant on the server from a journal ID.
+
+Searches have a six-second bound and use the application's existing `AI_GATEWAY_API_KEY`; no browser scraping, arbitrary URL fetching or additional search key is needed. Provider access and Gateway credits must support native search. A failed search preserves the original review question. Business identity is evidence about the merchant, not proof of what was bought or of tax deductibility. Search text remains untrusted reference data. Actual citations are stored with the category decision and shown in the review queue; the model cannot supply invented citation fields.
+
+The bounded `merchant_research_cache` stores only screened public queries and validated public search results. Positive results expire after 24 hours, empty searches after 15 minutes. Transient errors are not cached. Cache collisions can evict a result but cannot return evidence for a different query.
 
 ## Missing information and adviser
 
@@ -25,4 +33,4 @@ Read-only coverage checks use saved workspaces and aggregated ledger queries. Th
 
 Each gap includes its source, why it affects the assessment and an action link. The adviser reads these gaps with the existing financial workspace before giving guidance and asks for specific missing evidence instead of inventing personal facts. General financial analysis remains read-only; requested categorisation uses the shared processor.
 
-`DATABASE_URL` and `AI_GATEWAY_API_KEY` must be available on the application server for persisted AI processing. The existing model setting selects the gateway model. Without a configured model, approved rules and learned matches can still run. The legacy description-only preview endpoint remains read-only, bounded and validated; it cannot apply journal changes.
+`DATABASE_URL` and `AI_GATEWAY_API_KEY` must be available on the application server for persisted AI processing. Background categorisation uses `CATEGORIZATION_MODEL_ID` (default `openai/gpt-4.1-mini`) independently of the adviser model selected in Settings. Without AI credentials, approved rules and learned matches can still run. The legacy description-only preview endpoint remains read-only, bounded and validated; it cannot apply journal changes.

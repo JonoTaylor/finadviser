@@ -18,6 +18,7 @@ import {
 import { sql } from 'drizzle-orm';
 import type { TaxMoneyField, TaxProfileFacts, TaxFieldSource } from '@/lib/tax/profileFacts';
 import type { AdviserMessageMetadata } from '@/lib/ai/specialists/contracts';
+import type { MerchantResearchResult } from '@/lib/merchant-research/types';
 
 // Custom Postgres BYTEA mapped to Buffer in/out. Drizzle pg-core doesn't
 // ship a binary type and Neon's HTTP driver serialises parameters as
@@ -131,6 +132,7 @@ export const transactionCategorizations = pgTable('transaction_categorizations',
   categoryId: integer('category_id').references(() => categories.id),
   confidence: numeric('confidence', { precision: 5, scale: 4 }),
   reason: text('reason').notNull(),
+  evidence: jsonb('evidence').$type<MerchantResearchResult>(),
   source: text('source').notNull(),
   status: text('status').notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
@@ -155,6 +157,16 @@ export const categorizationProcessingLease = pgTable('categorization_processing_
   expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 }, table => [check('categorization_processing_lease_singleton_check', sql`${table.id} = 1`)]);
+
+// Direct-mapped slots give the shared public merchant cache a strict size bound.
+// A full query-key check prevents a hash-slot collision from reusing evidence.
+export const merchantResearchCache = pgTable('merchant_research_cache', {
+  cacheSlot: integer('cache_slot').primaryKey(),
+  queryKey: text('query_key').notNull(),
+  result: jsonb('result').$type<MerchantResearchResult>().notNull(),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, table => [check('merchant_research_cache_slot_check', sql`${table.cacheSlot} >= 0 AND ${table.cacheSlot} < 2048`)]);
 
 export type TransferKind =
   | 'statement_payment'

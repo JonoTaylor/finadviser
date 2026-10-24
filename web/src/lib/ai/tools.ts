@@ -33,6 +33,9 @@ import { readFinanceWorkspaceEvidence } from './finance-workspace';
 import { processCategorization } from '@/lib/categorization/service';
 import { loadDataIntelligence } from '@/lib/data-intelligence/load';
 import { CategorizationConflictError, InvalidCategorizationError, confirmedCategorize, getCategorizationRecords } from '@/lib/categorization/review';
+import { researchMerchant } from '@/lib/merchant-research/service';
+import { merchantResearchInputFromCandidate } from '@/lib/merchant-research/privacy';
+import { needsMovementReview } from '@/lib/categorization/decisions';
 
 /**
  * Plain JSON-Schema tool definition. claude-client.ts wraps each entry
@@ -119,6 +122,9 @@ const processCategorizationInputSchema = z.object({
 const journalIdsInputSchema = z.object({
   journal_ids: z.array(z.number().int().positive()).min(1).max(100)
     .refine(ids => new Set(ids).size === ids.length, 'Journal IDs must be unique.'),
+}).strict();
+const merchantResearchInputSchema = z.object({
+  journal_id: z.number().int().positive(),
 }).strict();
 const confirmedCategoryInputSchema = z.object({
   journal_id: z.number().int().positive(),
@@ -324,9 +330,19 @@ export const TOOL_DEFINITIONS: Tool[] = [
     },
   },
   {
+    name: 'research_merchant',
+    description:
+      'Read-only public-web research for the merchant on one recorded transaction. Supply its journal ID; the server selects and sanitises the stored merchant name, never sending amounts, dates, account details or raw bank memos to public search. Skips transfers and private or missing merchant identities. Returns actual cited sources or an explicit unavailable/no-match status. Public business identity does not establish what was bought, tax deductibility, owner or property attribution. Does not categorise or change financial records.',
+    input_schema: {
+      type: 'object',
+      properties: { journal_id: { type: 'integer', minimum: 1, description: 'ID of the recorded transaction whose public merchant identity needs checking.' } },
+      required: ['journal_id'], additionalProperties: false,
+    },
+  },
+  {
     name: 'auto_categorize',
     description:
-      'Process a bounded batch of uncategorised transactions using existing confirmed rules, context-specific learned mappings and AI. Applies only eligible confident decisions; uncertain results go to review. Returns honest processed, remaining, review, conflict, hasMore and model-availability counts. Does not overwrite existing categories or change amounts, transfers, accounts, owners, property links or create broad rules. Call only when the user asks to process or categorise data; a financial analysis alone does not authorise writes.',
+      'Process a bounded batch of uncategorised transactions using existing confirmed rules, context-specific learned mappings, fast AI and limited public merchant research for eligible ambiguous matches. Applies only eligible confident decisions; uncertain results go to review. Returns honest processed, remaining, review, conflict, hasMore and model-availability counts. A time_budget deferral is a resumable processing limit, not proof of provider capacity or zero saved changes. Does not overwrite existing categories or change amounts, transfers, accounts, owners, property links or create broad rules. Call only when the user asks to process or categorise data; a financial analysis alone does not authorise writes.',
     input_schema: {
       type: 'object' as const,
       properties: {
@@ -884,6 +900,7 @@ export const TOOL_LABELS: Record<string, string> = {
   list_uncategorized_in_month: 'Reading uncategorized for the month',
   apply_categorizations_bulk: 'Applying categorisations',
   auto_categorize: 'Auto-categorising transactions',
+  research_merchant: 'Researching the public merchant identity',
   create_category: 'Creating category',
   add_categorization_rule: 'Adding categorisation rule',
   add_tip: 'Adding tip to dashboard',
@@ -932,6 +949,8 @@ export async function executeTool(
       return executeListUncategorized(input);
     case 'auto_categorize':
       return executeAutoCategorize(input);
+    case 'research_merchant':
+      return executeResearchMerchant(input);
     case 'get_data_intelligence': {
       if (!financeWorkspaceInputSchema.safeParse(input).success) {
         return { error: 'The data intelligence overview is read-only and accepts no input fields.' };
@@ -1577,6 +1596,30 @@ async function executeAutoCategorize(input: Record<string, unknown>) {
       error: 'Data processing could not finish or verify its final counts. Reload the Data assistant before retrying.',
       basis: 'Some decisions may have been saved before the failure. No completion or unchanged-record count can be inferred from this failed run.',
     };
+  }
+}
+
+async function executeResearchMerchant(input: Record<string, unknown>) {
+  const parsed = merchantResearchInputSchema.safeParse(input);
+  if (!parsed.success) return { error: financialPlanValidationError(parsed.error) };
+  try {
+    const [records, owners] = await Promise.all([
+      getCategorizationRecords([parsed.data.journal_id]), propertyRepo.listOwners(),
+    ]);
+    const record = records.find(row => row.journalId === parsed.data.journal_id);
+    if (!record) return { status: 'not_found', journalId: parsed.data.journal_id, error: 'This transaction could not be found. No public search was made.' };
+    if (record.isTransfer || record.pendingTransfer || needsMovementReview({ ...record, id: record.journalId })) {
+      return { status: 'skipped_private', journalId: record.journalId, query: null, sources: [], basis: 'Possible account movements are not sent to public merchant search.' };
+    }
+    const publicMerchant = merchantResearchInputFromCandidate(record, owners.map(owner => owner.name));
+    if (!publicMerchant) return { status: 'skipped_private', journalId: record.journalId, query: null, sources: [], basis: 'No eligible public merchant identity could be safely selected from this transaction. No public search was made.' };
+    const result = await researchMerchant(publicMerchant);
+    return {
+      ...result, journalId: record.journalId,
+      basis: 'Public merchant identity evidence only. Sources may describe a different business with the same name and do not prove purchase purpose, tax treatment, owner or property attribution. No financial records were changed.',
+    };
+  } catch {
+    return { status: 'unavailable', journalId: parsed.data.journal_id, query: null, sources: [], error: 'Merchant research could not be completed. No financial records were changed.' };
   }
 }
 

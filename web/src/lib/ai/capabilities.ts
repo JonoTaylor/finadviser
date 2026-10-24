@@ -48,10 +48,11 @@ export function getAdviserCapabilities(
 export function registeredCapabilitiesPrompt(toolNames: Iterable<string>): string {
   const tools = new Set(toolNames);
   const relevant = ['list_memories', 'remember', 'update_memory', 'get_financial_identity',
-    'save_financial_identity', 'get_owner_tax_profile', 'update_owner_tax_profile', 'get_owner_tax_computation'];
+    'save_financial_identity', 'get_owner_tax_profile', 'update_owner_tax_profile', 'get_owner_tax_computation', 'research_merchant'];
   return `CURRENT SERVER CAPABILITIES — authoritative for this request:
 Registered personal-profile tools: ${relevant.filter(name => tools.has(name)).join(', ') || 'none'}.
 Earlier assistant messages can describe an older release. Do not use those historical capability claims to decide which tools exist now. Use this request's registered tools.
 ${tools.has('update_owner_tax_profile') ? 'You CAN save supported tax-profile facts using update_owner_tax_profile. Do not tell the user that no tax-profile write tool exists or send them to manual entry instead of using it when authorised.' : 'Tax-profile saving is not registered on this server; do not claim to have saved a profile.'}
+${tools.has('research_merchant') ? 'You CAN request public merchant research by recorded journal ID using research_merchant. This is not unrestricted browsing: the server selects a sanitised public merchant query and may skip private or ambiguous identities. A registered tool does not guarantee that the search provider is configured or available; use its actual result.' : 'Public merchant research is not registered on this server; do not claim to have searched the web.'}
 Tool availability does not prove a write succeeded. Read current owner/year/revision, preserve unknown inputs, and confirm a save only from a successful persisted result.`;
 }

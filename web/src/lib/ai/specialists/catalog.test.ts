@@ -13,7 +13,7 @@ const auditedReadTools = new Set([
   'get_income_expense_summary', 'list_memories', 'get_finance_workspace', 'get_financial_plan',
   'get_financial_health_check', 'list_investments', 'list_owners', 'get_financial_identity',
   'get_owner_tax_profile', 'get_owner_tax_computation', 'list_property_expense_categories',
-  'find_transfer_pair_candidates', 'get_mortgage_payment_date_review',
+  'find_transfer_pair_candidates', 'get_mortgage_payment_date_review', 'research_merchant',
 ]);
 
 describe('financial specialist catalogue', () => {
@@ -59,6 +59,10 @@ describe('financial specialist catalogue', () => {
       expect(isSpecialistId(value)).toBe(false);
       expect(isAdviserMode(value)).toBe(false);
     }
+  });
+
+  it('grants record-scoped public research only to spending and data workers', () => {
+    expect(SPECIALISTS.filter(specialist => specialist.readTools.includes('research_merchant')).map(specialist => specialist.id)).toEqual(['spending', 'data']);
   });
 });
 

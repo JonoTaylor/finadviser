@@ -1,6 +1,7 @@
 import { sql, type SQL } from 'drizzle-orm';
 import { getDb } from '@/lib/db';
 import { londonTodayIso } from '@/lib/dates/today';
+import { parseMerchantResearchEvidence } from '@/lib/merchant-research/schema';
 import { categorizationContextKey } from './decisions';
 import type { CategorizationCandidate, CategorizationDecision, CategorizationOptions } from './types';
 
@@ -155,13 +156,17 @@ export const categorizationRepo = {
       const candidate = candidateById.get(decision.journalId);
       if (!candidate) throw new Error('A categorisation decision is outside the selected batch.');
       if (decision.status === 'applied' && decision.categoryId === null) throw new Error('An applied category must be known.');
-      return { ...decision, snapshot: candidate.snapshot, contextKey: categorizationContextKey(candidate) };
+      const evidence = decision.evidence === undefined ? null : parseMerchantResearchEvidence(decision.evidence);
+      if (decision.evidence !== undefined && (!evidence || decision.source !== 'ai')) {
+        throw new Error('Categorisation evidence must contain actual public merchant sources.');
+      }
+      return { ...decision, evidence, snapshot: candidate.snapshot, contextKey: categorizationContextKey(candidate) };
     });
     const rows = await getDb().execute(sql`
       WITH proposed AS (
         SELECT * FROM jsonb_to_recordset(${JSON.stringify(payload)}::jsonb)
         AS p("journalId" integer, "categoryId" integer, confidence numeric,
-          reason text, source text, status text, snapshot text, "contextKey" text)
+          reason text, source text, status text, snapshot text, "contextKey" text, evidence jsonb)
       ), locked AS MATERIALIZED (
         SELECT je.id, p.* FROM journal_entries je JOIN proposed p ON p."journalId" = je.id
         WHERE ${candidateEligibilitySql()}
@@ -178,13 +183,13 @@ export const categorizationRepo = {
         FOR UPDATE OF je
       ), stored AS (
         INSERT INTO transaction_categorizations (journal_entry_id, snapshot_hash, context_key,
-          category_id, confidence, reason, source, status, created_at, updated_at)
-        SELECT id, snapshot, "contextKey", "categoryId", confidence, reason, source, status, now(), now()
+          category_id, confidence, reason, source, status, evidence, created_at, updated_at)
+        SELECT id, snapshot, "contextKey", "categoryId", confidence, reason, source, status, evidence, now(), now()
           FROM locked
         ON CONFLICT (journal_entry_id) DO UPDATE SET snapshot_hash = EXCLUDED.snapshot_hash,
           context_key = EXCLUDED.context_key, category_id = EXCLUDED.category_id,
           confidence = EXCLUDED.confidence, reason = EXCLUDED.reason, source = EXCLUDED.source,
-          status = EXCLUDED.status, updated_at = now()
+          status = EXCLUDED.status, evidence = EXCLUDED.evidence, updated_at = now()
         WHERE transaction_categorizations.status = 'needs_review'
           AND (transaction_categorizations.snapshot_hash <> EXCLUDED.snapshot_hash OR (
             EXCLUDED.source = 'learned' AND transaction_categorizations.context_key = EXCLUDED.context_key

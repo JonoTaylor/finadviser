@@ -1476,3 +1476,19 @@ CREATE TABLE IF NOT EXISTS categorization_processing_lease (
 -- Preserve existing conversations while attaching server-validated specialist
 -- reviews to new assistant messages. No historical review claims are backfilled.
 ALTER TABLE ai_messages ADD COLUMN IF NOT EXISTS metadata JSONB;
+
+-- Cited public merchant research is category provenance, not a financial fact
+-- or a learned categorisation rule. Existing decisions retain NULL evidence.
+ALTER TABLE transaction_categorizations ADD COLUMN IF NOT EXISTS evidence JSONB;
+
+-- Only sanitised public queries and their public search results are cached.
+-- Direct-mapped slots enforce a strict limit even with concurrent deployments;
+-- reads also compare the complete query hash, so collisions only evict entries.
+CREATE TABLE IF NOT EXISTS merchant_research_cache (
+    cache_slot INTEGER PRIMARY KEY,
+    query_key TEXT NOT NULL,
+    result JSONB NOT NULL,
+    expires_at TIMESTAMPTZ NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT merchant_research_cache_slot_check CHECK (cache_slot >= 0 AND cache_slot < 2048)
+);

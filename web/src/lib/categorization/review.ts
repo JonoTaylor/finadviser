@@ -1,6 +1,8 @@
 import { sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { getDb } from '@/lib/db';
+import { parseMerchantResearchEvidence } from '@/lib/merchant-research/schema';
+import type { MerchantResearchResult } from '@/lib/merchant-research/types';
 import { categorizationContextKey } from './decisions';
 import { candidateEligibilitySql, candidateSnapshotSql } from './repository';
 import type { CategorizationCandidate, CategorizationLeg } from './types';
@@ -33,6 +35,7 @@ export interface ReviewItem {
   suggestedCategoryName: string | null;
   confidence: number | null;
   reason: string;
+  evidence: MerchantResearchResult | null;
   snapshot: string;
   updatedAt: string;
 }
@@ -97,7 +100,7 @@ export async function loadReviewQueue(limit = 25, afterId = 0): Promise<ReviewQu
       SELECT je.id AS "journalId", je.date, je.description, je.property_id AS "propertyId",
         tm.merchant_name AS "merchantName", tm.currency, ${recordLegsSql} AS legs,
         tc.category_id AS "suggestedCategoryId", c.name AS "suggestedCategoryName",
-        tc.confidence, tc.reason, tc.snapshot_hash AS snapshot, tc.updated_at AS "updatedAt"
+        tc.confidence, tc.reason, tc.evidence, tc.snapshot_hash AS snapshot, tc.updated_at AS "updatedAt"
       FROM journal_entries je JOIN transaction_categorizations tc ON tc.journal_entry_id = je.id
       LEFT JOIN transaction_metadata tm ON tm.journal_entry_id = je.id
       LEFT JOIN categories c ON c.id = tc.category_id
@@ -109,6 +112,7 @@ export async function loadReviewQueue(limit = 25, afterId = 0): Promise<ReviewQu
   ]);
   const items = queue.rows.slice(0, limit).map(row => ({
     ...row,
+    evidence: parseMerchantResearchEvidence(row.evidence),
     confidence: row.confidence === null ? null : Number(row.confidence),
     updatedAt: row.updatedAt instanceof Date ? row.updatedAt.toISOString() : String(row.updatedAt),
   })) as unknown as ReviewItem[];
@@ -151,6 +155,8 @@ export async function confirmedCategorize(input: {
         'Category confirmed by the user.', 'user', 'reviewed', now(), now() FROM updated
       ON CONFLICT (journal_entry_id) DO UPDATE SET snapshot_hash = EXCLUDED.snapshot_hash,
         context_key = EXCLUDED.context_key, category_id = EXCLUDED.category_id,
+        evidence = CASE WHEN transaction_categorizations.snapshot_hash = EXCLUDED.snapshot_hash
+          THEN transaction_categorizations.evidence ELSE NULL END,
         confidence = NULL, reason = EXCLUDED.reason, source = 'user', status = 'reviewed', updated_at = now()
       RETURNING journal_entry_id
     ), learned AS (

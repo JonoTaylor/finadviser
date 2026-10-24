@@ -95,6 +95,8 @@ describe('specialist adviser request and streaming', () => {
     expect(text).not.toContain('secret-db');
     expect(text).not.toContain('private-model');
     expect(mocks.addAssistant.mock.calls[0][2]).toMatchObject({ status: 'interrupted', specialistResults: [taxResult] });
+    expect(mocks.addAssistant.mock.calls[0][1]).toContain('**Review interrupted.** This answer is incomplete.');
+    expect(mocks.addAssistant.mock.calls[0][1]).toContain('Check any saved record changes');
     expect(stream.some(event => event.type === 'complete')).toBe(false);
   });
 
@@ -112,6 +114,7 @@ describe('specialist adviser request and streaming', () => {
     expect(stream.at(-1).type).toBe('error');
     expect(mocks.addAssistant.mock.calls[0][1]).toContain('interrupted');
     expect(mocks.addAssistant.mock.calls[0][2].status).toBe('interrupted');
+    expect(mocks.addAssistant.mock.calls[0][1]).toContain('**Review interrupted.**');
   });
 
   it('rejects an unknown saved conversation before appending a new message', async () => {

@@ -60,7 +60,13 @@ export async function POST(request: NextRequest) {
         const persist = async (status: 'complete' | 'interrupted') => {
           if (persisted || persistenceAttempted) return;
           if (!fullResponse && results.size === 0 && status === 'interrupted') return;
-          const content = fullResponse.trim() ? fullResponse : 'The review was interrupted before the adviser finished. Review any available specialist notes and check saved records before retrying.';
+          const answer = fullResponse.trim() ? fullResponse : 'The adviser stopped before finishing its answer. Any available specialist notes may be incomplete.';
+          // Keep this warning in content as well as metadata: older clients and
+          // the bounded text-only model history must not treat partial advice
+          // as a completed recommendation after a reload or another turn.
+          const content = status === 'interrupted'
+            ? answer + '\n\n**Review interrupted.** This answer is incomplete. Check any saved record changes and obtain a fresh review before acting or retrying.'
+            : answer;
           const metadata = adviserMessageMetadataSchema.parse({
             version: 1, specialistMode: specialist, specialistResults: [...results.values()], status,
           });

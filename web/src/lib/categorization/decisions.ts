@@ -11,6 +11,7 @@ import type {
 export const AUTO_APPLY_CONFIDENCE = 0.9;
 export const MODEL_BATCH_SIZE = 25;
 export const MAX_PROCESSING_ENTRIES = 100;
+export const PAYEE_MEANINGS_CONFLICT_REASON = 'Your confirmed private payee meanings conflict. Confirm which meaning applies before reusing them.';
 
 const modelDecisionSchema = z.object({
   journalId: z.number().int().positive(),
@@ -72,14 +73,36 @@ export function movementReviewReason(
   categoryId?: number | null,
   categories: CategorizationCategory[] = [],
 ): string | null {
+  return movementReviewReasonForContext(candidate, categoryId, categories, false);
+}
+
+/**
+ * A user's confirmed, account-scoped context can identify an external bank
+ * payment. It cannot reconcile real account movements or override ledger guards.
+ */
+export function confirmedContextReviewReason(
+  candidate: CategorizationCandidate,
+  categoryId: number,
+  categories: CategorizationCategory[],
+): string | null {
+  return movementReviewReasonForContext(candidate, categoryId, categories, true);
+}
+
+function movementReviewReasonForContext(
+  candidate: CategorizationCandidate,
+  categoryId: number | null | undefined,
+  categories: CategorizationCategory[],
+  confirmedContext: boolean,
+): string | null {
   const financialLegs = candidate.legs.filter(leg => leg.accountType === 'ASSET' || leg.accountType === 'LIABILITY');
   if (financialLegs.length !== 1) return 'Confirm whether this is a movement between your accounts; the financial account legs are missing or ambiguous.';
   if (!Number.isFinite(Number(financialLegs[0].amount)) || Number(financialLegs[0].amount) === 0) return 'The financial account amount is missing or zero; confirm what this transaction represents.';
   // Liability credits reduce debt: a repayment is not income, and a refund
   // requires the original purchase context rather than an income guess.
   if (financialLegs[0].accountType === 'LIABILITY' && Number(financialLegs[0].amount) > 0) return 'This reduces a liability and may be a debt repayment or refund. Confirm the original transaction before treating it as income or spending.';
-  const movementType = normalizeExact(candidate.transactionType).replace(/[_-]/g, ' ');
-  if (/\b(?:pot (?:transfer|deposit|withdrawal)|(?:internal|account|bank|money) transfer|credit card (?:repayment|bill payment)|loan repayment)\b/.test(movementType)) return 'The bank metadata describes an account movement. Confirm whether it is spending, income or a transfer before categorising it.';
+  const movementType = normalizeExact(candidate.transactionType).replace(/[_-]/g, ' ').replace(/\s+/g, ' ');
+  const confirmedExternalBankPayment = confirmedContext && movementType === 'bank transfer';
+  if (!confirmedExternalBankPayment && /\b(?:pot (?:transfer|deposit|withdrawal)|(?:internal|account|bank|money) transfer|credit card (?:repayment|bill payment)|loan repayment)\b/.test(movementType)) return 'The bank metadata describes an account movement. Confirm whether it is spending, income or a transfer before categorising it.';
   const categoryById = new Map(categories.map(category => [category.id, category]));
   const seen = new Set<number>();
   let ancestor = categoryId ? categoryById.get(categoryId) : undefined;

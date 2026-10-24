@@ -20,6 +20,8 @@ export type CategorizationCandidate = {
   currency: string | null;
   legs: CategorizationLeg[];
   snapshot: string;
+  /** An unchanged review may only be revisited with newly confirmed knowledge. */
+  pendingReview?: boolean;
 };
 
 export type CategorizationCategory = { id: number; name: string; parentId?: number | null };
@@ -36,10 +38,13 @@ export type CategorizationDecision = {
   categoryId: number | null;
   confidence: number;
   reason: string;
-  source: 'rule' | 'learned' | 'ai';
+  source: 'rule' | 'learned' | 'ai' | 'payee';
   status: 'applied' | 'needs_review';
   /** Public merchant identity evidence; never proof of a specific purchase. */
   evidence?: MerchantResearchResult;
+  /** Private user-confirmed payee provenance; never sent to public search. */
+  payeeMemoryId?: string;
+  payeeMemoryRevision?: number;
 };
 
 export type CategorizationOptions = {

@@ -27,8 +27,22 @@ describe.skipIf(!url)('data intelligence coverage SQL in disposable PostgreSQL',
       );
       CREATE TEMP TABLE book_entries (id integer GENERATED ALWAYS AS IDENTITY PRIMARY KEY, journal_entry_id integer, account_id integer, amount numeric(14,2));
       CREATE TEMP TABLE transaction_metadata (journal_entry_id integer PRIMARY KEY, merchant_name text, bank_category text, transaction_type text, currency text);
-      CREATE TEMP TABLE transaction_categorizations (journal_entry_id integer PRIMARY KEY, snapshot_hash text, status text, context_key text, source text, category_id integer);
-      CREATE TEMP TABLE categorization_learning (context_key text PRIMARY KEY, category_id integer);
+      CREATE TEMP TABLE transaction_categorizations (
+        journal_entry_id integer PRIMARY KEY, snapshot_hash text, status text, context_key text, source text,
+        category_id integer, reason text, updated_at timestamptz DEFAULT now(),
+        payee_memory_id uuid, payee_memory_revision integer
+      );
+      CREATE TEMP TABLE categorization_learning (context_key text PRIMARY KEY, category_id integer, updated_at timestamptz DEFAULT now());
+      -- TEMP fixture counterparts for the confirmed-knowledge eligibility query.
+      -- No foreign keys to permanent application tables are introduced here.
+      CREATE TEMP TABLE categorization_payee_memories (
+        id uuid PRIMARY KEY, revision integer, status text, account_id integer, owner_id integer,
+        account_type text, direction integer, currency text, property_id integer,
+        category_id integer, identity_kind text, source_journal_id integer
+      );
+      CREATE TEMP TABLE categorization_payee_aliases (
+        memory_id uuid, identity_kind text, normalized_alias text, active boolean
+      );
       CREATE TEMP TABLE properties (id integer PRIMARY KEY, name text NOT NULL);
       CREATE TEMP TABLE property_valuations (property_id integer, valuation_date text);
       CREATE TEMP TABLE tenancies (property_id integer, start_date text, end_date text);
@@ -48,7 +62,8 @@ describe.skipIf(!url)('data intelligence coverage SQL in disposable PostgreSQL',
     mocks.execute.mockClear();
     await client.query(`
       TRUNCATE accounts, journal_entries, book_entries, transaction_metadata,
-        transaction_categorizations, categorization_learning, properties, property_valuations, tenancies, property_ownership RESTART IDENTITY;
+        transaction_categorizations, categorization_learning, categorization_payee_aliases, categorization_payee_memories,
+        properties, property_valuations, tenancies, property_ownership RESTART IDENTITY;
       INSERT INTO accounts VALUES (1,'Example bank','ASSET',NULL), (2,'Expenses','EXPENSE',NULL),
         (3,'Income','INCOME',NULL), (4,'Investment adjustments','EQUITY',NULL);
       INSERT INTO journal_entries(id,date,description) VALUES

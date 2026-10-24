@@ -5,6 +5,7 @@ import type { MerchantResearchResult } from '@/lib/merchant-research/types';
 const mocks = vi.hoisted(() => ({
   acquireLease: vi.fn(), releaseLease: vi.fn(), listCandidates: vi.fn(), counts: vi.fn(), lookupLearned: vi.fn(), persistDecisions: vi.fn(),
   categories: vi.fn(), rules: vi.fn(), owners: vi.fn(), model: vi.fn(), research: vi.fn(), researchQuery: vi.fn(),
+  payees: vi.fn(), payeeNames: vi.fn(), payeeMatch: vi.fn(),
 }));
 vi.mock('./repository', () => ({ categorizationRepo: mocks }));
 vi.mock('@/lib/repos/category.repo', () => ({ categoryRepo: { listAll: mocks.categories, getRules: mocks.rules } }));
@@ -15,6 +16,8 @@ vi.mock('@/lib/merchant-research/privacy', async importOriginal => ({
   buildMerchantResearchQuery: mocks.researchQuery,
 }));
 vi.mock('@/lib/merchant-research/service', () => ({ researchMerchant: mocks.research }));
+vi.mock('./payees/service', () => ({ loadActivePayeeMemories: mocks.payees, loadPrivatePayeeNames: mocks.payeeNames }));
+vi.mock('./payees/matching', () => ({ matchingConfirmedPayees: mocks.payeeMatch }));
 import { processCategorization } from './service';
 import { categorizationContextKey } from './decisions';
 
@@ -45,6 +48,9 @@ beforeEach(() => {
   mocks.categories.mockResolvedValue([{ id: 1, name: 'Groceries' }, { id: 2, name: 'Other' }]);
   mocks.rules.mockResolvedValue([]);
   mocks.owners.mockResolvedValue([]);
+  mocks.payees.mockResolvedValue([]);
+  mocks.payeeNames.mockResolvedValue([]);
+  mocks.payeeMatch.mockReturnValue([]);
   mocks.researchQuery.mockReturnValue(null);
   mocks.research.mockResolvedValue({ status: 'unavailable', sources: [] });
   mocks.persistDecisions.mockImplementation(async (_candidates: CategorizationCandidate[], decisions: CategorizationDecision[]) => decisions.map(({ journalId, status }) => ({ journalId, status })));
@@ -205,6 +211,38 @@ describe('bounded leased categorisation passes', () => {
     expect(await processCategorization()).toMatchObject({ learned: 1, ruleBased: 0, aiCategorized: 0 });
     expect(mocks.persistDecisions.mock.calls[0][1][0]).toMatchObject({ categoryId: 2, source: 'learned' });
     expect(mocks.model).not.toHaveBeenCalled();
+  });
+  it('applies an explicitly remembered external bank payment instead of sending the same context back for review', async () => {
+    const payment = { ...candidate(), description: 'Known cleaner payment', merchantName: 'Known cleaner', transactionType: 'bank_transfer' };
+    mocks.listCandidates.mockResolvedValue([payment]);
+    mocks.lookupLearned.mockResolvedValue(new Map([[categorizationContextKey(payment), 1]]));
+    expect(await processCategorization()).toMatchObject({ learned: 1, reviewQueued: 0, aiCategorized: 0 });
+    expect(mocks.persistDecisions.mock.calls[0][1][0]).toMatchObject({ source: 'learned', status: 'applied', categoryId: 1 });
+    expect(mocks.model).not.toHaveBeenCalled();
+    expect(mocks.research).not.toHaveBeenCalled();
+  });
+  it('uses confirmed private payee knowledge before AI and counts it as learned progress', async () => {
+    mocks.payeeMatch.mockReturnValue([{ memory: { id: 'ae7f77a1-2536-4adc-891d-8df9ded86fc4', revision: 2, categoryId: 1 } }]);
+    expect(await processCategorization()).toMatchObject({ learned: 1, aiCategorized: 0, reviewQueued: 0 });
+    expect(mocks.persistDecisions.mock.calls[0][1][0]).toMatchObject({ source: 'payee', status: 'applied', payeeMemoryRevision: 2 });
+    expect(mocks.model).not.toHaveBeenCalled();
+    expect(mocks.research).not.toHaveBeenCalled();
+  });
+  it('asks about conflicting private meanings instead of letting AI invent a resolution', async () => {
+    mocks.payeeMatch.mockReturnValue([
+      { memory: { id: 'ae7f77a1-2536-4adc-891d-8df9ded86fc4', revision: 2, categoryId: 1 } },
+      { memory: { id: 'cf3516e2-cdfe-4e76-9bbc-014e920d57f3', revision: 1, categoryId: 2 } },
+    ]);
+    expect(await processCategorization()).toMatchObject({ learned: 0, aiCategorized: 0, reviewQueued: 1 });
+    expect(mocks.persistDecisions.mock.calls[0][1][0]).toMatchObject({ source: 'payee', status: 'needs_review', categoryId: null });
+    expect(mocks.model).not.toHaveBeenCalled();
+    expect(mocks.research).not.toHaveBeenCalled();
+  });
+  it('does not send an unchanged review back to AI when newly confirmed knowledge no longer matches', async () => {
+    mocks.listCandidates.mockResolvedValue([{ ...candidate(), pendingReview: true }]);
+    await processCategorization();
+    expect(mocks.model).not.toHaveBeenCalled();
+    expect(mocks.persistDecisions).not.toHaveBeenCalled();
   });
   it('ignores deleted learned categories and uses the model rather than arbitrary IDs', async () => {
     mocks.lookupLearned.mockResolvedValue(new Map([[categorizationContextKey(candidate()), 999]]));

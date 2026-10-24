@@ -14,6 +14,7 @@ const auditedReadTools = new Set([
   'get_financial_health_check', 'list_investments', 'list_owners', 'get_financial_identity',
   'get_owner_tax_profile', 'get_owner_tax_computation', 'list_property_expense_categories',
   'find_transfer_pair_candidates', 'get_mortgage_payment_date_review', 'research_merchant', 'get_categorization_job',
+  'get_payee_learning_context', 'list_payee_meanings',
 ]);
 
 describe('financial specialist catalogue', () => {

@@ -136,13 +136,15 @@ export const transactionCategorizations = pgTable('transaction_categorizations',
   confidence: numeric('confidence', { precision: 5, scale: 4 }),
   reason: text('reason').notNull(),
   evidence: jsonb('evidence').$type<MerchantResearchResult>(),
+  payeeMemoryId: uuid('payee_memory_id').references((): AnyPgColumn => categorizationPayeeMemories.id, { onDelete: 'set null' }),
+  payeeMemoryRevision: integer('payee_memory_revision'),
   source: text('source').notNull(),
   status: text('status').notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 }, table => [
   check('transaction_categorizations_confidence_check', sql`${table.confidence} BETWEEN 0 AND 1`),
-  check('transaction_categorizations_source_check', sql`${table.source} IN ('rule', 'learned', 'ai', 'user')`),
+  check('transaction_categorizations_source_check', sql`${table.source} IN ('rule', 'learned', 'ai', 'user', 'payee')`),
   check('transaction_categorizations_status_check', sql`${table.status} IN ('applied', 'needs_review', 'reviewed', 'dismissed')`),
   index('transaction_categorizations_review_idx').on(table.status, table.journalEntryId),
 ]);
@@ -153,6 +155,35 @@ export const categorizationLearning = pgTable('categorization_learning', {
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });
+
+// Private user-confirmed recipient meanings. These are not public merchant data.
+export const categorizationPayeeMemories = pgTable('categorization_payee_memories', {
+  id: uuid('id').primaryKey(), revision: integer('revision').notNull().default(1),
+  status: text('status').notNull().default('active'), scopeKey: text('scope_key').notNull(),
+  accountId: integer('account_id').notNull().references(() => accounts.id), ownerId: integer('owner_id'),
+  accountType: text('account_type').notNull(), direction: integer('direction').notNull(), currency: text('currency'),
+  propertyId: integer('property_id'), payeeName: text('payee_name').notNull(), purpose: text('purpose'),
+  categoryId: integer('category_id').notNull().references(() => categories.id), identityKind: text('identity_kind').notNull(),
+  sourceJournalId: integer('source_journal_id').references(() => journalEntries.id, { onDelete: 'set null' }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, table => [
+  check('categorization_payee_memories_revision_check', sql`${table.revision} > 0`),
+  check('categorization_payee_memories_status_check', sql`${table.status} IN ('active', 'disabled', 'conflicted')`),
+  check('categorization_payee_memories_account_type_check', sql`${table.accountType} IN ('ASSET', 'LIABILITY')`),
+  check('categorization_payee_memories_direction_check', sql`${table.direction} IN (-1, 1)`),
+  check('categorization_payee_memories_identity_kind_check', sql`${table.identityKind} IN ('merchant', 'description', 'bank_payee')`),
+  index('categorization_payee_memories_scope_idx').on(table.scopeKey, table.status),
+]);
+export const categorizationPayeeAliases = pgTable('categorization_payee_aliases', {
+  id: serial('id').primaryKey(), memoryId: uuid('memory_id').notNull().references(() => categorizationPayeeMemories.id, { onDelete: 'cascade' }),
+  scopeKey: text('scope_key').notNull(), identityKind: text('identity_kind').notNull(),
+  normalizedAlias: text('normalized_alias').notNull(), displayAlias: text('display_alias').notNull(), active: boolean('active').notNull().default(true),
+  isCurrent: boolean('is_current').notNull().default(true),
+}, table => [
+  unique('categorization_payee_alias_memory_key').on(table.memoryId, table.identityKind, table.normalizedAlias),
+  uniqueIndex('categorization_payee_alias_active_key').on(table.scopeKey, table.identityKind, table.normalizedAlias).where(sql`${table.active} = TRUE`),
+]);
 
 export const categorizationProcessingLease = pgTable('categorization_processing_lease', {
   id: integer('id').primaryKey(),

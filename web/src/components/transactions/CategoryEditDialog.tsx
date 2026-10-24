@@ -2,6 +2,7 @@
 
 import { useMemo, useRef, useState } from 'react';
 import { buildCategoryLabels } from '@/components/data/categoryLabels';
+import RememberPayeeDialog from '@/components/data/RememberPayeeDialog';
 import {
   Dialog,
   DialogTitle,
@@ -29,6 +30,8 @@ export default function CategoryEditDialog({
   categories,
   onClose,
   onSave,
+  journalId,
+  onRemembered,
 }: {
   open: boolean;
   currentCategoryId: number | null;
@@ -36,11 +39,14 @@ export default function CategoryEditDialog({
   categories: Category[];
   onClose: () => void;
   onSave: (categoryId: number, createRule: boolean) => Promise<void>;
+  journalId?: number;
+  onRemembered?: () => void | Promise<void>;
 }) {
   const [selected, setSelected] = useState<Category | null>(null);
   const [createRule, setCreateRule] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const [rememberPayeeOpen, setRememberPayeeOpen] = useState(false);
   const writing = useRef(false);
   const categoryLabels = useMemo(() => buildCategoryLabels(categories), [categories]);
 
@@ -62,7 +68,7 @@ export default function CategoryEditDialog({
   };
 
   return (
-    <Dialog
+    <><Dialog
       open={open}
       onClose={() => { if (!writing.current) onClose(); }}
       disableEscapeKeyDown={saving}
@@ -95,10 +101,14 @@ export default function CategoryEditDialog({
                 disabled={saving}
               />
             }
-            label="Remember for matching transactions"
+            label="Reuse this category for the same exact payment context"
           />
         )}
-        {description && <Typography variant="caption" component="p" sx={{ mt: 0.5 }}>Reuses this reviewed category for an exact match in the same account context.</Typography>}
+        {description && <Typography variant="caption" component="p" sx={{ mt: 0.5 }}>This needs an exact description and the same account context. Leave it off for a one-off choice.</Typography>}
+        {journalId && <>
+          <Button variant="outlined" sx={{ mt: 2 }} disabled={saving || !selected} onClick={() => setRememberPayeeOpen(true)}>Remember this payee</Button>
+          <Typography variant="caption" component="p" sx={{ mt: 0.75 }}>For a person or recurring service, save who they are and what the payment means. Confirmed bank payee names can handle changing references.</Typography>
+        </>}
       </DialogContent>
       <DialogActions>
         <Button onClick={onClose} disabled={saving}>Cancel</Button>
@@ -110,6 +120,6 @@ export default function CategoryEditDialog({
           {saving ? 'Saving…' : 'Save category'}
         </Button>
       </DialogActions>
-    </Dialog>
+    </Dialog><RememberPayeeDialog open={rememberPayeeOpen && open} journalId={journalId ?? null} categoryId={selected?.id ?? null} categoryLabel={selected ? categoryLabels.get(selected.id) ?? selected.name : 'Choose a category'} onClose={() => setRememberPayeeOpen(false)} onSaved={async () => { try { await onRemembered?.(); } finally { setRememberPayeeOpen(false); onClose(); } }} /></>
   );
 }

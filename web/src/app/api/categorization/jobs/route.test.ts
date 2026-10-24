@@ -3,8 +3,9 @@ import type { CategorizationJob } from '@/lib/categorization/jobs/types';
 
 const mocks = vi.hoisted(() => ({
   get: vi.fn(), start: vi.fn(), pause: vi.fn(), resume: vi.fn(), cancel: vi.fn(), run: vi.fn(),
-  capability: vi.fn(), schedule: vi.fn(), wake: vi.fn(), dispatch: vi.fn(), after: vi.fn(),
+  capability: vi.fn(), schedule: vi.fn(), wake: vi.fn(), dispatch: vi.fn(), after: vi.fn(), evaluate: vi.fn(),
 }));
+vi.mock('@/lib/ai/categorization-models/service', () => ({ maybeEvaluateCategorizationModels: mocks.evaluate }));
 vi.mock('@/lib/categorization/jobs/service', () => ({
   getCategorizationJob: mocks.get, startCategorizationJob: mocks.start, pauseCategorizationJob: mocks.pause,
   resumeCategorizationJob: mocks.resume, cancelCategorizationJob: mocks.cancel, runCategorizationJob: mocks.run,
@@ -45,6 +46,7 @@ beforeEach(() => {
   mocks.wake.mockReturnValue(false);
   mocks.run.mockResolvedValue({ job, shouldContinue: true, delayMs: 0 });
   mocks.dispatch.mockResolvedValue({ accepted: true, reason: null });
+  mocks.evaluate.mockResolvedValue({ status: 'skipped', report: null });
 });
 afterEach(() => { vi.unstubAllEnvs(); vi.restoreAllMocks(); });
 
@@ -136,5 +138,24 @@ describe('internal categorisation worker endpoint', () => {
     await worker(signedRequest()); await mocks.after.mock.calls[1][0]();
     expect(mocks.dispatch).not.toHaveBeenCalled();
     expect(JSON.stringify(warning.mock.calls)).not.toContain('Private');
+  });
+  it('does not spend model-comparison calls acknowledging a paused job', async () => {
+    mocks.get.mockResolvedValue({ ...job, status: 'paused' });
+    mocks.run.mockResolvedValue({ job: { ...job, status: 'paused' }, shouldContinue: false, delayMs: 0 });
+    await worker(signedRequest()); await mocks.after.mock.calls[0][0]();
+    expect(mocks.evaluate).not.toHaveBeenCalled();
+    expect(mocks.dispatch).not.toHaveBeenCalled();
+  });
+  it('keeps comparison, processing and handoff within one absolute worker deadline', async () => {
+    vi.useFakeTimers();
+    try {
+      const started = Date.now();
+      mocks.evaluate.mockImplementation(async () => { vi.setSystemTime(started + 29_000); return { status: 'complete', report: null }; });
+      await worker(signedRequest()); await mocks.after.mock.calls[0][0]();
+      expect(mocks.evaluate).toHaveBeenCalledExactlyOnceWith({ budgetMs: 29_000 });
+      expect(mocks.run).toHaveBeenCalledExactlyOnceWith(id, { budgetMs: 71_000 });
+      expect(mocks.dispatch).toHaveBeenCalledExactlyOnceWith(id);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally { vi.useRealTimers(); }
   });
 });

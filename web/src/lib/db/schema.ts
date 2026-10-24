@@ -17,6 +17,7 @@ import {
 } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 import type { TaxMoneyField, TaxProfileFacts, TaxFieldSource } from '@/lib/tax/profileFacts';
+import type { AdviserMessageMetadata } from '@/lib/ai/specialists/contracts';
 
 // Custom Postgres BYTEA mapped to Buffer in/out. Drizzle pg-core doesn't
 // ship a binary type and Neon's HTTP driver serialises parameters as
@@ -377,6 +378,8 @@ export const aiMessages = pgTable('ai_messages', {
   conversationId: integer('conversation_id').notNull().references(() => aiConversations.id, { onDelete: 'cascade' }),
   role: messageRoleEnum('role').notNull(),
   content: text('content').notNull(),
+  // Server-produced specialist reviews; older conversations remain unlabelled.
+  metadata: jsonb('metadata').$type<AdviserMessageMetadata>(),
   createdAt: timestamp('created_at').notNull().defaultNow(),
 });
 

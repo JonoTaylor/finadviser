@@ -1472,3 +1472,7 @@ CREATE TABLE IF NOT EXISTS categorization_processing_lease (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     CONSTRAINT categorization_processing_lease_singleton_check CHECK (id = 1)
 );
+
+-- Preserve existing conversations while attaching server-validated specialist
+-- reviews to new assistant messages. No historical review claims are backfilled.
+ALTER TABLE ai_messages ADD COLUMN IF NOT EXISTS metadata JSONB;

@@ -1,6 +1,7 @@
 import { conversationRepo } from '@/lib/repos';
 import { ClientError, NotFoundError } from '@/lib/errors';
 import type { AdviserMessageMetadata } from './specialists/contracts';
+import { boundAdviserHistory } from './context-budget';
 
 const MAX_HISTORY_MESSAGES = 20;
 
@@ -25,7 +26,7 @@ export async function addAssistantMessage(conversationId: number, content: strin
 }
 
 export async function getHistory(conversationId: number): Promise<Array<{ role: 'user' | 'assistant'; content: string }>> {
-  return conversationRepo.getModelHistory(conversationId, MAX_HISTORY_MESSAGES);
+  return boundAdviserHistory(await conversationRepo.getModelHistory(conversationId, MAX_HISTORY_MESSAGES));
 }
 
 export async function listConversations() {

@@ -116,8 +116,9 @@ Workers themselves remain read-only.
 | Specialist output | At most 1,800 tokens per model step and four steps; final validated report at most 12,000 characters. |
 | Specialist deadline | 20 seconds each; no automatic model retries. |
 | Specialist phase | At most 60 seconds, with cancellation propagated. |
-| Whole adviser request | At most 110 seconds within the existing 120-second route. |
-| Coordinator | Retains the existing 15-step action/tool loop and 4,096-token per-step response limit. |
+| Whole adviser request | Preparation shares a 10-second bound. Generation ends by 105 seconds from API entry, history saving is bounded to eight seconds, and stream finalisation ends by 113 seconds within the 120-second route. Direct library callers retain a 110-second maximum. |
+| Coordinator | At most 15 steps, reserving the last step for an answer, with a 4,096-token per-step response limit. Long processing passes require enough remaining time for both the pass and the final answer. |
+| Conversation context | Recent history is capped at 36,000 characters and 6,000 per message, retaining interruption notices. Tool results preserve call/result pairing and mark large reads as incomplete previews. |
 
 Model timeouts, malformed reports, missing evidence and failed reads are explicit
 outcomes. A non-cooperating model call must not hold the response indefinitely.
@@ -125,6 +126,20 @@ The coordinator may fall back to its existing evidence tools while disclosing
 which expert reviews were unavailable. Queued specialists must not start after
 cancellation or the overall deadline. Source failures mean unknown, not no assets
 or no income. Responses must not expose raw credential or database errors.
+
+The coordinator defers another categorisation pass when there is insufficient
+time to complete it and explain the result, and links to `/data` for continuation.
+Thrown or returned unverified mutation outcomes block further writes in that turn;
+known partial processing results can still continue. Failed reads remain explicit
+evidence gaps. Questions about choosing a specialist do not start financial reviews.
+
+Failure events distinguish provider access, rate limits, timeouts, invalid or
+empty responses, response limits and unconfirmed chat-history saves. They include
+a safe request reference, whether a record-changing tool actually started, and
+whether answer generation completed. Logs contain only the reference, stage,
+classified code/status and completion flags. Completed text remains visible if
+only history saving cannot be confirmed. No failure path automatically replays
+the model, a record-changing action or an uncertain message insert.
 
 ## API and storage contract
 

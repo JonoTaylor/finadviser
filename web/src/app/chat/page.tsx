@@ -30,6 +30,8 @@ import AdviserCapabilitiesStatus from '@/components/chat/AdviserCapabilities';
 import SpecialistTeamSelector, { adviserModeName } from '@/components/chat/SpecialistTeamSelector';
 import SpecialistReviews from '@/components/chat/SpecialistReviews';
 import { createChatStreamDecoder } from '@/components/chat/chat-stream';
+import ChatFailureNotice from '@/components/chat/ChatFailureNotice';
+import { ChatRequestFailure, chatHttpFailure, type ChatFailure } from '@/components/chat/chat-failure';
 import { SPECIALISTS, type AdviserMode, type SpecialistId } from '@/lib/ai/specialists/catalog';
 import { adviserMessageMetadataSchema, type AdviserMessageMetadata, type SpecialistResult } from '@/lib/ai/specialists/contracts';
 
@@ -133,7 +135,7 @@ export default function ChatPage() {
   const loadPending = useRef(false);
   const [loadingConversation, setLoadingConversation] = useState<number | null>(null);
   const [historyError, setHistoryError] = useState<string | null>(null);
-  const [sendError, setSendError] = useState<string | null>(null);
+  const [sendError, setSendError] = useState<ChatFailure | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const busy = loading || loadingConversation !== null;
 
@@ -187,7 +189,7 @@ export default function ChatPage() {
     let fullContent = '';
     let results: SpecialistResult[] = [];
     let completedMetadata: AdviserMessageMetadata | undefined;
-    let streamError: string | null = null;
+    let streamError: ChatFailure | null = null;
     let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
     try {
       const response = await fetch('/api/ai/analyze', {
@@ -196,7 +198,7 @@ export default function ChatPage() {
       });
       if (!response.ok) {
         const body = await response.json().catch(() => null);
-        throw new Error(typeof body?.error === 'string' ? body.error : 'The adviser request could not be started.');
+        throw new ChatRequestFailure(chatHttpFailure(body));
       }
       reader = response.body?.getReader();
       if (!reader) throw new Error('The adviser returned no response stream.');
@@ -216,16 +218,16 @@ export default function ChatPage() {
         } else if (event.type === 'complete') {
           if (event.metadata && event.metadata.specialistMode !== mode) throw new Error('The adviser returned a different review focus. Your message has been kept.');
           completedMetadata = event.metadata;
-        } else if (event.type === 'error') streamError = event.message;
+        } else if (event.type === 'error') streamError = event;
       });
       while (true) {
         const part = await reader.read();
         if (part.done) break;
         decoder.push(part.value);
-        if (streamError) throw new Error(streamError);
+        if (streamError) throw new ChatRequestFailure(streamError);
       }
       decoder.finish();
-      if (streamError) throw new Error(streamError);
+      if (streamError) throw new ChatRequestFailure(streamError);
       if (!decoder.getState().complete) throw new Error('The adviser response ended before completion could be confirmed.');
       const metadata: AdviserMessageMetadata = completedMetadata ?? {
         version: 1, specialistMode: mode, specialistResults: results, status: 'complete',
@@ -237,17 +239,19 @@ export default function ChatPage() {
       void mutateConversations();
     } catch (error) {
       if (reader) await reader.cancel().catch(() => undefined);
+      const failure: ChatFailure = controller.signal.aborted
+        ? { message: 'Response stopped. Any answer or specialist notes shown may be incomplete.' }
+        : error instanceof ChatRequestFailure ? error.failure
+          : { message: error instanceof Error ? error.message : 'The adviser response was interrupted.' };
       if (fullContent.trim() || results.length > 0) {
-        const metadata: AdviserMessageMetadata = { version: 1, specialistMode: mode, specialistResults: results, status: 'interrupted' };
+        const metadata: AdviserMessageMetadata = { version: 1, specialistMode: mode, specialistResults: results, status: failure.generationCompleted ? 'complete' : 'interrupted' };
         setMessages(previous => [...previous, { role: 'assistant', content: fullContent.trim(), metadata }]);
       }
       setStreamingContent('');
       setLiveResults([]);
       setPendingSpecialists([]);
       setInput(text);
-      setSendError(controller.signal.aborted
-        ? 'Response stopped. Your message is kept below. Any changes already saved remain in your records; check them before retrying.'
-        : (error instanceof Error ? error.message : 'The adviser response was interrupted.') + ' Your message is kept below. Check any recorded changes before retrying.');
+      setSendError(failure);
       void mutateConversations();
     } finally {
       reader?.releaseLock();
@@ -347,7 +351,7 @@ export default function ChatPage() {
       </Box>
 
       <Box sx={{ flexShrink: 0, borderTop: 1, borderColor: 'divider', p: { xs: 1.5, sm: 2 }, bgcolor: 'background.paper' }}>
-        {sendError && <Alert severity="warning" sx={{ mb: 1.5 }}>{sendError}</Alert>}
+        {sendError && <ChatFailureNotice failure={sendError} />}
         <Stack direction="row" gap={1} alignItems="flex-end" sx={{ border: 1, borderColor: 'divider', borderRadius: '6px', p: 0.5, minWidth: 0 }}>
           <TextField fullWidth multiline minRows={1} maxRows={4} size="small" placeholder={selectedMode === 'team' ? 'Ask about your finances…' : 'Ask your ' + adviserModeName(selectedMode).toLowerCase() + '…'} value={input} onChange={event => setInput(event.target.value)}
             onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void sendMessage(input); } }}

@@ -47,6 +47,8 @@ export type CategorizationOptions = {
   syncRunIds?: number[];
   source?: 'manual' | 'import' | 'bank-sync' | 'scheduled';
   limit?: number;
+  /** Internal snapshot scope for a durable job; later imports are a separate run. */
+  maxJournalId?: number;
   /** One shared model budget; individual attempts are capped and may retry once with a smaller batch. */
   modelTimeoutMs?: number;
   /** Overall run budget, including deterministic processing; maximum 45 seconds. */
@@ -55,6 +57,7 @@ export type CategorizationOptions = {
 
 export type CategorizationCounts = { remaining: number; needsReview: number; available: number };
 export type CategorizationResult = CategorizationCounts & {
+  scopeAvailable?: number;
   total: number;
   ruleBased: number;
   aiCategorized: number;

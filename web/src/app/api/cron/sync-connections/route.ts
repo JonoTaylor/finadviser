@@ -1,5 +1,6 @@
-import { NextResponse } from 'next/server';
+import { after, NextResponse } from 'next/server';
 import { runDailySync } from '@/lib/banking/cron-sync';
+import { recoverCategorizationJob } from '@/lib/categorization/jobs/recovery';
 
 /**
  * GET /api/cron/sync-connections
@@ -15,9 +16,10 @@ import { runDailySync } from '@/lib/banking/cron-sync';
  * the ingest_bank_transaction function) keeps re-runs harmless.
  *
  * Cron timeout: most syncs land in single-digit seconds, but we
- * give ourselves 60s headroom for a four-bank cold-start path.
+ * keep headroom for a four-bank cold start and an after-response recovery
+ * handoff for an already-authorised categorisation job.
  */
-export const maxDuration = 60;
+export const maxDuration = 120;
 export const runtime = 'nodejs';
 
 export async function GET(req: Request) {
@@ -43,5 +45,9 @@ export async function GET(req: Request) {
     // where the orchestrator itself throws (e.g. listConnections fails).
     console.error('Daily cron failed:', err);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+  } finally {
+    // Existing daily scheduling also recovers a lost worker handoff. Paused,
+    // cancelled and completed jobs remain untouched by this sweep.
+    after(recoverCategorizationJob);
   }
 }

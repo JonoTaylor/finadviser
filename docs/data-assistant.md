@@ -5,9 +5,20 @@ The Data assistant (`/data`) brings transaction processing, unresolved questions
 ## Automatic processing
 
 - New CSV/PDF imports and bank syncs await the existing transfer reconciliation before a bounded categorisation pass. Failed processing preserves the successful import or sync and reports unknown counts when a partial save cannot be confirmed.
-- The dashboard continues eligible records in up to five sequential passes while the tab is visible. The Data assistant can continue up to 100 passes, with a control to stop after the current pass. A normal time-budget boundary can continue after durable progress; unavailable models, conflicting workers and unchanged batches stop.
-- The existing daily bank-sync cron also processes the outstanding backlog, including days with no new bank transactions. Its configured Vercel schedule and `CRON_SECRET` remain prerequisites for the scheduled run.
+- Global processing uses a saved job shared by chat, the dashboard and the Data assistant. Closing a tab or moving between pages does not cancel the server job. Controls pause or end processing after the current pass; already-saved decisions remain intact. Paused or cancelled jobs never restart merely because a page opens.
+- A job captures an upper journal-ID boundary and permits at most 200 passes before requiring an explicit resume. Newer imports can start a later job. A normal time-budget boundary continues after durable progress; unavailable models, conflicting workers and unchanged batches pause instead of retrying indefinitely.
+- The existing daily bank-sync cron also processes the outstanding backlog and recovers an already-authorised job whose handoff was lost. It never unpauses or creates a job during recovery. Its configured Vercel schedule and `CRON_SECRET` remain prerequisites for the scheduled run.
 - Each pass considers at most 100 journals. AI starts with five-entry batches, saves each completed batch, and can retry a slow batch once as single entries. Model calls share a 20-second execution budget inside a 45-second pass; a time-budget pause leaves unprocessed records available for continuation. A database lease prevents overlapping workers; snapshot guards keep newer edits and changed transaction context.
+
+## Durable jobs and background continuation
+
+`categorization_jobs` deduplicates active global processing, including requests arriving simultaneously from chat and the Data assistant. Each `categorization_job_passes` record is created before processing; its acknowledgement and job totals change atomically. Progress shows only acknowledged results for that job, alongside a separately observed current backlog. It never combines approximate historical session totals. If a worker crashes after saving decisions but before acknowledging them, totals are marked incomplete and the current ledger is checked; unknown changes are never reported as zero.
+
+Authenticated job APIs start, inspect, pause, resume or cancel jobs. Straightforward global categorisation commands use these tools directly, without a model call or specialist reviews. Scoped requests and financial analysis retain their existing controlled paths. Routine chat replies link to the saved job rather than asking the user to request each batch.
+
+A signed internal worker returns an acknowledgement and uses Next.js `after()` to process a bounded slice, then awaits a fresh handoff for continuation. Each slice has a 75-second bound and a 90-second claim lease. Expired claims can be recovered; stale workers cannot acknowledge results or release a newer worker's lease. The existing session secret signs short-lived method/path/job-specific capabilities. Worker URLs come only from validated Vercel deployment environment variables; no browser cookies, private transaction payloads or caller-supplied origins are forwarded.
+
+Configured background access is distinct from an accepted handoff or actual progress. Failed handoffs remain visible on the saved job. Status polling and the existing daily cron can recover queued or expired active work, with failed dispatches backed off. Deployment protection, unavailable providers or missing server configuration can still stop continuation; the UI reports those states rather than claiming work is running.
 
 ## Categories and decisions
 

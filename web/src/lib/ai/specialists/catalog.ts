@@ -31,7 +31,7 @@ export const SPECIALIST_READ_TOOL_NAMES = [
   'get_income_expense_summary', 'list_memories', 'get_finance_workspace', 'get_financial_plan',
   'get_financial_health_check', 'list_investments', 'list_owners', 'get_financial_identity',
   'get_owner_tax_profile', 'get_owner_tax_computation', 'list_property_expense_categories',
-  'find_transfer_pair_candidates', 'get_mortgage_payment_date_review', 'research_merchant',
+  'find_transfer_pair_candidates', 'get_mortgage_payment_date_review', 'research_merchant', 'get_categorization_job',
 ] as const;
 
 const commonReadTools = ['get_financial_identity', 'get_data_intelligence', 'get_finance_workspace'] as const;
@@ -49,7 +49,7 @@ export const SPECIALISTS: readonly SpecialistDefinition[] = [
     id: 'spending', name: 'Spending specialist',
     description: 'Understand spending, review recurring costs and find realistic budget improvements.',
     exampleQuestions: ['Where could I reduce spending?', 'Which recurring costs should I review?'],
-    readTools: [...commonReadTools, 'get_financial_plan', 'get_monthly_spending', 'get_income_expense_summary', 'get_budget_status', 'search_transactions', 'get_categories', 'get_savings_goals', 'research_merchant'],
+    readTools: [...commonReadTools, 'get_financial_plan', 'get_monthly_spending', 'get_income_expense_summary', 'get_budget_status', 'search_transactions', 'get_categories', 'get_savings_goals', 'research_merchant', 'get_categorization_job'],
     prompt: SPECIALIST_PROMPTS.spending, version: '1',
   },
   {
@@ -84,7 +84,7 @@ export const SPECIALISTS: readonly SpecialistDefinition[] = [
     id: 'data', name: 'Data specialist',
     description: 'Missing statements, uncertain categories and records that need reconciliation.',
     exampleQuestions: ['Which missing information matters most?', 'What needs reviewing before I trust my reports?'],
-    readTools: [...commonReadTools, 'search_transactions', 'get_categories', 'get_transaction_categorization', 'list_uncategorized', 'list_months_needing_categorization', 'list_uncategorized_in_month', 'find_transfer_pair_candidates', 'get_mortgage_payment_date_review', 'research_merchant'],
+    readTools: [...commonReadTools, 'search_transactions', 'get_categories', 'get_transaction_categorization', 'list_uncategorized', 'list_months_needing_categorization', 'list_uncategorized_in_month', 'find_transfer_pair_candidates', 'get_mortgage_payment_date_review', 'research_merchant', 'get_categorization_job'],
     prompt: SPECIALIST_PROMPTS.data, version: '1',
   },
 ];

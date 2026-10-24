@@ -29,6 +29,9 @@ const PUBLIC_PATHS = new Set([
   // ${CRON_SECRET} header; the route handler verifies that token
   // itself, so we let it past the session-cookie gate here.
   '/api/cron/sync-connections',
+  // Internal continuation uses a short-lived, path/job-bound HMAC capability.
+  // The exact POST route verifies it and fails closed without SESSION_SECRET.
+  '/api/categorization/jobs/worker',
 ]);
 
 export async function middleware(req: NextRequest) {

@@ -149,6 +149,12 @@ describe.skipIf(!url)('categorisation persistence in disposable PostgreSQL', () 
     expect((await categorizationRepo.listCandidates({ syncRunIds: [77] })).map(entry => entry.id)).toEqual([1]);
   });
 
+  it('keeps durable processing inside its start snapshot while reporting the current global backlog', async () => {
+    expect((await categorizationRepo.listCandidates({ maxJournalId: 1 })).map(entry => entry.id)).toEqual([1]);
+    expect(await categorizationRepo.counts({ maxJournalId: 1 })).toMatchObject({ available: 2, scopeAvailable: 1 });
+    expect(await categorizationRepo.listCandidates({ maxJournalId: 0 })).toEqual([]);
+  });
+
   it('atomically records provenance and changes only the category while retaining signs, ownership and property links', async () => {
     const entry = await candidate();
     const before = await rawJournal();

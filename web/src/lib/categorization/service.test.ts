@@ -54,6 +54,10 @@ beforeEach(() => {
 afterEach(() => { vi.useRealTimers(); vi.unstubAllEnvs(); vi.restoreAllMocks(); });
 
 describe('bounded leased categorisation passes', () => {
+  it.each([-1, 1.5, NaN, Infinity])('rejects an invalid internal processing snapshot ID %s before acquiring a lease', async maxJournalId => {
+    await expect(processCategorization({ maxJournalId })).rejects.toThrow('processing snapshot');
+    expect(mocks.acquireLease).not.toHaveBeenCalled();
+  });
   it('applies valid AI decisions atomically with the current lease token', async () => {
     const result = await processCategorization();
     expect(result).toMatchObject({ total: 1, aiCategorized: 1, reviewQueued: 0, status: 'complete', busy: false, batches: 1, reviewUrl: '/data', deferredReason: null });

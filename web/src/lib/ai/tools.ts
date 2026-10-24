@@ -43,7 +43,7 @@ import {
 import { getCategorizationBackgroundCapability, scheduleCategorizationJob } from '@/lib/categorization/jobs/dispatch';
 import { categorizationJobSchema } from '@/lib/categorization/jobs/schema';
 import type { CategorizationJob } from '@/lib/categorization/jobs/types';
-import { getPayeeLearningContext, listPayeeMemories, saveConfirmedPayee, disablePayeeMemory,
+import { getPayeeLearningContext, listPayeeMemories, saveConfirmedPayee, disablePayeeMemory, loadPrivatePayeeNames,
   InvalidPayeeMemoryError, PayeeMemoryConflictError } from '@/lib/categorization/payees/service';
 import { payeeSaveSchema } from '@/lib/categorization/payees/schema';
 
@@ -1788,15 +1788,15 @@ async function executeResearchMerchant(input: Record<string, unknown>) {
   const parsed = merchantResearchInputSchema.safeParse(input);
   if (!parsed.success) return { error: financialPlanValidationError(parsed.error) };
   try {
-    const [records, owners] = await Promise.all([
-      getCategorizationRecords([parsed.data.journal_id]), propertyRepo.listOwners(),
+    const [records, owners, privatePayees] = await Promise.all([
+      getCategorizationRecords([parsed.data.journal_id]), propertyRepo.listOwners(), loadPrivatePayeeNames(),
     ]);
     const record = records.find(row => row.journalId === parsed.data.journal_id);
     if (!record) return { status: 'not_found', journalId: parsed.data.journal_id, error: 'This transaction could not be found. No public search was made.' };
     if (record.isTransfer || record.pendingTransfer || needsMovementReview({ ...record, id: record.journalId })) {
       return { status: 'skipped_private', journalId: record.journalId, query: null, sources: [], basis: 'Possible account movements are not sent to public merchant search.' };
     }
-    const publicMerchant = merchantResearchInputFromCandidate(record, owners.map(owner => owner.name));
+    const publicMerchant = merchantResearchInputFromCandidate(record, [...owners.map(owner => owner.name), ...privatePayees]);
     if (!publicMerchant) return { status: 'skipped_private', journalId: record.journalId, query: null, sources: [], basis: 'No eligible public merchant identity could be safely selected from this transaction. No public search was made.' };
     const result = await researchMerchant(publicMerchant);
     return {

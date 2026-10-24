@@ -101,6 +101,19 @@ describe('incremental adviser NDJSON decoder', () => {
     expect(received).toEqual([{ type: 'error', message: 'The review was interrupted.' }]);
   });
 
+  it('preserves safe structured failure context without treating a completed answer as interrupted', () => {
+    const error: ChatStreamEvent = {
+      type: 'error', message: 'Your answer finished, but saving chat history could not be confirmed.',
+      code: 'history_unavailable', requestId: '0b3f4d52-a902-465e-a209-507fc0649c1a',
+      retryable: false, recordChanges: 'none', historySaved: false, generationCompleted: true,
+    };
+    const { decoder, events: received } = collector();
+    decoder.push(encode([{ type: 'text', content: 'Your completed financial review.' }, error]));
+    decoder.finish();
+    expect(received).toEqual([{ type: 'text', content: 'Your completed financial review.' }, error]);
+    expect(decoder.getState().failed).toBe(false);
+  });
+
   it.each([
     '{bad JSON}\n',
     '{"type":"text","content":"unterminated',
@@ -119,6 +132,11 @@ describe('incremental adviser NDJSON decoder', () => {
     '{"type":"tool","name":"test","label":null}\n',
     '{"type":"error","message":false}\n',
     '{"type":"complete","metadata":{"version":2}}\n',
+    '{"type":"error","message":"Stopped","code":"invented_private_error"}\n',
+    '{"type":"error","message":"Stopped","requestId":"private diagnostic body"}\n',
+    '{"type":"error","message":"Stopped","recordChanges":"confirmed"}\n',
+    '{"type":"error","message":"Stopped","retryable":"yes"}\n',
+    '{"type":"error","message":"Stopped","providerResponse":"private financial data"}\n',
   ])('rejects malformed, truncated, unknown, or incorrectly typed events safely: %s', input => {
     const onEvent = vi.fn();
     const decoder = createChatStreamDecoder(onEvent);

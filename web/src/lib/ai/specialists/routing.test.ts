@@ -21,4 +21,9 @@ describe('specialist topic routing', () => {
     expect(routeSpecialists('What about that?', 'team', [{ role: 'user', content: 'What is missing from my pension evidence?' }]).ids).toContain('pensions');
     expect(routeSpecialists('Which investments have high fees?', 'team', [{ role: 'assistant', content: 'The user pays a lot of tax.' }]).ids).toEqual(['wealth']);
   });
+  it('answers specialist-selection help without running financial reviewers', () => {
+    expect(routeSpecialists('Who should lead?').ids).toEqual([]);
+    expect(routeSpecialists('Which specialist should I choose?', 'tax').ids).toEqual([]);
+    expect(routeSpecialists('Which specialist should review my rental tax?').ids).toEqual(['tax', 'property']);
+  });
 });

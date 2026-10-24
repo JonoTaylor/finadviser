@@ -117,7 +117,7 @@ describe('actual multi-specialist adviser loop', () => {
       })(),
     }));
     const consume = async () => { for await (const event of runAgent('Save my tax profile', [], { signal: controller.signal })) void event; };
-    await expect(consume()).rejects.toMatchObject({ name: 'AbortError' });
+    await expect(consume()).rejects.toMatchObject({ code: 'request_cancelled' });
     expect(mocks.execute).not.toHaveBeenCalled();
   });
 
@@ -135,7 +135,7 @@ describe('actual multi-specialist adviser loop', () => {
     const pending = consume();
     await streamStarted;
     controller.abort();
-    await expect(pending).rejects.toMatchObject({ name: 'AbortError' });
+    await expect(pending).rejects.toMatchObject({ code: 'request_cancelled' });
     expect(cleanup).toHaveBeenCalledTimes(1);
     expect(mocks.execute).not.toHaveBeenCalled();
   });
@@ -144,11 +144,11 @@ describe('actual multi-specialist adviser loop', () => {
     mocks.gateway.mockReturnValue({ modelId: 'fixture' });
     mocks.stream.mockImplementationOnce(() => ({ fullStream: (async function* () { yield { type: 'finish', finishReason: 'stop' }; })() }));
     const consume = async () => { for await (const event of runAgent('Save my tax profile')) void event; };
-    await expect(consume()).rejects.toThrow('could not finish');
+    await expect(consume()).rejects.toMatchObject({ code: 'no_answer' });
     mocks.stream.mockImplementationOnce(() => ({ fullStream: (async function* () {
       yield { type: 'text-delta', text: 'An unfinished answer' };
       yield { type: 'finish', finishReason: 'length' };
     })() }));
-    await expect(consume()).rejects.toThrow('could not finish');
+    await expect(consume()).rejects.toMatchObject({ code: 'response_limit' });
   });
 });

@@ -4,6 +4,7 @@ import {
   adviserMessageMetadataSchema,
   specialistResultSchema,
 } from '@/lib/ai/specialists/contracts';
+import { adviserFailureDetailsSchema } from '@/lib/ai/adviser-failure';
 
 export const MAX_CHAT_STREAM_LINE_LENGTH = 200_000;
 const DECODE_WINDOW_BYTES = 16_384;
@@ -19,7 +20,7 @@ const chatStreamEventSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('tool'), name: z.string(), label: z.string() }).strict(),
   z.object({ type: z.literal('text'), content: z.string() }).strict(),
   z.object({ type: z.literal('complete'), metadata: adviserMessageMetadataSchema.optional() }).strict(),
-  z.object({ type: z.literal('error'), message: z.string() }).strict(),
+  adviserFailureDetailsSchema.partial().extend({ type: z.literal('error'), message: z.string().max(2000) }).strict(),
 ]);
 
 export type ChatStreamEvent = z.infer<typeof chatStreamEventSchema>;

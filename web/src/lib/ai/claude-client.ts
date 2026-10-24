@@ -16,6 +16,30 @@ import { categorizationPrompt } from '@/lib/categorization/decisions';
 import type { CategorizationCandidate, CategorizationCategory } from '@/lib/categorization/types';
 import { previewCategorizationSchema, previewCategorizationPrompt, validatePreviewMapping } from '@/lib/categorization/preview';
 import type { MerchantResearchResult } from '@/lib/merchant-research/types';
+import { AdviserFailureError } from './adviser-failure';
+import { isRecordChangingAdviserTool } from './tool-policy';
+import { boundAdviserHistory, boundAdviserModelMessages } from './context-budget';
+
+const ADVISER_REQUEST_MS = 110_000;
+const FINAL_ANSWER_RESERVE_MS = 12_000;
+const ADVISER_MAX_STEPS = 15;
+type AgentBudget = { deadline: number; finalizing: boolean; unverifiedWrite?: boolean; onToolStart?: (name: string) => void };
+
+/** Many write adapters report a failed acknowledgement as a result, not a throw. */
+function unverifiedWriteResult(value: unknown, depth = 0): boolean {
+  if (depth > 4) return false;
+  if (value === null || value === undefined) return true;
+  if (Array.isArray(value)) return value.some(item => unverifiedWriteResult(item, depth + 1));
+  if (typeof value !== 'object') return false;
+  const result = value as Record<string, unknown>;
+  if (result.outcome === 'unknown' || ['unavailable', 'error', 'unknown'].includes(String(result.status))) return true;
+  if (['rejected', 'conflict', 'deferred'].includes(String(result.status))) return false;
+  if (result.error !== undefined && result.error !== null || result.success === false
+    || typeof result.unavailable === 'number' && result.unavailable > 0) return true;
+  // A bulk writer can have acknowledged successes alongside an unverified
+  // entry. Preserve those counts while preventing a replay of the unknown one.
+  return Array.isArray(result.results) && result.results.some(item => unverifiedWriteResult(item, depth + 1));
+}
 
 /**
  * Wrap AGENT_SYSTEM_PROMPT with the user's saved memories so the agent
@@ -178,7 +202,7 @@ export async function categorizeContextBatch(
  * properties shape to AI SDK's strict JSONSchema7 type — the schema is
  * structurally correct but the looser type is more practical to author.
  */
-function buildAgentTools(signal: AbortSignal): ToolSet {
+function buildAgentTools(signal: AbortSignal, budget: AgentBudget): ToolSet {
   const tools: ToolSet = {};
   for (const def of TOOL_DEFINITIONS) {
     tools[def.name] = tool({
@@ -186,7 +210,38 @@ function buildAgentTools(signal: AbortSignal): ToolSet {
       inputSchema: jsonSchema(def.input_schema as Parameters<typeof jsonSchema>[0]),
       execute: async (input: unknown) => {
         if (signal.aborted) return { error: 'The adviser request was interrupted. No new action has been started.' };
-        return executeTool(def.name, (input ?? {}) as Record<string, unknown>);
+        if (budget.unverifiedWrite && isRecordChangingAdviserTool(def.name)) {
+          return { status: 'deferred', actionStarted: false,
+            error: 'An earlier record-changing action has an unverified outcome. No further action was started. Read the current records and report the uncertainty before another write is requested.',
+          };
+        }
+        // The shared categoriser may legitimately need 45 seconds. Do not
+        // launch another pass which can outlive this reply and then replay it
+        // after an ambiguous timeout. Leave time to report the saved results.
+        const requiredMs = def.name === 'auto_categorize' ? 45_000 : 2_000;
+        if (budget.finalizing || budget.deadline - Date.now() <= requiredMs + FINAL_ANSWER_RESERVE_MS) {
+          budget.finalizing = true;
+          return { status: 'deferred', actionStarted: false,
+            error: 'This tool was not started because the response is nearing its time limit. Summarise the results already returned and explain the work still pending.',
+            ...(def.name === 'auto_categorize' ? { continuationUrl: '/data' } : {}),
+          };
+        }
+        budget.onToolStart?.(def.name);
+        try {
+          const result = await executeTool(def.name, (input ?? {}) as Record<string, unknown>);
+          if (isRecordChangingAdviserTool(def.name) && unverifiedWriteResult(result)) budget.unverifiedWrite = true;
+          return result;
+        } catch {
+          // Adapter errors can contain private SQL, prompts and bank details.
+          // Let the model report the missing result without seeing that text
+          // or treating an unverified write as a safe automatic retry.
+          if (isRecordChangingAdviserTool(def.name)) budget.unverifiedWrite = true;
+          return { status: 'unavailable', outcome: isRecordChangingAdviserTool(def.name) ? 'unknown' : 'unavailable',
+            error: isRecordChangingAdviserTool(def.name)
+              ? 'The result of this record-changing action could not be verified. Do not retry it automatically or claim that no changes were saved. Check the current record before any further action.'
+              : 'This source could not be read. Its values remain unknown; continue with the available evidence and disclose this gap.',
+          };
+        }
       },
     });
   }
@@ -205,12 +260,16 @@ function buildAgentTools(signal: AbortSignal): ToolSet {
 export async function* runAgent(
   userMessage: string,
   history: Array<{ role: 'user' | 'assistant'; content: string }> = [],
-  options: { specialist?: AdviserMode; signal?: AbortSignal } = {},
+  options: { specialist?: AdviserMode; signal?: AbortSignal; onToolStart?: (name: string) => void; deadlineAt?: number } = {},
 ): AsyncGenerator<AgentEvent, string> {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 110_000);
+  const startedAt = Date.now();
+  const deadline = Math.min(startedAt + ADVISER_REQUEST_MS, Number.isFinite(options.deadlineAt) ? options.deadlineAt! : Infinity);
+  const budget: AgentBudget = { deadline, finalizing: false, onToolStart: options.onToolStart };
+  const timer = setTimeout(() => controller.abort(), Math.max(0, deadline - startedAt));
   const signal = options.signal ? AbortSignal.any([options.signal, controller.signal]) : controller.signal;
   try {
+    if (deadline <= Date.now()) throw new AdviserFailureError('request_timeout');
     const mode = options.specialist ?? 'team';
     const route = routeSpecialists(userMessage, mode, history);
     const { modelId } = await abortable(resolveModelId(), signal);
@@ -235,26 +294,37 @@ export async function* runAgent(
     if (signal.aborted) throw new DOMException('The adviser request was interrupted.', 'AbortError');
     const reference = specialistReferenceMessage(reviews);
     const messages: ModelMessage[] = [
-      ...history.map((m) => ({ role: m.role, content: m.content }) as ModelMessage),
+      ...boundAdviserHistory(history).map((m) => ({ role: m.role, content: m.content }) as ModelMessage),
       ...(reference ? [reference] : []),
       { role: 'user', content: userMessage },
     ];
 
-    const agentTools = buildAgentTools(signal);
+    const agentTools = buildAgentTools(signal, budget);
+    const system = buildAgentSystemPrompt(Object.keys(agentTools), memory, mode, referenceDate, taxYear);
     const result = streamText({
       model: languageModel,
-      system: buildAgentSystemPrompt(Object.keys(agentTools), memory, mode, referenceDate, taxYear),
+      system,
       messages,
       tools: agentTools,
       // Match the previous 15-iteration cap.
-      stopWhen: stepCountIs(15),
+      stopWhen: stepCountIs(ADVISER_MAX_STEPS),
+      prepareStep: ({ stepNumber, messages: stepMessages }) => {
+        if (stepNumber >= ADVISER_MAX_STEPS - 1 || budget.deadline - Date.now() <= FINAL_ANSWER_RESERVE_MS) budget.finalizing = true;
+        const boundedMessages = boundAdviserModelMessages(stepMessages);
+        return budget.finalizing ? { toolChoice: 'none', activeTools: [], messages: boundedMessages,
+          system: `${system}\n\nRESPONSE BUDGET: Finish the answer now using only results already returned. Do not request or repeat another action. State completed, deferred and unverified work distinctly; include /data for pending transaction processing. Missing results remain unknown.`,
+        } : { messages: boundedMessages };
+      },
       maxOutputTokens: 4096,
       maxRetries: 0,
       abortSignal: signal,
+      // Provider errors travel through fullStream and are classified safely by
+      // the API. The SDK's default error logger can expose private request data.
+      onError: () => {},
     });
 
     let fullText = '';
-    let incompleteFinish = false;
+    let finishReason: string | undefined;
     const iterator = result.fullStream[Symbol.asyncIterator]();
     try {
       while (true) {
@@ -274,9 +344,9 @@ export async function* runAgent(
             break;
           }
           case 'error':
-            throw new Error('The adviser response could not be completed. Check saved records before repeating any requested action.');
+            throw new Error('The adviser response could not be completed.', { cause: part.error });
           case 'finish':
-            incompleteFinish = !['stop'].includes(part.finishReason);
+            finishReason = part.finishReason;
             break;
           // tool-result / step-start / step-finish / finish / reasoning etc.
           // are not surfaced to callers — we only need text + tool-call events
@@ -293,8 +363,16 @@ export async function* runAgent(
 
     if (signal.aborted) throw new DOMException('The adviser request was interrupted.', 'AbortError');
 
-    if (!fullText || incompleteFinish) throw new Error('The adviser could not finish its response within the request budget. Check saved records before repeating a requested action.');
+    if (finishReason && finishReason !== 'stop') {
+      const code = ['length', 'tool-calls'].includes(finishReason) ? 'response_limit'
+        : finishReason === 'content-filter' ? 'provider_rejected' : 'invalid_response';
+      throw new AdviserFailureError(code);
+    }
+    if (!fullText.trim()) throw new AdviserFailureError('no_answer');
 
     return fullText;
+  } catch (error) {
+    if (signal.aborted) throw new AdviserFailureError(options.signal?.aborted ? 'request_cancelled' : 'request_timeout', error);
+    throw error;
   } finally { clearTimeout(timer); controller.abort(); }
 }

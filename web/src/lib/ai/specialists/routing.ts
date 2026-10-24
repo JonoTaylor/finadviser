@@ -9,6 +9,9 @@ export function routeSpecialists(message: string, mode: AdviserMode = 'team', hi
   if (/^(?:hi|hello|hey|thanks|thank you|good morning|good afternoon|good evening)[!.\s]*$/.test(text)) {
     return { ids: [], reason: 'A conversation greeting does not need a financial review.' };
   }
+  if (/^(?:who should lead|which specialist(?: should i (?:use|choose))?|what can (?:you|the specialists) do)[?!.\s]*$/.test(text)) {
+    return { ids: [], reason: 'Choosing a specialist does not require a financial review.' };
+  }
   // Keep supported record changes on the existing controlled action path.
   // "Save money" remains a spending question, rather than a record write.
   const imperative = /^(?:(?:please|can you|could you|would you|help me to)\s+)*(remember|forget|categori[sz]e|record|book|tag|untag|save|update|correct|set)\b/.exec(text)?.[1];

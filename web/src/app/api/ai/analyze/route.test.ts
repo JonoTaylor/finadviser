@@ -108,6 +108,28 @@ describe('specialist adviser request and streaming', () => {
     expect(text).not.toContain('private write');
   });
 
+  it('saves a durable warning if a record action was announced but the model failed before any answer text', async () => {
+    mocks.run.mockImplementation(async function* () {
+      yield { type: 'tool', name: 'update_owner_tax_profile', label: 'Saving tax profile' };
+      throw new Error('Provider failed after the action started');
+    });
+    const stream = events(await (await POST(request(body))).text());
+    expect(stream.at(-1).type).toBe('error');
+    expect(mocks.addAssistant).toHaveBeenCalledTimes(1);
+    expect(mocks.addAssistant.mock.calls[0][1]).toContain('**Review interrupted.**');
+    expect(mocks.addAssistant.mock.calls[0][2]).toMatchObject({ status: 'interrupted', specialistResults: [] });
+  });
+
+  it('reserves room for the durable warning when an interrupted response exceeds the saved-content limit', async () => {
+    mocks.run.mockImplementation(async function* () { yield { type: 'text', content: 'a'.repeat(100_050) }; });
+    const stream = events(await (await POST(request(body))).text());
+    expect(stream.at(-1).type).toBe('error');
+    const saved = mocks.addAssistant.mock.calls[0][1];
+    expect(saved.length).toBeLessThanOrEqual(100_000);
+    expect(saved).toContain('**Review interrupted.** This answer is incomplete.');
+    expect(mocks.addAssistant.mock.calls[0][2].status).toBe('interrupted');
+  });
+
   it('does not turn an empty coordinator response into a successful completed review', async () => {
     mocks.run.mockImplementation(async function* () { yield { type: 'specialist-result', result: taxResult }; });
     const stream = events(await (await POST(request(body))).text());

@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const mocks = vi.hoisted(() => ({ records: vi.fn(), owners: vi.fn(), research: vi.fn(), confirm: vi.fn(), process: vi.fn() }));
+const mocks = vi.hoisted(() => ({ records: vi.fn(), owners: vi.fn(), research: vi.fn(), confirm: vi.fn(), process: vi.fn(), privateNames: vi.fn() }));
+vi.mock('@/lib/categorization/payees/service', () => ({ loadPrivatePayeeNames: mocks.privateNames }));
 vi.mock('@/lib/repos', () => ({
   accountRepo: {}, journalRepo: {}, categoryRepo: {}, tipRepo: {}, budgetRepo: {}, savingsGoalRepo: {}, aiMemoryRepo: {}, ownerTaxRepo: {},
   propertyRepo: { listOwners: mocks.owners },
@@ -34,9 +35,21 @@ beforeEach(() => {
   mocks.records.mockResolvedValue([record]);
   mocks.owners.mockResolvedValue([{ id: 7, name: 'Private Owner' }]);
   mocks.research.mockResolvedValue(result);
+  mocks.privateNames.mockResolvedValue([]);
 });
 
 describe('record-scoped public merchant research', () => {
+  it('keeps remembered private payees out of direct public lookups too', async () => {
+    mocks.privateNames.mockResolvedValue(['Private Cleaner']);
+    mocks.records.mockResolvedValue([{ ...record, merchantName: 'Private Cleaner' }]);
+    expect(await executeTool('research_merchant', { journal_id: 42 })).toMatchObject({ status: 'skipped_private' });
+    expect(mocks.research).not.toHaveBeenCalled();
+  });
+  it('fails closed when remembered private identities cannot be read', async () => {
+    mocks.privateNames.mockRejectedValue(new Error('Private database detail'));
+    expect(await executeTool('research_merchant', { journal_id: 42 })).toMatchObject({ status: 'unavailable' });
+    expect(mocks.research).not.toHaveBeenCalled();
+  });
   it('selects the stored public merchant while keeping financial details out of the search input', async () => {
     expect(await executeTool('research_merchant', { journal_id: 42 })).toMatchObject({ ...result, journalId: 42 });
     expect(mocks.records).toHaveBeenCalledExactlyOnceWith([42]);

@@ -38,4 +38,11 @@ describe('running adviser capabilities', () => {
     expect(prompt).toContain('confirm a save only from a successful persisted result');
     expect(registeredCapabilitiesPrompt([])).not.toContain('You CAN save');
   });
+
+  it('describes merchant lookup as limited public research rather than guaranteed unrestricted browsing', () => {
+    const prompt = registeredCapabilitiesPrompt(['research_merchant']);
+    expect(prompt).toContain('You CAN request public merchant research by recorded journal ID');
+    expect(prompt).toContain('does not guarantee that the search provider is configured or available');
+    expect(registeredCapabilitiesPrompt([])).not.toContain('You CAN request public merchant research');
+  });
 });

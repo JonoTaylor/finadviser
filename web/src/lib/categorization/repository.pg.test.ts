@@ -4,6 +4,7 @@ import { PgDialect } from 'drizzle-orm/pg-core';
 import type { SQL } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CategorizationCandidate, CategorizationDecision } from './types';
+import type { MerchantResearchResult } from '@/lib/merchant-research/types';
 
 const mocks = vi.hoisted(() => ({ execute: vi.fn() }));
 vi.mock('@/lib/db', async () => ({ getDb: () => ({ execute: mocks.execute }), schema: await import('@/lib/db/schema') }));
@@ -50,7 +51,7 @@ describe.skipIf(!url)('categorisation persistence in disposable PostgreSQL', () 
         journal_entry_id integer PRIMARY KEY REFERENCES journal_entries(id) ON DELETE CASCADE,
         snapshot_hash text NOT NULL, context_key text NOT NULL,
         category_id integer REFERENCES categories(id), confidence numeric(5,4) CHECK (confidence BETWEEN 0 AND 1),
-        reason text NOT NULL, source text NOT NULL CHECK (source IN ('rule','learned','ai','user')),
+        reason text NOT NULL, evidence jsonb, source text NOT NULL CHECK (source IN ('rule','learned','ai','user')),
         status text NOT NULL CHECK (status IN ('applied','needs_review','reviewed','dismissed')),
         created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now()
       );
@@ -122,6 +123,11 @@ describe.skipIf(!url)('categorisation persistence in disposable PostgreSQL', () 
   });
   const rawJournal = async (id = 1) => (await fixture.query('SELECT * FROM journal_entries WHERE id=$1', [id])).rows[0];
   const rawDecision = async (id = 1) => (await fixture.query('SELECT * FROM transaction_categorizations WHERE journal_entry_id=$1', [id])).rows[0];
+  const publicEvidence = (): MerchantResearchResult => ({
+    status: 'matched', query: 'Example merchant business merchant',
+    sources: [{ title: 'Synthetic public business source', url: 'https://www.tesco.com/', snippet: 'Synthetic public merchant identity fixture.', retrievedAt: '2026-10-24T12:00:00.000Z' }],
+    researchedAt: '2026-10-24T12:00:00.000Z', provider: 'gateway_perplexity', scope: 'merchant_identity_only',
+  });
 
   it('excludes transfers, unresolved pairs, future postings, existing categories and equity adjustments', async () => {
     await fixture.query(`
@@ -166,6 +172,60 @@ describe.skipIf(!url)('categorisation persistence in disposable PostgreSQL', () 
     expect(await categorizationRepo.counts()).toMatchObject({ remaining: 2, available: 1, needsReview: 1 });
     expect(await categorizationRepo.persistDecisions([entry], [decision(entry)])).toEqual([]);
     expect((await rawJournal()).category_id).toBeNull();
+  });
+
+  it('stores actual public citations atomically with a category without learning merchant rules', async () => {
+    const entry = await candidate();
+    await categorizationRepo.persistDecisions([entry], [decision(entry, { evidence: publicEvidence() })]);
+    expect((await rawDecision()).evidence).toEqual(publicEvidence());
+    expect((await rawJournal()).category_id).toBe(1);
+    expect((await fixture.query('SELECT * FROM categorization_learning')).rows).toEqual([]);
+  });
+
+  it.each(['accept', 'correct', 'dismiss'] as const)('retains public citations when a user chooses %s', async action => {
+    const entry = await candidate();
+    await categorizationRepo.persistDecisions([entry], [decision(entry, { confidence: 0.6, status: 'needs_review', evidence: publicEvidence() })]);
+    expect((await loadReviewQueue()).items[0].evidence).toEqual(publicEvidence());
+    await decideReview({ journalId: 1, snapshot: entry.snapshot, action, remember: false, ...(action === 'correct' ? { categoryId: 2 } : {}) });
+    expect((await rawDecision()).evidence).toEqual(publicEvidence());
+    expect((await rawDecision()).source).toBe('user');
+    expect((await rawJournal()).category_id).toBe(action === 'dismiss' ? null : action === 'correct' ? 2 : 1);
+    expect((await fixture.query('SELECT * FROM categorization_learning')).rows).toEqual([]);
+  });
+
+  it('discards stale public provenance when a manual correction follows changed transaction context', async () => {
+    const entry = await candidate();
+    await categorizationRepo.persistDecisions([entry], [decision(entry, { confidence: 0.6, status: 'needs_review', evidence: publicEvidence() })]);
+    await fixture.query("UPDATE transaction_metadata SET merchant_name = 'Different merchant' WHERE journal_entry_id = 1");
+    const [current] = await getCategorizationRecords([1]);
+    await confirmedCategorize({ journalId: 1, categoryId: 2, snapshot: current.snapshot });
+    expect((await rawDecision()).evidence).toBeNull();
+  });
+
+  it('rejects malformed public provenance before applying any category', async () => {
+    const entry = await candidate();
+    await expect(categorizationRepo.persistDecisions([entry], [decision(entry, { evidence: { ...publicEvidence(), sources: [] } })])).rejects.toThrow('actual public merchant sources');
+    expect((await rawJournal()).category_id).toBeNull();
+    expect(await rawDecision()).toBeUndefined();
+  });
+
+  it('never exposes unsafe historical evidence in the review queue', async () => {
+    const entry = await candidate();
+    await categorizationRepo.persistDecisions([entry], [decision(entry, { confidence: 0.6, status: 'needs_review', evidence: publicEvidence() })]);
+    await fixture.query(`UPDATE transaction_categorizations SET evidence = jsonb_set(evidence, '{sources,0,url}', '"javascript:alert(1)"'::jsonb)`);
+    expect((await loadReviewQueue()).items[0].evidence).toBeNull();
+  });
+
+  it('rolls back the category if the public provenance database write fails', async () => {
+    const entry = await candidate();
+    await fixture.query('ALTER TABLE transaction_categorizations ADD CONSTRAINT reject_test_evidence CHECK (evidence IS NULL)');
+    try {
+      await expect(categorizationRepo.persistDecisions([entry], [decision(entry, { evidence: publicEvidence() })])).rejects.toThrow();
+      expect((await rawJournal()).category_id).toBeNull();
+      expect(await rawDecision()).toBeUndefined();
+    } finally {
+      await fixture.query('ALTER TABLE transaction_categorizations DROP CONSTRAINT reject_test_evidence');
+    }
   });
 
   it.each([

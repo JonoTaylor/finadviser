@@ -53,7 +53,7 @@ export default function DataProcessingCard() {
       <LinearProgress aria-label="Processing transactions" sx={{ mb: 1, borderRadius: '4px' }} />
       <Stack direction="row" gap={1} justifyContent="space-between" flexWrap="wrap" alignItems="center" aria-live="polite"><Typography variant="caption">{processing.cancelRequested ? 'Stopping after the current pass…' : processing.passes ? `${processing.passes} pass${processing.passes === 1 ? '' : 'es'} complete. Organising the next records…` : 'Organising the first batch…'}</Typography><Button size="small" onClick={processing.cancel} disabled={processing.cancelRequested}>Stop after this pass</Button></Stack>
     </Box>}
-    {processing.result && <Box sx={{ mt: 2 }}><ProcessingSummary result={processing.result} /></Box>}
+    {processing.result && <Box sx={{ mt: 2 }}><ProcessingSummary result={processing.result} onContinue={() => void run(true, 5)} running={processing.running} /></Box>}
     {processing.error && <Alert severity="warning" sx={{ mt: 2 }}>{processing.error}<Button component={Link} href="/data" size="small" sx={{ display: 'block', mt: 0.5 }}>Open assistant to retry</Button></Alert>}
     {processing.notice && <Typography variant="body2" color="text.secondary" sx={{ mt: 1.5 }}>{processing.notice}</Typography>}
   </CardContent></Card>;

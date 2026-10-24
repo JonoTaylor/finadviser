@@ -1,3 +1,5 @@
+import type { MerchantResearchResult } from '@/lib/merchant-research/types';
+
 export type CategorizationLeg = {
   accountId: number;
   accountName: string;
@@ -36,6 +38,8 @@ export type CategorizationDecision = {
   reason: string;
   source: 'rule' | 'learned' | 'ai';
   status: 'applied' | 'needs_review';
+  /** Public merchant identity evidence; never proof of a specific purchase. */
+  evidence?: MerchantResearchResult;
 };
 
 export type CategorizationOptions = {
@@ -43,7 +47,7 @@ export type CategorizationOptions = {
   syncRunIds?: number[];
   source?: 'manual' | 'import' | 'bank-sync' | 'scheduled';
   limit?: number;
-  /** One shared model budget for the whole run, rather than a fresh budget per batch. */
+  /** One shared model budget; individual attempts are capped and may retry once with a smaller batch. */
   modelTimeoutMs?: number;
   /** Overall run budget, including deterministic processing; maximum 45 seconds. */
   deadlineMs?: number;

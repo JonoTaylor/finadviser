@@ -43,6 +43,7 @@ export default function DataAssistantWorkspace() {
         <Box sx={{ flex: 1, minWidth: 0 }}>
           <Typography component="h2" variant="h6" sx={{ mb: 0.75 }}>Heavy lifting, with the evidence kept visible</Typography>
           <Typography variant="body2" color="text.secondary">Saved rules and reviewed matches organise repeat activity. AI reads each transaction’s actual account context and applies strongly supported categories. Unclear merchants and possible money movements come to you for a quick decision.</Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>For eligible unclear merchants, AI can search public business information and keep its sources with the suggestion. Searches use the merchant name and public location details, without transaction amounts or account details.</Typography>
         </Box>
         <Chip size="small" color={data?.processing.modelAvailable ? 'success' : 'default'} variant="outlined" label={isLoading ? 'Checking AI availability…' : data ? data.processing.modelAvailable ? 'AI configured' : 'AI unavailable' : 'Availability unknown'} sx={{ alignSelf: 'flex-start', flexShrink: 0 }} />
       </Stack>
@@ -51,7 +52,7 @@ export default function DataAssistantWorkspace() {
         <LinearProgress aria-label="Organising queued records" sx={{ mb: 1.25 }} />
         <Stack direction="row" justifyContent="space-between" gap={1} flexWrap="wrap" alignItems="center"><Typography variant="body2">{processing.passes ? `${processing.passes} processing pass${processing.passes === 1 ? '' : 'es'} complete. ` : ''}{processing.cancelRequested ? 'Stopping after the current pass…' : 'Working through the next bounded batch…'}</Typography><Button size="small" onClick={processing.cancel} disabled={processing.cancelRequested}>Stop after this pass</Button></Stack>
       </Box>}
-      {processing.result && <Box sx={{ mt: 2 }}><ProcessingSummary result={processing.result} /></Box>}
+      {processing.result && <Box sx={{ mt: 2 }}><ProcessingSummary result={processing.result} onContinue={() => void processing.run(true)} running={processing.running} /></Box>}
       {processing.error && <Alert severity="error" sx={{ mt: 2 }}>{processing.error} Your saved transactions remain available; completed categorisation passes have been retained.</Alert>}
       {processing.notice && <Alert severity="info" sx={{ mt: 2 }}>{processing.notice}</Alert>}
       {data && <Typography variant="caption" component="p" sx={{ mt: 2 }}>Household data snapshot · {data.asOf} · Missing information stays unknown until you provide or confirm it.</Typography>}

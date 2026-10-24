@@ -1,4 +1,5 @@
 import { randomBytes, randomUUID } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
 import { Client, Pool } from 'pg';
 import { PgDialect } from 'drizzle-orm/pg-core';
 import type { SQL } from 'drizzle-orm';
@@ -10,7 +11,7 @@ const mocks = vi.hoisted(() => ({ execute: vi.fn() }));
 vi.mock('@/lib/db', async () => ({ getDb: () => ({ execute: mocks.execute }), schema: await import('@/lib/db/schema') }));
 import { categorizationRepo } from './repository';
 import { CategorizationConflictError, InvalidCategorizationError, confirmedCategorize, decideReview, getCategorizationRecords, loadReviewQueue } from './review';
-import { categorizationContextKey } from './decisions';
+import { categorizationContextKey, confirmedContextReviewReason, PAYEE_MEANINGS_CONFLICT_REASON } from './decisions';
 
 const url = process.env.DATA_PLAN_TEST_PG_URL;
 
@@ -64,6 +65,10 @@ describe.skipIf(!url)('categorisation persistence in disposable PostgreSQL', () 
         expires_at timestamptz NOT NULL, updated_at timestamptz NOT NULL DEFAULT now()
       );
     `);
+    const migration = await readFile(new URL('../db/migration.sql', import.meta.url), 'utf8');
+    const privatePayees = migration.indexOf('-- Private confirmed payee meanings.');
+    if (privatePayees < 0) throw new Error('Missing private payee migration.');
+    await fixture.query(migration.slice(privatePayees));
     pool = new Pool({ connectionString: url, max: 2, options: `-c search_path=${testSchema},public` });
     const dialect = new PgDialect();
     mocks.execute.mockImplementation(async (statement: SQL) => {
@@ -406,6 +411,38 @@ describe.skipIf(!url)('categorisation persistence in disposable PostgreSQL', () 
     expect(await rawDecision()).toMatchObject({ source: 'user', status: 'reviewed', category_id: 1, confidence: null });
   });
 
+  it('forgets an older conflicting exact match when a later manual correction is not remembered', async () => {
+    const entry = await candidate(1);
+    const key = categorizationContextKey(entry);
+    await confirmedCategorize({ journalId: 1, categoryId: 1, snapshot: entry.snapshot, remember: true });
+    await fixture.query("INSERT INTO categorization_learning(context_key,category_id) VALUES ('unrelated-confirmation',1)");
+    const [current] = await getCategorizationRecords([1]);
+    expect(await confirmedCategorize({ journalId: 1, categoryId: 2, snapshot: current.snapshot, remember: false })).toMatchObject({ categoryId: 2, remembered: false });
+    expect((await categorizationRepo.lookupLearned([key])).has(key)).toBe(false);
+    expect(await categorizationRepo.lookupLearned(['unrelated-confirmation'])).toEqual(new Map([['unrelated-confirmation', 1]]));
+    expect((await rawJournal(1)).category_id).toBe(2);
+  });
+
+  it('keeps an existing consistent exact match when the user confirms that category without remembering again', async () => {
+    const entry = await candidate(1);
+    const key = categorizationContextKey(entry);
+    await confirmedCategorize({ journalId: 1, categoryId: 1, snapshot: entry.snapshot, remember: true });
+    const [current] = await getCategorizationRecords([1]);
+    await confirmedCategorize({ journalId: 1, categoryId: 1, snapshot: current.snapshot, remember: false });
+    expect(await categorizationRepo.lookupLearned([key])).toEqual(new Map([[key, 1]]));
+  });
+
+  it.each(['correct', 'dismiss'] as const)('retires conflicting exact learning only for a confirmed review correction, not a %s dismissal', async action => {
+    const entry = await candidate(1);
+    const key = categorizationContextKey(entry);
+    await fixture.query('INSERT INTO categorization_learning(context_key,category_id) VALUES ($1,1)', [key]);
+    await categorizationRepo.persistDecisions([entry], [decision(entry, { source: 'learned', confidence: 1, status: 'needs_review' })]);
+    await decideReview({ journalId: 1, snapshot: entry.snapshot, action, remember: false, ...(action === 'correct' ? { categoryId: 2 } : {}) });
+    const learned = await categorizationRepo.lookupLearned([key]);
+    expect(learned.has(key)).toBe(action === 'dismiss');
+    expect((await rawJournal(1)).category_id).toBe(action === 'correct' ? 2 : null);
+  });
+
   it.each([
     ['metadata', "UPDATE transaction_metadata SET merchant_name='Changed after queue load' WHERE journal_entry_id=1"],
     ['manual category', 'UPDATE journal_entries SET category_id=2 WHERE id=1'],
@@ -521,6 +558,113 @@ describe.skipIf(!url)('categorisation persistence in disposable PostgreSQL', () 
     await decideReview({ journalId: 1, snapshot: first.snapshot, action: 'accept', remember: true });
     return second;
   }
+
+  async function alignPrivatePayments() {
+    await fixture.query(`
+      UPDATE journal_entries SET property_id=7 WHERE id=2;
+      UPDATE book_entries SET account_id=1 WHERE journal_entry_id=2 AND account_id=5;
+      UPDATE transaction_metadata SET transaction_type='bank_transfer';
+    `);
+  }
+  async function confirmedPrivatePayee() {
+    const source = await candidate(1);
+    await confirmedCategorize({ journalId: 1, categoryId: 1, snapshot: source.snapshot });
+    const id = randomUUID();
+    await fixture.query(`INSERT INTO categorization_payee_memories
+      (id,scope_key,account_id,owner_id,account_type,direction,currency,property_id,payee_name,purpose,category_id,identity_kind,source_journal_id)
+      VALUES ($1,'fixture-scope',1,NULL,'ASSET',-1,'GBP',7,'Known cleaner','Confirmed recurring service',1,'merchant',1)`, [id]);
+    await fixture.query(`INSERT INTO categorization_payee_aliases(memory_id,scope_key,identity_kind,normalized_alias,display_alias)
+      VALUES ($1,'fixture-scope','merchant','example merchant','Example merchant')`, [id]);
+    return id;
+  }
+
+  it('resolves an unchanged review using current confirmed payee knowledge without changing ledger amounts', async () => {
+    await alignPrivatePayments();
+    const pending = await candidate(2);
+    await categorizationRepo.persistDecisions([pending], [decision(pending, { confidence: 0.4, status: 'needs_review' })]);
+    const memoryId = await confirmedPrivatePayee();
+    const [reconsidered] = await categorizationRepo.listCandidates();
+    expect(reconsidered.id).toBe(2);
+    expect(reconsidered.pendingReview).toBe(true);
+    expect(confirmedContextReviewReason(reconsidered, 1, [{ id: 1, name: 'Groceries' }])).toBeNull();
+    const legs = (await fixture.query('SELECT * FROM book_entries ORDER BY id')).rows;
+    expect(await categorizationRepo.persistDecisions([reconsidered], [decision(reconsidered, {
+      source: 'payee', confidence: 1, payeeMemoryId: memoryId, payeeMemoryRevision: 1,
+    })])).toEqual([{ journalId: 2, status: 'applied' }]);
+    expect(await rawDecision(2)).toMatchObject({ source: 'payee', payee_memory_id: memoryId, payee_memory_revision: 1 });
+    expect((await fixture.query('SELECT * FROM book_entries ORDER BY id')).rows).toEqual(legs);
+    expect(await categorizationRepo.counts()).toMatchObject({ available: 0, needsReview: 0 });
+  });
+
+  it('reconsiders the legacy bank-transfer-only review once when its exact context was explicitly remembered', async () => {
+    await alignPrivatePayments();
+    await fixture.query("UPDATE transaction_metadata SET bank_category='groceries' WHERE journal_entry_id=2");
+    const source = await candidate(1);
+    await confirmedCategorize({ journalId: 1, categoryId: 1, snapshot: source.snapshot, remember: true });
+    const pending = await candidate(2);
+    const reason = 'The bank metadata describes an account movement. Confirm whether it is spending, income or a transfer before categorising it.';
+    await categorizationRepo.persistDecisions([pending], [decision(pending, { source: 'learned', confidence: 1, status: 'needs_review', reason })]);
+    expect(await categorizationRepo.counts()).toMatchObject({ available: 1, needsReview: 1 });
+    const [reconsidered] = await categorizationRepo.listCandidates();
+    expect(confirmedContextReviewReason(reconsidered, 1, [{ id: 1, name: 'Groceries' }])).toBeNull();
+    expect(await categorizationRepo.persistDecisions([reconsidered], [decision(reconsidered, { source: 'learned', confidence: 1 })])).toEqual([{ journalId: 2, status: 'applied' }]);
+    expect(await categorizationRepo.counts()).toMatchObject({ available: 0, needsReview: 0 });
+    expect(await categorizationRepo.listCandidates()).toEqual([]);
+  });
+
+  it.each(['disabled', 'revision', 'source'] as const)('rejects stale private payee decisions after a %s change', async change => {
+    await alignPrivatePayments();
+    const memoryId = await confirmedPrivatePayee();
+    const pending = await candidate(2);
+    if (change === 'disabled') await fixture.query("UPDATE categorization_payee_memories SET status='disabled' WHERE id=$1", [memoryId]);
+    if (change === 'revision') await fixture.query('UPDATE categorization_payee_memories SET revision=2 WHERE id=$1', [memoryId]);
+    if (change === 'source') await fixture.query('UPDATE journal_entries SET category_id=2 WHERE id=1');
+    expect(await categorizationRepo.persistDecisions([pending], [decision(pending, {
+      source: 'payee', confidence: 1, payeeMemoryId: memoryId, payeeMemoryRevision: 1,
+    })])).toEqual([]);
+    expect((await rawJournal(2)).category_id).toBeNull();
+  });
+
+  it('retires conflicting private knowledge atomically when a later payment is corrected', async () => {
+    await alignPrivatePayments();
+    const memoryId = await confirmedPrivatePayee();
+    const pending = await candidate(2);
+    await confirmedCategorize({ journalId: 2, categoryId: 2, snapshot: pending.snapshot });
+    expect((await rawJournal(2)).category_id).toBe(2);
+    expect((await fixture.query('SELECT status,revision FROM categorization_payee_memories WHERE id=$1', [memoryId])).rows[0]).toEqual({ status: 'conflicted', revision: 2 });
+    expect((await fixture.query('SELECT active FROM categorization_payee_aliases WHERE memory_id=$1', [memoryId])).rows[0].active).toBe(false);
+    expect(await rawDecision(2)).toMatchObject({ source: 'user', payee_memory_id: null, payee_memory_revision: null });
+  });
+
+  it('does not loop an unchanged private-meaning conflict and revisits it when one meaning remains', async () => {
+    await alignPrivatePayments();
+    const memoryId = await confirmedPrivatePayee();
+    await fixture.query(`
+      INSERT INTO journal_entries(id,date,description,property_id,category_id) VALUES (4,'2026-10-11','Example supermarket',7,2);
+      INSERT INTO book_entries(journal_entry_id,account_id,amount) VALUES (4,1,-10),(4,2,10);
+      INSERT INTO transaction_metadata(journal_entry_id,merchant_name,bank_category,transaction_type,currency) VALUES (4,'Example merchant','shopping','bank_transfer','GBP');
+    `);
+    const otherId = randomUUID();
+    await fixture.query(`INSERT INTO categorization_payee_memories
+      (id,scope_key,account_id,owner_id,account_type,direction,currency,property_id,payee_name,category_id,identity_kind,source_journal_id)
+      VALUES ($1,'fixture-scope',1,NULL,'ASSET',-1,'GBP',7,'Other confirmed meaning',2,'description',4)`, [otherId]);
+    await fixture.query(`INSERT INTO categorization_payee_aliases(memory_id,scope_key,identity_kind,normalized_alias,display_alias)
+      VALUES ($1,'fixture-scope','description','example supermarket','Example supermarket')`, [otherId]);
+    const pending = await candidate(2);
+    await categorizationRepo.persistDecisions([pending], [decision(pending, {
+      source: 'payee', categoryId: null, confidence: 1, status: 'needs_review', reason: PAYEE_MEANINGS_CONFLICT_REASON,
+      payeeMemoryId: memoryId, payeeMemoryRevision: 1,
+    })]);
+    expect(await categorizationRepo.listCandidates()).toEqual([]);
+    expect(await categorizationRepo.counts()).toMatchObject({ available: 0, needsReview: 1 });
+    await fixture.query("UPDATE categorization_payee_memories SET status='disabled', revision=2 WHERE id=$1", [otherId]);
+    const [resolved] = await categorizationRepo.listCandidates();
+    expect(resolved.id).toBe(2);
+    expect(await categorizationRepo.persistDecisions([resolved], [decision(resolved, {
+      source: 'payee', confidence: 1, payeeMemoryId: memoryId, payeeMemoryRevision: 1,
+    })])).toEqual([{ journalId: 2, status: 'applied' }]);
+    expect(await categorizationRepo.listCandidates()).toEqual([]);
+  });
 
   it('reuses an opted-in confirmation for an existing identical-context question without another model guess', async () => {
     const second = await matchingPendingRecords();

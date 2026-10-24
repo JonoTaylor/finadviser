@@ -5,10 +5,12 @@ import { researchMerchant } from '@/lib/merchant-research/service';
 import type { MerchantResearchResult } from '@/lib/merchant-research/types';
 import { categoryRepo } from '@/lib/repos/category.repo';
 import { propertyRepo } from '@/lib/repos/property.repo';
+import { loadActivePayeeMemories, loadPrivatePayeeNames } from './payees/service';
+import { matchingConfirmedPayees } from './payees/matching';
 import { categorizationRepo } from './repository';
 import {
-  categorizationContextKey, MAX_PROCESSING_ENTRIES, MODEL_BATCH_SIZE,
-  movementReviewReason, needsMovementReview, ruleDecision, validateModelDecisions,
+  categorizationContextKey, confirmedContextReviewReason, MAX_PROCESSING_ENTRIES, MODEL_BATCH_SIZE, PAYEE_MEANINGS_CONFLICT_REASON,
+  needsMovementReview, ruleDecision, validateModelDecisions,
 } from './decisions';
 import type {
   CategorizationCandidate, CategorizationDecision, CategorizationOptions, CategorizationResult,
@@ -103,22 +105,43 @@ export async function processCategorization(options: CategorizationOptions = {})
       categorizationRepo.listCandidates(normalized), categoryRepo.listAll(), categoryRepo.getRules(),
     ]);
     counters.total = candidates.length;
-    const learned = await categorizationRepo.lookupLearned(candidates.map(categorizationContextKey));
+    const [learned, payeeMemories] = await Promise.all([
+      categorizationRepo.lookupLearned(candidates.map(categorizationContextKey)),
+      loadActivePayeeMemories(candidates),
+    ]);
     const validCategories = new Set(categories.map(category => category.id));
     const deterministic: CategorizationDecision[] = [];
     const unmatched: CategorizationCandidate[] = [];
     for (const candidate of candidates) {
       const learnedCategoryId = learned.get(categorizationContextKey(candidate));
-      if (learnedCategoryId !== undefined && validCategories.has(learnedCategoryId)) {
+      const payeeMatches = matchingConfirmedPayees(candidate, payeeMemories, categories);
+      const payeeMatch = payeeMatches[0];
+      const validLearned = learnedCategoryId !== undefined && validCategories.has(learnedCategoryId);
+      if (payeeMatch) {
+        const multipleMeanings = payeeMatches.length > 1;
+        const mappingConflict = validLearned && learnedCategoryId !== payeeMatch.memory.categoryId;
+        const reviewReason = multipleMeanings ? PAYEE_MEANINGS_CONFLICT_REASON : mappingConflict
+          ? 'Your saved exact match and private payee meaning disagree. Confirm the category and update the conflicting knowledge.'
+          : confirmedContextReviewReason(candidate, payeeMatch.memory.categoryId, categories);
+        deterministic.push({
+          journalId: candidate.id, categoryId: mappingConflict || multipleMeanings ? null : payeeMatch.memory.categoryId,
+          confidence: 1, source: 'payee', status: reviewReason ? 'needs_review' : 'applied',
+          reason: reviewReason ?? 'Matches private payee knowledge you confirmed for this account, direction and property context.',
+          payeeMemoryId: payeeMatch.memory.id, payeeMemoryRevision: payeeMatch.memory.revision,
+        });
+      } else if (validLearned) {
+        const reviewReason = confirmedContextReviewReason(candidate, learnedCategoryId, categories);
         deterministic.push({
           journalId: candidate.id, categoryId: learnedCategoryId, confidence: 1, source: 'learned',
-          status: needsMovementReview(candidate, learnedCategoryId, categories) ? 'needs_review' : 'applied',
-          reason: movementReviewReason(candidate, learnedCategoryId, categories) ?? 'Matches an exact transaction context previously confirmed by you.',
+          status: reviewReason ? 'needs_review' : 'applied',
+          reason: reviewReason ?? 'Matches an exact transaction context previously confirmed by you.',
         });
       } else {
         const rule = ruleDecision(candidate, rules, categories);
         if (rule) deterministic.push(rule);
-        else unmatched.push(candidate);
+        // An unchanged review is only eligible for newly confirmed knowledge.
+        // Never send it through the model again merely because a lookup raced.
+        else if (!candidate.pendingReview) unmatched.push(candidate);
       }
     }
 
@@ -134,7 +157,7 @@ export async function processCategorization(options: CategorizationOptions = {})
           if (decision.source === 'ai') counters.aiNoMatch++;
         } else if (decision.source === 'rule') {
           counters.ruleBased++;
-        } else if (decision.source === 'learned') {
+        } else if (decision.source === 'learned' || decision.source === 'payee') {
           counters.learned++;
         } else {
           counters.aiCategorized++;
@@ -201,8 +224,10 @@ export async function processCategorization(options: CategorizationOptions = {})
             if (timeoutMs <= 0) return decisions;
             const lookupStartedAt = Date.now();
             try {
-              const owners = await boundedOperation(() => propertyRepo.listOwners(), timeoutMs);
-              privateNames = owners.map(owner => owner.name);
+              const [owners, payeeNames] = await boundedOperation(() => Promise.all([
+                propertyRepo.listOwners(), loadPrivatePayeeNames(),
+              ]), timeoutMs);
+              privateNames = [...owners.map(owner => owner.name), ...payeeNames];
             } catch {
               // Fail closed when the local private-name exclusion list cannot
               // be read; categorisation from local transaction context still works.

@@ -15,6 +15,7 @@ import type { DataIntelligenceReport } from '@/lib/data-intelligence/types';
 import CategorizationJobProgress from './CategorizationJobProgress';
 import CategorizationReviewQueue from './CategorizationReviewQueue';
 import useDataProcessing from './useDataProcessing';
+import PaymentKnowledgeCard from './PaymentKnowledgeCard';
 
 const priorityOrder = { high: 0, medium: 1, low: 2 };
 const coverageLabels = { recorded: 'Recorded', empty: 'Not recorded', incomplete: 'Needs detail', stale: 'Needs an update', unavailable: 'Unavailable' };
@@ -55,6 +56,7 @@ export default function DataAssistantWorkspace() {
       {data && <Typography variant="caption" component="p" sx={{ mt: 2 }}>Household data snapshot · {data.asOf} · Missing information stays unknown until you provide or confirm it.</Typography>}
     </CardContent></Card>
 
+    <Box id="payment-meanings" sx={{ scrollMarginTop: 84, mb: 3 }}><PaymentKnowledgeCard onChanged={processing.refresh} /></Box>
     <Box id="review" sx={{ scrollMarginTop: 84, mb: 3 }}><CategorizationReviewQueue onReviewed={processing.refresh} /></Box>
 
     <Box id="missing-information" sx={{ scrollMarginTop: 84, mb: 3 }}>

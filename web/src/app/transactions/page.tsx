@@ -175,6 +175,8 @@ export default function TransactionsPage() {
         currentCategoryId={editEntry?.categoryId ?? null}
         description={editEntry?.description}
         categories={categories ?? []}
+        journalId={editEntry?.id}
+        onRemembered={() => { setEditEntry(null); void refreshFinancialData(isFinancialDataKey); setSnackbar({ open: true, message: 'Category and private payment meaning saved.', severity: 'success' }); }}
         onClose={() => setEditEntry(null)}
         onSave={async (categoryId, createRule) => {
           if (editEntry) await handleCategoryUpdate(editEntry.id, categoryId, createRule, editEntry.description);

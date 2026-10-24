@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  categorizationContextKey, categorizationPrompt, InvalidCategorizationResponseError,
+  categorizationContextKey, categorizationPrompt, confirmedContextReviewReason, InvalidCategorizationResponseError,
   needsMovementReview, ruleDecision, validateModelDecisions,
 } from './decisions';
 import type { CategorizationCandidate } from './types';
@@ -106,6 +106,28 @@ describe('purchase purpose remains distinct from merchant identity', () => {
 });
 
 describe('movement protection', () => {
+  it('reuses an explicitly confirmed scoped external bank payment without weakening AI movement checks', () => {
+    const payment = candidate({ transactionType: 'BANK_TRANSFER', description: 'Known cleaner payment', merchantName: 'Known cleaner' });
+    expect(confirmedContextReviewReason(payment, 1, categories)).toBeNull();
+    expect(needsMovementReview(payment, 1, categories)).toBe(true);
+    expect(validateModelDecisions({ decisions: [decision()] }, [payment], categories)[0].status).toBe('needs_review');
+    expect(ruleDecision(payment, [{ pattern: 'Known cleaner payment', categoryId: 1, matchType: 'exact', source: 'user' }], categories)?.status).toBe('needs_review');
+  });
+  it.each(['internal transfer', 'account_transfer', 'money-transfer', 'pot transfer', 'credit card repayment', 'loan repayment'])('keeps confirmed context %s behind movement review', transactionType => {
+    expect(confirmedContextReviewReason(candidate({ transactionType }), 1, categories)).not.toBeNull();
+  });
+  it('does not let confirmation override multiple accounts, zero amounts, liability credits or transfer categories', () => {
+    const payment = candidate({ transactionType: 'bank transfer' });
+    const secondFinancial = { ...payment.legs[0], accountId: 99, amount: '20.00' };
+    for (const unsafe of [
+      candidate({ ...payment, legs: [...payment.legs, secondFinancial] }),
+      candidate({ ...payment, legs: [{ ...payment.legs[0], amount: '0.00' }] }),
+      candidate({ ...payment, legs: [{ ...payment.legs[0], accountType: 'LIABILITY', amount: '20.00' }] }),
+      candidate({ ...payment, legs: [] }),
+    ]) expect(confirmedContextReviewReason(unsafe, 1, categories)).not.toBeNull();
+    expect(confirmedContextReviewReason(payment, 3, categories)).not.toBeNull();
+    expect(confirmedContextReviewReason(payment, 4, categories)).not.toBeNull();
+  });
   it('reviews unresolved movements with multiple financial accounts', () => {
     const movement = candidate({ legs: [...candidate().legs, { accountId: 15, accountName: 'Example card', accountType: 'LIABILITY', ownerId: 1, amount: '20.00' }] });
     expect(validateModelDecisions({ decisions: [decision()] }, [movement], categories)[0].status).toBe('needs_review');

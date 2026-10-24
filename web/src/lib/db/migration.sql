@@ -1528,3 +1528,45 @@ CREATE TABLE IF NOT EXISTS categorization_job_passes (
     finished_at TIMESTAMPTZ
 );
 CREATE INDEX IF NOT EXISTS categorization_job_passes_job_idx ON categorization_job_passes(job_id, status);
+
+-- Private confirmed payee meanings. Exact aliases remain inside a complete
+-- financial-account/owner/direction/currency/property scope, never a web query.
+CREATE TABLE IF NOT EXISTS categorization_payee_memories (
+    id UUID PRIMARY KEY,
+    revision INTEGER NOT NULL DEFAULT 1 CHECK (revision > 0),
+    status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'disabled', 'conflicted')),
+    scope_key TEXT NOT NULL,
+    account_id INTEGER NOT NULL REFERENCES accounts(id),
+    owner_id INTEGER,
+    account_type TEXT NOT NULL CHECK (account_type IN ('ASSET', 'LIABILITY')),
+    direction INTEGER NOT NULL CHECK (direction IN (-1, 1)),
+    currency TEXT,
+    property_id INTEGER,
+    payee_name TEXT NOT NULL,
+    purpose TEXT,
+    category_id INTEGER NOT NULL REFERENCES categories(id),
+    identity_kind TEXT NOT NULL CHECK (identity_kind IN ('merchant', 'description', 'bank_payee')),
+    source_journal_id INTEGER REFERENCES journal_entries(id) ON DELETE SET NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS categorization_payee_memories_scope_idx ON categorization_payee_memories(scope_key, status);
+CREATE TABLE IF NOT EXISTS categorization_payee_aliases (
+    id SERIAL PRIMARY KEY,
+    memory_id UUID NOT NULL REFERENCES categorization_payee_memories(id) ON DELETE CASCADE,
+    scope_key TEXT NOT NULL,
+    identity_kind TEXT NOT NULL,
+    normalized_alias TEXT NOT NULL,
+    display_alias TEXT NOT NULL,
+    active BOOLEAN NOT NULL DEFAULT TRUE,
+    is_current BOOLEAN NOT NULL DEFAULT TRUE,
+    CONSTRAINT categorization_payee_alias_memory_key UNIQUE (memory_id, identity_kind, normalized_alias)
+);
+ALTER TABLE categorization_payee_aliases ADD COLUMN IF NOT EXISTS is_current BOOLEAN NOT NULL DEFAULT TRUE;
+CREATE UNIQUE INDEX IF NOT EXISTS categorization_payee_alias_active_key
+    ON categorization_payee_aliases(scope_key, identity_kind, normalized_alias) WHERE active = TRUE;
+ALTER TABLE transaction_categorizations ADD COLUMN IF NOT EXISTS payee_memory_id UUID REFERENCES categorization_payee_memories(id) ON DELETE SET NULL;
+ALTER TABLE transaction_categorizations ADD COLUMN IF NOT EXISTS payee_memory_revision INTEGER;
+ALTER TABLE transaction_categorizations DROP CONSTRAINT IF EXISTS transaction_categorizations_source_check;
+ALTER TABLE transaction_categorizations ADD CONSTRAINT transaction_categorizations_source_check
+    CHECK (source IN ('rule', 'learned', 'ai', 'user', 'payee'));

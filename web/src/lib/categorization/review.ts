@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { getDb } from '@/lib/db';
 import { parseMerchantResearchEvidence } from '@/lib/merchant-research/schema';
 import type { MerchantResearchResult } from '@/lib/merchant-research/types';
+import { payeeCandidateMatchSql } from './payees/sql';
 import { categorizationContextKey } from './decisions';
 import { candidateEligibilitySql, candidateSnapshotSql } from './repository';
 import type { CategorizationCandidate, CategorizationLeg } from './types';
@@ -157,13 +158,27 @@ export async function confirmedCategorize(input: {
         context_key = EXCLUDED.context_key, category_id = EXCLUDED.category_id,
         evidence = CASE WHEN transaction_categorizations.snapshot_hash = EXCLUDED.snapshot_hash
           THEN transaction_categorizations.evidence ELSE NULL END,
-        confidence = NULL, reason = EXCLUDED.reason, source = 'user', status = 'reviewed', updated_at = now()
+        confidence = NULL, reason = EXCLUDED.reason, source = 'user', status = 'reviewed',
+        payee_memory_id = NULL, payee_memory_revision = NULL, updated_at = now()
       RETURNING journal_entry_id
     ), learned AS (
       INSERT INTO categorization_learning (context_key, category_id, created_at, updated_at)
       SELECT ${key}, ${input.categoryId}, now(), now() FROM stored WHERE ${input.remember === true}
       ON CONFLICT (context_key) DO UPDATE SET category_id = EXCLUDED.category_id, updated_at = now()
       RETURNING context_key
+    ), forgotten AS (
+      DELETE FROM categorization_learning learning
+      WHERE learning.context_key = ${key} AND learning.category_id <> ${input.categoryId}
+        AND ${input.remember !== true} AND EXISTS (SELECT 1 FROM stored)
+      RETURNING context_key
+    ), conflicting_payees AS (
+      UPDATE categorization_payee_memories pm SET status = 'conflicted', revision = pm.revision + 1, updated_at = now()
+      WHERE pm.category_id <> ${input.categoryId}
+        AND EXISTS (SELECT 1 FROM updated u JOIN journal_entries je ON je.id = u.id WHERE ${payeeCandidateMatchSql()})
+      RETURNING pm.id
+    ), retired_aliases AS (
+      UPDATE categorization_payee_aliases SET active = FALSE
+      WHERE memory_id IN (SELECT id FROM conflicting_payees) RETURNING memory_id
     )
     SELECT stored.journal_entry_id AS "journalId", EXISTS(SELECT 1 FROM learned) AS remembered FROM stored
   `);
@@ -199,6 +214,7 @@ export async function decideReview(input: ReviewDecision): Promise<{
       UPDATE transaction_categorizations tc
       SET status = ${input.action === 'dismiss' ? 'dismissed' : 'reviewed'}, source = 'user',
         category_id = ${categoryId}, confidence = NULL,
+        payee_memory_id = NULL, payee_memory_revision = NULL,
         reason = ${input.action === 'dismiss' ? 'Suggestion dismissed by the user; no category applied.' : 'Category confirmed by the user.'}, updated_at = now()
       FROM locked WHERE tc.journal_entry_id = locked.id RETURNING tc.journal_entry_id
     ), updated AS (
@@ -210,6 +226,19 @@ export async function decideReview(input: ReviewDecision): Promise<{
       SELECT ${key}, ${categoryId}, now(), now() FROM updated WHERE ${input.remember && input.action !== 'dismiss'}
       ON CONFLICT (context_key) DO UPDATE SET category_id = EXCLUDED.category_id, updated_at = now()
       RETURNING context_key
+    ), forgotten AS (
+      DELETE FROM categorization_learning learning
+      WHERE learning.context_key = ${key} AND learning.category_id <> ${categoryId}::integer
+        AND ${!input.remember && input.action !== 'dismiss'} AND EXISTS (SELECT 1 FROM updated)
+      RETURNING context_key
+    ), conflicting_payees AS (
+      UPDATE categorization_payee_memories pm SET status = 'conflicted', revision = pm.revision + 1, updated_at = now()
+      WHERE pm.category_id <> ${categoryId}::integer
+        AND EXISTS (SELECT 1 FROM updated u JOIN journal_entries je ON je.id = u.id WHERE ${payeeCandidateMatchSql()})
+      RETURNING pm.id
+    ), retired_aliases AS (
+      UPDATE categorization_payee_aliases SET active = FALSE
+      WHERE memory_id IN (SELECT id FROM conflicting_payees) RETURNING memory_id
     )
     SELECT stored.journal_entry_id AS "journalId", EXISTS(SELECT 1 FROM learned) AS remembered FROM stored
   `);

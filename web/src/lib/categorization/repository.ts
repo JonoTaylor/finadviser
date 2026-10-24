@@ -1,8 +1,10 @@
 import { sql, type SQL } from 'drizzle-orm';
+import { z } from 'zod';
 import { getDb } from '@/lib/db';
 import { londonTodayIso } from '@/lib/dates/today';
 import { parseMerchantResearchEvidence } from '@/lib/merchant-research/schema';
-import { categorizationContextKey } from './decisions';
+import { categorizationContextKey, PAYEE_MEANINGS_CONFLICT_REASON } from './decisions';
+import { payeeCandidateMatchSql, payeeSourceValiditySql } from './payees/sql';
 import type { CategorizationCandidate, CategorizationDecision, CategorizationOptions } from './types';
 
 /**
@@ -51,15 +53,28 @@ function scopeSql(options: CategorizationOptions): SQL {
   return clauses.length ? sql.join(clauses, sql` AND `) : sql`TRUE`;
 }
 
+const refreshedConfirmation = sql`EXISTS (
+  SELECT 1 FROM categorization_learning learning WHERE learning.context_key = tc.context_key
+    AND tc.status = 'needs_review'
+    AND (tc.source NOT IN ('learned', 'payee')
+      OR (tc.source = 'learned' AND tc.category_id IS DISTINCT FROM learning.category_id)
+      OR learning.updated_at > tc.updated_at
+      OR (tc.source = 'learned' AND tc.reason = 'The bank metadata describes an account movement. Confirm whether it is spending, income or a transfer before categorising it.'
+        AND lower(btrim(regexp_replace(COALESCE((SELECT transaction_type FROM transaction_metadata WHERE journal_entry_id = je.id), ''), '[_-]+', ' ', 'g'))) = 'bank transfer'))
+) OR EXISTS (
+  SELECT 1 FROM categorization_payee_memories pm
+  WHERE tc.status = 'needs_review' AND ${payeeCandidateMatchSql()} AND ${payeeSourceValiditySql()}
+    AND (SELECT count(*) FROM categorization_payee_memories candidate_pm
+      WHERE ${payeeCandidateMatchSql('candidate_pm')} AND ${payeeSourceValiditySql('candidate_pm')}) = 1
+    AND (tc.payee_memory_id IS DISTINCT FROM pm.id OR tc.payee_memory_revision IS DISTINCT FROM pm.revision
+      OR tc.reason = ${PAYEE_MEANINGS_CONFLICT_REASON})
+)`;
+
 const noCurrentDecision = sql`NOT EXISTS (
   SELECT 1 FROM transaction_categorizations tc
    WHERE tc.journal_entry_id = je.id
      AND (tc.status IN ('reviewed', 'dismissed', 'applied') OR (
-       tc.snapshot_hash = ${candidateSnapshotSql()} AND NOT EXISTS (
-         SELECT 1 FROM categorization_learning learning WHERE learning.context_key = tc.context_key
-           AND tc.status = 'needs_review'
-           AND (tc.source <> 'learned' OR tc.category_id IS DISTINCT FROM learning.category_id)
-       )
+       tc.snapshot_hash = ${candidateSnapshotSql()} AND NOT (${refreshedConfirmation})
      ))
 )`;
 
@@ -84,6 +99,7 @@ export const categorizationRepo = {
     const limit = Math.min(100, Math.max(1, options.limit ?? 100));
     const rows = await getDb().execute(sql`
       SELECT je.id, je.date, je.description, je.property_id AS "propertyId",
+        (tc.status = 'needs_review' AND tc.snapshot_hash = ${candidateSnapshotSql()}) AS "pendingReview",
         tm.merchant_name AS "merchantName", tm.bank_category AS "bankCategory",
         tm.transaction_type AS "transactionType", tm.currency,
         ${candidateSnapshotSql()} AS snapshot,
@@ -93,6 +109,7 @@ export const categorizationRepo = {
           WHERE be.journal_entry_id = je.id), '[]'::jsonb) AS legs
       FROM journal_entries je
       LEFT JOIN transaction_metadata tm ON tm.journal_entry_id = je.id
+      LEFT JOIN transaction_categorizations tc ON tc.journal_entry_id = je.id
       WHERE ${candidateEligibilitySql()} AND ${scopeSql(options)} AND ${noCurrentDecision}
       ORDER BY je.date DESC, je.id DESC LIMIT ${limit}
     `);
@@ -161,13 +178,24 @@ export const categorizationRepo = {
       if (decision.evidence !== undefined && (!evidence || decision.source !== 'ai')) {
         throw new Error('Categorisation evidence must contain actual public merchant sources.');
       }
-      return { ...decision, evidence, snapshot: candidate.snapshot, contextKey: categorizationContextKey(candidate) };
+      if (decision.source === 'payee') {
+        if (!z.uuid().safeParse(decision.payeeMemoryId).success
+          || !Number.isSafeInteger(decision.payeeMemoryRevision) || decision.payeeMemoryRevision! <= 0) {
+          throw new Error('A private payee decision needs its current confirmed memory revision.');
+        }
+      } else if (decision.payeeMemoryId !== undefined || decision.payeeMemoryRevision !== undefined) {
+        throw new Error('Private payee provenance belongs only to confirmed payee decisions.');
+      }
+      return { ...decision, evidence, payeeMemoryId: decision.payeeMemoryId ?? null,
+        payeeMemoryRevision: decision.payeeMemoryRevision ?? null,
+        snapshot: candidate.snapshot, contextKey: categorizationContextKey(candidate) };
     });
     const rows = await getDb().execute(sql`
       WITH proposed AS (
         SELECT * FROM jsonb_to_recordset(${JSON.stringify(payload)}::jsonb)
         AS p("journalId" integer, "categoryId" integer, confidence numeric,
-          reason text, source text, status text, snapshot text, "contextKey" text, evidence jsonb)
+          reason text, source text, status text, snapshot text, "contextKey" text, evidence jsonb,
+          "payeeMemoryId" uuid, "payeeMemoryRevision" integer)
       ), locked AS MATERIALIZED (
         SELECT je.id, p.* FROM journal_entries je JOIN proposed p ON p."journalId" = je.id
         WHERE ${candidateEligibilitySql()}
@@ -179,23 +207,42 @@ export const categorizationRepo = {
             WHERE learning.context_key = p."contextKey" AND learning.category_id = p."categoryId"))
           AND NOT EXISTS (SELECT 1 FROM transaction_categorizations current_decision
             WHERE current_decision.journal_entry_id = je.id AND current_decision.snapshot_hash = p.snapshot
-              AND (p.source <> 'learned' OR current_decision.context_key <> p."contextKey"))
+              AND (p.source NOT IN ('learned', 'payee') OR current_decision.context_key <> p."contextKey"))
           AND (p."categoryId" IS NULL OR EXISTS (SELECT 1 FROM categories c WHERE c.id = p."categoryId"))
-        FOR UPDATE OF je
+        ORDER BY je.id FOR UPDATE OF je
+      ), locked_payee_sources AS MATERIALIZED (
+        SELECT sj.id FROM journal_entries sj
+        JOIN categorization_payee_memories pm ON pm.source_journal_id = sj.id
+        JOIN locked p ON p.source = 'payee' AND p."payeeMemoryId" = pm.id AND p."payeeMemoryRevision" = pm.revision
+        ORDER BY sj.id FOR UPDATE OF sj
+      ), confirmed_payees AS MATERIALIZED (
+        SELECT pm.id, pm.revision, pm.category_id FROM categorization_payee_memories pm
+        JOIN locked_payee_sources sj ON sj.id = pm.source_journal_id
+        JOIN locked p ON p.source = 'payee' AND p."payeeMemoryId" = pm.id AND p."payeeMemoryRevision" = pm.revision
+        JOIN journal_entries je ON je.id = p.id
+        WHERE pm.status = 'active' AND (p."categoryId" IS NULL OR pm.category_id = p."categoryId")
+          AND ${payeeCandidateMatchSql()} AND ${payeeSourceValiditySql()}
+        ORDER BY pm.id FOR UPDATE OF pm
       ), stored AS (
         INSERT INTO transaction_categorizations (journal_entry_id, snapshot_hash, context_key,
-          category_id, confidence, reason, source, status, evidence, created_at, updated_at)
-        SELECT id, snapshot, "contextKey", "categoryId", confidence, reason, source, status, evidence, now(), now()
-          FROM locked
+          category_id, confidence, reason, source, status, evidence, payee_memory_id, payee_memory_revision, created_at, updated_at)
+        SELECT id, snapshot, "contextKey", "categoryId", confidence, reason, source, status, evidence,
+          "payeeMemoryId", "payeeMemoryRevision", now(), now()
+          FROM locked p WHERE p.source <> 'payee' OR EXISTS (SELECT 1 FROM confirmed_payees cp
+            WHERE cp.id = p."payeeMemoryId" AND cp.revision = p."payeeMemoryRevision")
         ON CONFLICT (journal_entry_id) DO UPDATE SET snapshot_hash = EXCLUDED.snapshot_hash,
           context_key = EXCLUDED.context_key, category_id = EXCLUDED.category_id,
           confidence = EXCLUDED.confidence, reason = EXCLUDED.reason, source = EXCLUDED.source,
-          status = EXCLUDED.status, evidence = EXCLUDED.evidence, updated_at = now()
+          status = EXCLUDED.status, evidence = EXCLUDED.evidence,
+          payee_memory_id = EXCLUDED.payee_memory_id, payee_memory_revision = EXCLUDED.payee_memory_revision, updated_at = now()
         WHERE transaction_categorizations.status = 'needs_review'
           AND (transaction_categorizations.snapshot_hash <> EXCLUDED.snapshot_hash OR (
             EXCLUDED.source = 'learned' AND transaction_categorizations.context_key = EXCLUDED.context_key
             AND EXISTS (SELECT 1 FROM categorization_learning learning
               WHERE learning.context_key = EXCLUDED.context_key AND learning.category_id = EXCLUDED.category_id)
+          ) OR (
+            EXCLUDED.source = 'payee' AND transaction_categorizations.context_key = EXCLUDED.context_key
+            AND EXISTS (SELECT 1 FROM confirmed_payees cp WHERE cp.id = EXCLUDED.payee_memory_id AND cp.revision = EXCLUDED.payee_memory_revision)
           ))
         RETURNING journal_entry_id, status, category_id
       ), updated AS (

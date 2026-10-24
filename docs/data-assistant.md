@@ -28,6 +28,24 @@ Known rules and explicitly remembered matches run first. AI suggestions meeting 
 
 Review decisions carry the current transaction snapshot. Approve or correct a category, or leave the record uncategorised. Remembering is optional and defaults off. A remembered correction applies only to the exact account, owner, direction, description, merchant and property context; it can also resolve matching records already in review. Legacy unreviewed AI rules are ignored. Explicit edits in the rule editor approve a rule as a user rule.
 
+## Private payment meanings
+
+A one-off category correction and a reusable payee meaning are separate choices. **Remember this payee** saves the chosen category and a confirmed private meaning in one atomic operation. The dialog shows the source payment and scope; it can use an exact merchant, an exact description, or a bank recipient extracted only from a recognised format with an explicitly delimited reference. The latter can match recurring payments when their references change. Additional aliases must be explicitly confirmed; first-name substrings and guessed reference stripping are never enough.
+
+The meaning is fenced by financial account, owner, direction, currency and property link. Household cleaning is distinct from rental-property cleaning, and remembering a payee never changes property attribution or establishes tax deductibility. These personal identities stay off public merchant search, including older aliases and disabled meanings.
+
+Confirmed meanings run before AI. Matching pending reviews become eligible when new confirmed knowledge can resolve them, with snapshot and memory-revision checks at the final write. Transfers, liability credits, multiple financial account legs and conflicting meanings retain hard review safeguards. A later conflicting category correction retires the conflicting meaning; the Data assistant shows that it needs reconfirmation. Saved meanings can be inspected, edited or disabled without silently changing existing categories. Read-only lookups do not mutate saved meanings.
+
+The adviser can read a payment's learning context, remember a user-confirmed meaning, inspect known payees or stop reusing one. General conversation memory alone does not teach the categorisation processor. These tools require current snapshots/revisions and preserve unknown or ambiguous scope.
+
+## Gateway model comparisons
+
+Classification uses a separate model policy from the adviser model. The app reads Vercel AI Gateway's live catalogue, compares up to three available candidates on ten fictional finance cases, and records accuracy, unsafe automatic guesses, review counts, batch latency and estimated cost. A candidate must get all ten cases right, make no unsafe automatic assignments, return valid responses and finish each five-row batch within eight seconds. Among qualified candidates the policy prefers lower measured cost, then latency. This is a small measured comparison among tested candidates, not evidence of a universally optimal or perfectly accurate model.
+
+The first eligible background worker can run a leased comparison within a 29-second bound; a shared cooldown prevents repeated concurrent spend. Settings also provides a revision-guarded **Compare models** action. Only synthetic fixtures reach this comparison, never private transaction records or public recipient searches. A deployment model override retains priority, and an unavailable or unconfirmed comparison cannot replace a qualified selection or claim a new winner. Until a model qualifies, the current fast default remains active.
+
+Known legacy Anthropic version spellings are translated to canonical Gateway IDs. Catalogue failures are distinguished from live catalogue results. Worker preflight, comparison, processing and handoff share an absolute deadline so model research cannot consume the time needed to save processing results.
+
 The metadata tables are `transaction_categorizations`, `categorization_learning` and `categorization_processing_lease`. Their migration is additive and idempotent. Review and processing endpoints return private/no-store responses or no-store responses; provider errors and financial prompt bodies are not logged by the processor.
 
 ## Public merchant research

@@ -43,6 +43,9 @@ import {
 import { getCategorizationBackgroundCapability, scheduleCategorizationJob } from '@/lib/categorization/jobs/dispatch';
 import { categorizationJobSchema } from '@/lib/categorization/jobs/schema';
 import type { CategorizationJob } from '@/lib/categorization/jobs/types';
+import { getPayeeLearningContext, listPayeeMemories, saveConfirmedPayee, disablePayeeMemory,
+  InvalidPayeeMemoryError, PayeeMemoryConflictError } from '@/lib/categorization/payees/service';
+import { payeeSaveSchema } from '@/lib/categorization/payees/schema';
 
 /**
  * Plain JSON-Schema tool definition. claude-client.ts wraps each entry
@@ -184,6 +187,33 @@ type ConfirmedCategoryToolResult = {
 // -------------------------------------------------------------------
 
 export const TOOL_DEFINITIONS: Tool[] = [
+  {
+    name: 'get_payee_learning_context',
+    description: 'Read one payment’s current snapshot, existing category, safe recurring identity choices and derived account/owner/direction/currency/property scope before remembering a payee. Personal recipients remain private; do not research their names on the public web. Does not change records.',
+    input_schema: { type: 'object', properties: { journal_id: { type: 'integer', minimum: 1 } }, required: ['journal_id'], additionalProperties: false },
+  },
+  {
+    name: 'list_payee_meanings',
+    description: 'Read saved private payee meanings, their confirmed category, account scope, exact aliases and revision. A general conversation memory is separate from these reusable payment meanings. Does not change records.',
+    input_schema: { type: 'object', properties: {}, required: [], additionalProperties: false },
+  },
+  {
+    name: 'remember_payment_payee',
+    description: 'Confirm a payment category and save a reusable private payee meaning only when the user has supplied or approved that meaning, category and reuse. First get_payee_learning_context for the current journal snapshot and exact identity. The server derives account/owner/direction/currency/property scope; never invent aliases, infer property use or tax deductibility, or match a first name across accounts. Preserve household versus rental context. Saves the selected category and meaning atomically; does not alter amounts, transfers, ownership or property links. An update needs the memory_id and expected_revision from list_payee_meanings.',
+    input_schema: { type: 'object', properties: {
+      journal_id: { type: 'integer', minimum: 1 }, expected_snapshot: { type: 'string', pattern: '^[a-f0-9]{32}$' },
+      category_id: { type: 'integer', minimum: 1 }, payee_name: { type: 'string', minLength: 1, maxLength: 100 },
+      purpose: { type: 'string', minLength: 1, maxLength: 200 },
+      identity_kind: { type: 'string', enum: ['merchant', 'description', 'bank_payee'] },
+      aliases: { type: 'array', maxItems: 8, items: { type: 'string', minLength: 1, maxLength: 200 }, description: 'Additional exact aliases explicitly confirmed by the user; omit to use the selected recorded identity only.' },
+      memory_id: { type: 'string', format: 'uuid' }, expected_revision: { type: 'integer', minimum: 1 },
+    }, required: ['journal_id', 'expected_snapshot', 'category_id', 'payee_name', 'identity_kind'], additionalProperties: false },
+  },
+  {
+    name: 'disable_payee_meaning',
+    description: 'Stop reusing a saved private payee meaning when the user asks. Read list_payee_meanings first and pass its exact ID/revision. Existing transaction categories remain unchanged; this does not delete payment history or conversation memories.',
+    input_schema: { type: 'object', properties: { memory_id: { type: 'string', format: 'uuid' }, expected_revision: { type: 'integer', minimum: 1 } }, required: ['memory_id', 'expected_revision'], additionalProperties: false },
+  },
   {
     name: 'get_account_balances',
     description:
@@ -906,6 +936,10 @@ export const TOOL_DEFINITIONS: Tool[] = [
 
 // Human-readable labels for tool status display
 export const TOOL_LABELS: Record<string, string> = {
+  get_payee_learning_context: 'Reading payment learning context',
+  list_payee_meanings: 'Reading remembered payees',
+  remember_payment_payee: 'Remembering a private payment meaning',
+  disable_payee_meaning: 'Stopping payment meaning reuse',
   list_investments: 'Loading investments',
   add_investment_account: 'Adding investment account',
   update_investment_balance: 'Updating investment balance',
@@ -972,6 +1006,11 @@ export async function executeTool(
   input: Record<string, unknown>,
 ): Promise<unknown> {
   switch (name) {
+    case 'get_payee_learning_context':
+    case 'list_payee_meanings':
+    case 'remember_payment_payee':
+    case 'disable_payee_meaning':
+      return executePayeeMeaningTool(name, input);
     case 'get_account_balances':
       return executeGetAccountBalances(input);
     case 'search_transactions':
@@ -1626,6 +1665,50 @@ async function executeListUncategorized(input: Record<string, unknown>) {
     notes: e.notes ?? undefined,
     address: e.address ?? undefined,
   }));
+}
+
+const payeeJournalInputSchema = z.object({ journal_id: z.number().int().positive() }).strict();
+const payeeMeaningInputSchema = z.object({
+  journal_id: z.number().int().positive(), expected_snapshot: z.string().regex(/^[a-f0-9]{32}$/),
+  category_id: z.number().int().positive(), payee_name: z.string().trim().min(1).max(100),
+  purpose: z.string().trim().min(1).max(200).optional(), identity_kind: z.enum(['merchant', 'description', 'bank_payee']),
+  aliases: z.array(z.string().trim().min(1).max(200)).max(8).optional(),
+  memory_id: z.uuid().optional(), expected_revision: z.number().int().positive().optional(),
+}).strict();
+const payeeDisableInputSchema = z.object({ memory_id: z.uuid(), expected_revision: z.number().int().positive() }).strict();
+
+async function executePayeeMeaningTool(name: string, input: Record<string, unknown>) {
+  try {
+    if (name === 'get_payee_learning_context') {
+      const parsed = payeeJournalInputSchema.safeParse(input);
+      if (!parsed.success) return { status: 'rejected', error: financialPlanValidationError(parsed.error) };
+      return await getPayeeLearningContext(parsed.data.journal_id);
+    }
+    if (name === 'list_payee_meanings') {
+      if (!z.object({}).strict().safeParse(input).success) return { status: 'rejected', error: 'Read saved payee meanings without extra options.' };
+      return { meanings: await listPayeeMemories(), basis: 'Private confirmed meanings, with exact account and payment scope. No public search was made.' };
+    }
+    if (name === 'disable_payee_meaning') {
+      const parsed = payeeDisableInputSchema.safeParse(input);
+      if (!parsed.success) return { status: 'rejected', error: financialPlanValidationError(parsed.error) };
+      return { saved: true, memory: await disablePayeeMemory(parsed.data.memory_id, parsed.data.expected_revision) };
+    }
+    const parsed = payeeMeaningInputSchema.safeParse(input);
+    if (!parsed.success) return { status: 'rejected', error: financialPlanValidationError(parsed.error) };
+    const value = parsed.data;
+    const meaning = payeeSaveSchema.safeParse({
+      journalId: value.journal_id, snapshot: value.expected_snapshot, categoryId: value.category_id,
+      payeeName: value.payee_name, purpose: value.purpose, identityKind: value.identity_kind, aliases: value.aliases,
+      memoryId: value.memory_id, expectedRevision: value.expected_revision,
+    });
+    if (!meaning.success) return { status: 'rejected', error: financialPlanValidationError(meaning.error) };
+    return { saved: true, ...await saveConfirmedPayee(meaning.data),
+      basis: 'The category and private payee meaning were confirmed together. Future reuse requires the same recorded identity, account, owner, direction, currency and property scope. No tax deductibility or ownership was inferred.' };
+  } catch (error) {
+    if (error instanceof PayeeMemoryConflictError) return { status: 'conflict', error: 'The payment or remembered meaning changed. Read its latest state before saving another choice.' };
+    if (error instanceof InvalidPayeeMemoryError) return { status: 'rejected', error: 'This payment cannot support that recurring meaning. Read its current learning context and confirm the identity, category and scope.' };
+    return { status: 'unavailable', error: 'The payment meaning operation could not be confirmed. Read current records before retrying; no saved outcome has been assumed.' };
+  }
 }
 
 async function executeAutoCategorize(input: Record<string, unknown>) {

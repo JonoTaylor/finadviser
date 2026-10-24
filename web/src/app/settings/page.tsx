@@ -12,6 +12,7 @@ import Link from 'next/link';
 import RulesManager from '@/components/settings/RulesManager';
 import AiModelSelector from '@/components/settings/AiModelSelector';
 import AiMemoryManager from '@/components/settings/AiMemoryManager';
+import CategorizationModels from '@/components/settings/CategorizationModels';
 import BankCoverageCard from '@/components/banking/BankCoverageCard';
 import PageHeader from '@/components/ui/PageHeader';
 import { designTokens } from '@/theme/theme';
@@ -65,6 +66,8 @@ export default function SettingsPage() {
           <SettingsCard icon={<AutoAwesomeRoundedIcon />} title="Adviser model"><AiModelSelector /></SettingsCard>
           <SettingsCard icon={<MemoryRoundedIcon />} title="Adviser memory"><AiMemoryManager /></SettingsCard>
         </Box>
+
+        <SettingsCard icon={<AutoAwesomeRoundedIcon />} title="Categorisation models"><CategorizationModels /></SettingsCard>
 
         <RulesManager />
 

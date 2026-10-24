@@ -9,6 +9,7 @@ import type { CategorizationLeg } from '@/lib/categorization/types';
 import type { ReviewItem, ReviewQueue } from '@/lib/categorization/review';
 import { buildCategoryLabels } from './categoryLabels';
 import MerchantResearchEvidence from './MerchantResearchEvidence';
+import RememberPayeeDialog from './RememberPayeeDialog';
 
 type ReviewAction = 'accept' | 'correct' | 'dismiss';
 function postingAmount(amount: string): string {
@@ -27,7 +28,8 @@ function AccountPosting({ leg }: { leg: CategorizationLeg }) {
   </Stack>;
 }
 
-function ReviewRecord({ item, categories, labels, onReviewed, onReload }: { item: ReviewItem; categories: ReviewQueue['categories']; labels: Map<number, string>; onReviewed: () => Promise<void>; onReload: () => Promise<unknown> }) {
+type RememberPayeeChoice = { journalId: number; categoryId: number; categoryLabel: string };
+function ReviewRecord({ item, categories, labels, onReviewed, onReload, onRememberPayee }: { item: ReviewItem; categories: ReviewQueue['categories']; labels: Map<number, string>; onReviewed: () => Promise<void>; onReload: () => Promise<unknown>; onRememberPayee: (choice: RememberPayeeChoice) => void }) {
   const [categoryId, setCategoryId] = useState<number | ''>(item.suggestedCategoryId ?? '');
   const [remember, setRemember] = useState(false);
   const [pending, setPending] = useState(false);
@@ -75,10 +77,12 @@ function ReviewRecord({ item, categories, labels, onReviewed, onReload }: { item
         <FormControl fullWidth size="small"><InputLabel id={`category-${item.journalId}`}>Confirm category</InputLabel><Select<number | ''> labelId={`category-${item.journalId}`} label="Confirm category" value={categoryId} onChange={event => setCategoryId(event.target.value === '' ? '' : Number(event.target.value))} disabled={pending}>
           <MenuItem value="" disabled>Choose category</MenuItem>{categoryId !== '' && !categories.some(category => category.id === categoryId) && <MenuItem value={categoryId} disabled>Category no longer available</MenuItem>}{categories.map(category => <MenuItem key={category.id} value={category.id} sx={{ whiteSpace: 'normal', overflowWrap: 'anywhere' }}>{labels.get(category.id) ?? category.name}</MenuItem>)}
         </Select></FormControl>
-        <FormControlLabel control={<Checkbox checked={remember} onChange={event => setRemember(event.target.checked)} disabled={pending} size="small" />} label={<Typography variant="body2">Remember this exact match for the same account context</Typography>} sx={{ mt: 1, alignItems: 'flex-start', ml: -0.75, '& .MuiCheckbox-root': { pt: 0.5 } }} />
+        <FormControlLabel control={<Checkbox checked={remember} onChange={event => setRemember(event.target.checked)} disabled={pending} size="small" />} label={<Typography variant="body2">Reuse this category for the same exact payment context</Typography>} sx={{ mt: 1, alignItems: 'flex-start', ml: -0.75, '& .MuiCheckbox-root': { pt: 0.5 } }} />
+        <Typography variant="caption" component="p" sx={{ mt: 0.25 }}>For a person or recurring service with changing references, remember the payee and what the payment means instead.</Typography>
         <Stack direction="row" gap={1} flexWrap="wrap" sx={{ mt: 1.5 }}>
           <Button variant="contained" disabled={pending || categoryId === '' || !categories.some(category => category.id === categoryId)} onClick={() => void apply(categoryId === item.suggestedCategoryId ? 'accept' : 'correct')}>{pending ? 'Saving…' : categoryId === item.suggestedCategoryId ? 'Approve category' : 'Save category'}</Button>
           <Button variant="outlined" disabled={pending} onClick={() => void apply('dismiss')}>Leave uncategorised</Button>
+          <Button variant="outlined" disabled={pending || categoryId === '' || !categories.some(category => category.id === categoryId)} onClick={() => { if (categoryId !== '') onRememberPayee({ journalId: item.journalId, categoryId, categoryLabel: labels.get(categoryId) ?? 'Selected category' }); }}>Remember this payee</Button>
         </Stack>
         <Typography variant="caption" component="p" sx={{ mt: 1 }}>Leaving uncategorised removes this question from the queue. It does not change the transaction.</Typography>
       </Box>
@@ -94,6 +98,7 @@ function GridlessRecord({ children }: { children: ReactNode }) {
 export default function CategorizationReviewQueue({ onReviewed }: { onReviewed: () => Promise<void> }) {
   const [cursors, setCursors] = useState<number[]>([]);
   const [announcement, setAnnouncement] = useState('');
+  const [rememberPayee, setRememberPayee] = useState<RememberPayeeChoice | null>(null);
   const queueHeading = useRef<HTMLHeadingElement>(null);
   const after = cursors.at(-1);
   const url = `/api/data-intelligence/review?limit=25${after ? `&afterId=${after}` : ''}`;
@@ -112,7 +117,8 @@ export default function CategorizationReviewQueue({ onReviewed }: { onReviewed: 
     {error && <Alert severity="warning" action={<Button size="small" onClick={() => void mutate()}>Retry</Button>}>Your review queue could not be loaded. No decisions have been assumed.</Alert>}
     {data && data.total === 0 && <Alert severity="info">No category questions are queued. Any records not yet processed are shown above.</Alert>}
     {data && data.total > 0 && data.items.length === 0 && <Alert severity="info">No questions remain on this page. Return to the first page to see the current queue.</Alert>}
-    <Stack gap={1.5}>{data?.items.map(item => <ReviewRecord key={item.journalId} item={item} categories={data.categories} labels={labels} onReviewed={refresh} onReload={() => mutate()} />)}</Stack>
+    <Stack gap={1.5}>{data?.items.map(item => <ReviewRecord key={item.journalId} item={item} categories={data.categories} labels={labels} onReviewed={refresh} onReload={() => mutate()} onRememberPayee={setRememberPayee} />)}</Stack>
+    <RememberPayeeDialog open={rememberPayee !== null} journalId={rememberPayee?.journalId ?? null} categoryId={rememberPayee?.categoryId ?? null} categoryLabel={rememberPayee?.categoryLabel ?? 'Selected category'} onClose={() => setRememberPayee(null)} onSaved={refresh} />
     {(cursors.length > 0 || data?.nextCursor) && <Stack direction="row" gap={1} flexWrap="wrap" sx={{ mt: 2 }}>
       {cursors.length > 0 && <Button variant="outlined" onClick={() => setCursors([])}>First page</Button>}
       {cursors.length > 0 && <Button onClick={() => setCursors(current => current.slice(0, -1))}>Previous</Button>}

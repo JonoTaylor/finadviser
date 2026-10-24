@@ -19,7 +19,20 @@ import { appSettingsRepo } from '@/lib/repos/app-settings.repo';
  */
 
 export const MODEL_SETTING_KEY = 'ai.model_id';
-export const DEFAULT_MODEL_ID = 'anthropic/claude-sonnet-4-5';
+export const DEFAULT_MODEL_ID = 'anthropic/claude-sonnet-4.5';
+
+/** Known legacy app spellings only; Gateway's canonical version separator is a dot. */
+export function canonicalGatewayModelId(modelId: string): string {
+  const aliases: Record<string, string> = {
+    'anthropic/claude-haiku-4-5': 'anthropic/claude-haiku-4.5',
+    'anthropic/claude-sonnet-4-5': 'anthropic/claude-sonnet-4.5',
+    'anthropic/claude-sonnet-4-6': 'anthropic/claude-sonnet-4.6',
+    'anthropic/claude-opus-4-5': 'anthropic/claude-opus-4.5',
+    'anthropic/claude-opus-4-6': 'anthropic/claude-opus-4.6',
+    'anthropic/claude-opus-4-7': 'anthropic/claude-opus-4.7',
+  };
+  return aliases[modelId] ?? modelId;
+}
 
 export interface AvailableModel {
   id: string;
@@ -33,10 +46,10 @@ export interface AvailableModel {
  * Better than an empty dropdown — the user can still pick something.
  */
 const FALLBACK_MODELS: AvailableModel[] = [
-  { id: 'anthropic/claude-haiku-4-5',  name: 'Claude Haiku 4.5',  provider: 'anthropic' },
-  { id: 'anthropic/claude-sonnet-4-5', name: 'Claude Sonnet 4.5', provider: 'anthropic' },
-  { id: 'anthropic/claude-sonnet-4-7', name: 'Claude Sonnet 4.7', provider: 'anthropic' },
-  { id: 'anthropic/claude-opus-4-7',   name: 'Claude Opus 4.7',   provider: 'anthropic' },
+  { id: 'anthropic/claude-haiku-4.5',  name: 'Claude Haiku 4.5',  provider: 'anthropic' },
+  { id: 'anthropic/claude-sonnet-4.5', name: 'Claude Sonnet 4.5', provider: 'anthropic' },
+  { id: 'anthropic/claude-sonnet-4.6', name: 'Claude Sonnet 4.6', provider: 'anthropic' },
+  { id: 'anthropic/claude-opus-4.7',   name: 'Claude Opus 4.7',   provider: 'anthropic' },
   { id: 'openai/gpt-5-mini',           name: 'GPT-5 mini',        provider: 'openai' },
   { id: 'openai/gpt-5',                name: 'GPT-5',             provider: 'openai' },
 ];
@@ -75,8 +88,8 @@ export async function getAvailableModels(): Promise<AvailableModel[]> {
     }
     cachedModels = { fetchedAt: Date.now(), ttlMs: MODEL_LIST_TTL_MS, models };
     return models;
-  } catch (err) {
-    console.warn('[model] getAvailableModels failed; using fallback list:', err instanceof Error ? err.message : err);
+  } catch {
+    console.warn('[model] gateway catalogue unavailable; using fallback list');
     cachedModels = { fetchedAt: Date.now(), ttlMs: FALLBACK_TTL_MS, models: FALLBACK_MODELS };
     return FALLBACK_MODELS;
   }
@@ -86,10 +99,10 @@ export type ModelSource = 'db' | 'env' | 'default';
 
 export async function resolveModelId(): Promise<{ modelId: string; source: ModelSource }> {
   const fromDb = await appSettingsRepo.get(MODEL_SETTING_KEY);
-  if (fromDb) return { modelId: fromDb, source: 'db' };
+  if (fromDb) return { modelId: canonicalGatewayModelId(fromDb), source: 'db' };
 
   const fromEnv = process.env.MODEL_ID;
-  if (fromEnv) return { modelId: fromEnv, source: 'env' };
+  if (fromEnv) return { modelId: canonicalGatewayModelId(fromEnv), source: 'env' };
 
   return { modelId: DEFAULT_MODEL_ID, source: 'default' };
 }

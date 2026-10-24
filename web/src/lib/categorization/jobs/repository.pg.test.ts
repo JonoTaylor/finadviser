@@ -32,8 +32,10 @@ describe.skipIf(!url)('durable categorisation jobs in disposable PostgreSQL', ()
     const migration = await readFile(new URL('../../db/migration.sql', import.meta.url), 'utf8');
     const marker = migration.indexOf('-- Durable automatic processing authorisations');
     if (marker < 0) throw new Error('Missing durable job migration.');
-    await fixture.query(migration.slice(marker));
-    await fixture.query(migration.slice(marker));
+    const nextSection = migration.indexOf('-- Private confirmed payee meanings', marker);
+    const jobMigration = migration.slice(marker, nextSection < 0 ? undefined : nextSection);
+    await fixture.query(jobMigration);
+    await fixture.query(jobMigration);
     pool = new Pool({ connectionString: url, max: 4, options: `-c search_path=${namespace},public` });
     const dialect = new PgDialect();
     mocks.execute.mockImplementation((query: SQL) => {

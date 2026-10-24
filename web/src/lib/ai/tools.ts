@@ -1363,11 +1363,17 @@ async function executeGetMonthlySpending() {
   const spending = await journalRepo.getMonthlySpending();
   const byMonth: Record<string, Array<{ category: string; total: string }>> = {};
   for (const row of spending) {
+    // The repository also supplies income rows for other consumers. Only
+    // expense postings describe consumption; a negative expense is a net
+    // refund, not positive spending or new employment income.
+    if (row.account_type !== 'EXPENSE') continue;
+    const amount = new Decimal(row.total);
+    if (!amount.isFinite()) throw new Error('Recorded monthly spending is unavailable because an amount is invalid.');
     const month = row.month ?? 'unknown';
     if (!byMonth[month]) byMonth[month] = [];
     byMonth[month].push({
       category: row.category_name || 'Uncategorised',
-      total: formatCurrency(Math.abs(parseFloat(row.total ?? '0'))),
+      total: formatCurrency(amount.toFixed(2)),
     });
   }
   return byMonth;
@@ -1393,7 +1399,9 @@ async function executeGetPropertySummary() {
         balance: formatCurrency(new Decimal(balance).abs().toString()),
       });
     }
-    const equity = await calculateEquity(prop.id);
+    // No valuation is unknown, rather than a £0 property worth less than its
+    // mortgage. Keep the same unknown state in the specialist's evidence.
+    const equity = valuation ? await calculateEquity(prop.id) : null;
     results.push({
       id: prop.id,
       name: prop.name,
@@ -1401,11 +1409,14 @@ async function executeGetPropertySummary() {
       purchasePrice: prop.purchasePrice ? formatCurrency(prop.purchasePrice) : null,
       currentValuation: valuation ? formatCurrency(valuation.valuation) : null,
       mortgages: mortgageDetails,
-      ownerEquity: equity.map((e) => ({
+      ownerEquity: equity?.map((e) => ({
         owner: e.name,
         amount: formatCurrency(e.equityAmount.toString()),
         percentage: `${e.equityPct.toFixed(1)}%`,
-      })),
+      })) ?? null,
+      ownerEquityBasis: valuation
+        ? 'Estimate using the recorded valuation, mortgage balances and ownership capital allocation; this is not accessible cash.'
+        : 'Unknown: no property valuation is recorded. Mortgage balances do not establish the property value or owner equity.',
     });
   }
   return results;

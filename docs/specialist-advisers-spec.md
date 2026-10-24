@@ -96,6 +96,9 @@ Workers themselves remain read-only.
   transactions, categorisation, date corrections or profile changes.
 - Results retain owner/household scope, periods and availability. Concurrent reads
   are observations, not an atomic snapshot of every account.
+- Specialist findings describe the records at their read times, before any later
+  coordinator actions. Saved action outcomes and a fresh read determine the
+  resulting state; historical review panels are not automatically refreshed.
 - Financial arithmetic uses existing deterministic engines. A model finding is
   planning information; it is not a verified tax filing or regulated suitability
   decision. Material unresolved inputs prevent definitive payable amounts.
@@ -110,11 +113,11 @@ Workers themselves remain read-only.
 | Specialists per request | At most seven; no duplicate or recursive reviews. |
 | Parallel specialist runs | At most three. |
 | Specialist model steps | At most four, with a separate bound of eight read calls. |
-| Specialist output | Approximately 1,800 output tokens, bounded structured fields. |
+| Specialist output | At most 1,800 tokens per model step and four steps; final validated report at most 12,000 characters. |
 | Specialist deadline | 20 seconds each; no automatic model retries. |
 | Specialist phase | At most 60 seconds, with cancellation propagated. |
 | Whole adviser request | At most 110 seconds within the existing 120-second route. |
-| Coordinator | Retains the existing bounded action/tool loop and response limit. |
+| Coordinator | Retains the existing 15-step action/tool loop and 4,096-token per-step response limit. |
 
 Model timeouts, malformed reports, missing evidence and failed reads are explicit
 outcomes. A non-cooperating model call must not hold the response indefinitely.

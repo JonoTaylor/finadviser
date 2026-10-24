@@ -13,7 +13,7 @@ const auditedReadTools = new Set([
   'get_income_expense_summary', 'list_memories', 'get_finance_workspace', 'get_financial_plan',
   'get_financial_health_check', 'list_investments', 'list_owners', 'get_financial_identity',
   'get_owner_tax_profile', 'get_owner_tax_computation', 'list_property_expense_categories',
-  'find_transfer_pair_candidates', 'get_mortgage_payment_date_review', 'research_merchant',
+  'find_transfer_pair_candidates', 'get_mortgage_payment_date_review', 'research_merchant', 'get_categorization_job',
 ]);
 
 describe('financial specialist catalogue', () => {
@@ -45,6 +45,8 @@ describe('financial specialist catalogue', () => {
       expect(specialist.readTools).not.toContain('remember');
       expect(specialist.readTools).not.toContain('update_owner_tax_profile');
       expect(specialist.readTools).not.toContain('auto_categorize');
+      expect(specialist.readTools).not.toContain('start_categorization_job');
+      expect(specialist.readTools).not.toContain('control_categorization_job');
       expect(specialist.readTools).not.toContain('bulk_add_mortgage_payments');
       expect(specialist.readTools).not.toContain('correct_mortgage_payment_date');
     }

@@ -31,6 +31,7 @@ import SpecialistTeamSelector, { adviserModeName } from '@/components/chat/Speci
 import SpecialistReviews from '@/components/chat/SpecialistReviews';
 import { createChatStreamDecoder } from '@/components/chat/chat-stream';
 import ChatFailureNotice from '@/components/chat/ChatFailureNotice';
+import ChatCategorizationProgress from '@/components/data/ChatCategorizationProgress';
 import { ChatRequestFailure, chatHttpFailure, type ChatFailure } from '@/components/chat/chat-failure';
 import { SPECIALISTS, type AdviserMode, type SpecialistId } from '@/lib/ai/specialists/catalog';
 import { adviserMessageMetadataSchema, type AdviserMessageMetadata, type SpecialistResult } from '@/lib/ai/specialists/contracts';
@@ -351,6 +352,7 @@ export default function ChatPage() {
       </Box>
 
       <Box sx={{ flexShrink: 0, borderTop: 1, borderColor: 'divider', p: { xs: 1.5, sm: 2 }, bgcolor: 'background.paper' }}>
+        <ChatCategorizationProgress />
         {sendError && <ChatFailureNotice failure={sendError} />}
         <Stack direction="row" gap={1} alignItems="flex-end" sx={{ border: 1, borderColor: 'divider', borderRadius: '6px', p: 0.5, minWidth: 0 }}>
           <TextField fullWidth multiline minRows={1} maxRows={4} size="small" placeholder={selectedMode === 'team' ? 'Ask about your finances…' : 'Ask your ' + adviserModeName(selectedMode).toLowerCase() + '…'} value={input} onChange={event => setInput(event.target.value)}

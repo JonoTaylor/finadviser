@@ -1492,3 +1492,39 @@ CREATE TABLE IF NOT EXISTS merchant_research_cache (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     CONSTRAINT merchant_research_cache_slot_check CHECK (cache_slot >= 0 AND cache_slot < 2048)
 );
+
+-- Durable automatic processing authorisations, bounded to the ledger snapshot
+-- present when started. Partial and unacknowledged passes remain distinguishable.
+CREATE TABLE IF NOT EXISTS categorization_jobs (
+    id UUID PRIMARY KEY,
+    slot INTEGER NOT NULL DEFAULT 1 CHECK (slot = 1),
+    status TEXT NOT NULL CHECK (status IN ('queued', 'running', 'paused', 'completed', 'cancelled')),
+    control_action TEXT CHECK (control_action IN ('pause', 'cancel')),
+    max_journal_id INTEGER NOT NULL CHECK (max_journal_id >= 0),
+    totals JSONB NOT NULL,
+    passes INTEGER NOT NULL DEFAULT 0 CHECK (passes >= 0),
+    pass_limit INTEGER NOT NULL DEFAULT 200 CHECK (pass_limit > 0),
+    counts_exact BOOLEAN NOT NULL DEFAULT TRUE,
+    latest_result JSONB,
+    pause_reason TEXT,
+    dispatch_issue TEXT,
+    lease_token UUID,
+    lease_expires_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    finished_at TIMESTAMPTZ
+);
+CREATE UNIQUE INDEX IF NOT EXISTS categorization_jobs_active_idx ON categorization_jobs(slot)
+    WHERE status IN ('queued', 'running', 'paused');
+CREATE INDEX IF NOT EXISTS categorization_jobs_created_idx ON categorization_jobs(created_at DESC);
+
+CREATE TABLE IF NOT EXISTS categorization_job_passes (
+    id UUID PRIMARY KEY,
+    job_id UUID NOT NULL REFERENCES categorization_jobs(id) ON DELETE CASCADE,
+    worker_token UUID NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('running', 'completed', 'abandoned', 'failed')),
+    result JSONB,
+    started_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    finished_at TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS categorization_job_passes_job_idx ON categorization_job_passes(job_id, status);

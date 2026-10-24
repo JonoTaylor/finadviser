@@ -55,6 +55,9 @@ function bounded(value: number | undefined, fallback: number, maximum: number): 
 }
 
 function normalizeOptions(options: CategorizationOptions): CategorizationOptions {
+  if (options.maxJournalId !== undefined && (!Number.isSafeInteger(options.maxJournalId) || options.maxJournalId < 0)) {
+    throw new Error('The processing snapshot must be a valid journal ID.');
+  }
   for (const ids of [options.journalIds, options.syncRunIds]) {
     if (ids !== undefined && (ids.length > 10000 || ids.some(id => !Number.isSafeInteger(id) || id <= 0))) {
       throw new Error('Select up to 10,000 valid journal or sync IDs.');

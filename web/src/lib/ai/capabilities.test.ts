@@ -45,4 +45,11 @@ describe('running adviser capabilities', () => {
     expect(prompt).toContain('does not guarantee that the search provider is configured or available');
     expect(registeredCapabilitiesPrompt([])).not.toContain('You CAN request public merchant research');
   });
+  it('describes saved processing jobs without claiming background execution is guaranteed', () => {
+    const prompt = registeredCapabilitiesPrompt(['start_categorization_job', 'get_categorization_job']);
+    expect(prompt).toContain('You CAN start a saved automatic categorisation job');
+    expect(prompt).toContain('actual saved state and continuation availability');
+    expect(prompt).toContain('Existing paused jobs require an explicit resume request');
+    expect(registeredCapabilitiesPrompt([])).not.toContain('You CAN start a saved automatic categorisation job');
+  });
 });

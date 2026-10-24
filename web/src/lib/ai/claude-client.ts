@@ -6,7 +6,8 @@ import { TOOL_DEFINITIONS, TOOL_LABELS, executeTool } from './tools';
 import { resolveModelId } from './model';
 import { registeredCapabilitiesPrompt } from './capabilities';
 import { getSpecialist, type AdviserMode } from './specialists/catalog';
-import { routeSpecialists } from './specialists/routing';
+import { isRoutineCategorizationRequest, routeSpecialists } from './specialists/routing';
+import { executeCategorizationCommand } from './categorization-command';
 import { abortable, runSpecialistReviews, specialistReferenceMessage } from './specialists/runtime';
 import type { SpecialistEvent, SpecialistResult } from './specialists/contracts';
 import { londonTodayIso } from '@/lib/dates/today';
@@ -271,6 +272,15 @@ export async function* runAgent(
   try {
     if (deadline <= Date.now()) throw new AdviserFailureError('request_timeout');
     const mode = options.specialist ?? 'team';
+    if (TOOL_DEFINITIONS.some(definition => definition.name === 'start_categorization_job')
+      && isRoutineCategorizationRequest(userMessage, history)) {
+      yield { type: 'tool', name: 'start_categorization_job', label: 'Starting automatic processing' };
+      const text = await abortable(executeCategorizationCommand({
+        message: userMessage, history, execute: executeTool, onToolStart: options.onToolStart, signal,
+      }), signal);
+      yield { type: 'text', content: text };
+      return text;
+    }
     const route = routeSpecialists(userMessage, mode, history);
     const { modelId } = await abortable(resolveModelId(), signal);
     const languageModel = gateway(modelId);

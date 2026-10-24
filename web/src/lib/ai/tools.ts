@@ -36,6 +36,13 @@ import { CategorizationConflictError, InvalidCategorizationError, confirmedCateg
 import { researchMerchant } from '@/lib/merchant-research/service';
 import { merchantResearchInputFromCandidate } from '@/lib/merchant-research/privacy';
 import { needsMovementReview } from '@/lib/categorization/decisions';
+import {
+  startCategorizationJob, getCategorizationJob, pauseCategorizationJob,
+  cancelCategorizationJob, resumeCategorizationJob,
+} from '@/lib/categorization/jobs/service';
+import { getCategorizationBackgroundCapability, scheduleCategorizationJob } from '@/lib/categorization/jobs/dispatch';
+import { categorizationJobSchema } from '@/lib/categorization/jobs/schema';
+import type { CategorizationJob } from '@/lib/categorization/jobs/types';
 
 /**
  * Plain JSON-Schema tool definition. claude-client.ts wraps each entry
@@ -118,6 +125,11 @@ const processCategorizationInputSchema = z.object({
   limit: z.number().int().min(1).max(100).optional(),
   journal_ids: z.array(z.number().int().positive()).min(1).max(100)
     .refine(ids => new Set(ids).size === ids.length, 'Journal IDs must be unique.').optional(),
+}).strict();
+const startCategorizationJobInputSchema = z.object({}).strict();
+const categorizationJobInputSchema = z.object({ job_id: z.uuid().optional() }).strict();
+const controlCategorizationJobInputSchema = z.object({
+  job_id: z.uuid(), action: z.enum(['pause', 'resume', 'cancel']),
 }).strict();
 const journalIdsInputSchema = z.object({
   journal_ids: z.array(z.number().int().positive()).min(1).max(100)
@@ -330,6 +342,32 @@ export const TOOL_DEFINITIONS: Tool[] = [
     },
   },
   {
+    name: 'start_categorization_job',
+    description:
+      'Start or reuse a saved automatic categorisation job for the existing eligible transaction backlog, only when the user asks to process or categorise their data. It continues independently of this chat response and applies the same confidence, transfer, snapshot and review protections as auto_categorize. Existing paused jobs stay paused until an explicit resume request. Returns durable job status, acknowledged progress and current backlog counts; scheduling is not proof the worker ran. Does not change amounts, ownership or property attribution. Use this for whole-backlog processing rather than asking the user for another batch.',
+    input_schema: { type: 'object', properties: {}, required: [], additionalProperties: false },
+  },
+  {
+    name: 'get_categorization_job',
+    description:
+      'Read the latest saved automatic categorisation job or one specific job by UUID, including its state, acknowledged progress, count certainty, current backlog and pending manual reviews. A completed job covers its recorded transaction scope, not all financial records or later imports. This read does not start, resume, control or wake a job. Null counts mean unavailable, never zero.',
+    input_schema: {
+      type: 'object', properties: { job_id: { type: 'string', format: 'uuid', description: 'Optional saved job UUID; omit for the latest job.' } },
+      required: [], additionalProperties: false,
+    },
+  },
+  {
+    name: 'control_categorization_job',
+    description:
+      'Pause, resume or cancel one saved automatic categorisation job only when the user explicitly requests that control or asks to continue processing again. Pause and cancel finish an already-started pass before stopping; completed decisions remain saved. Resume applies only to paused jobs and must not be repeated automatically after a provider or processing failure. Report the actual returned status and flags, not an assumed successful state transition.',
+    input_schema: {
+      type: 'object', properties: {
+        job_id: { type: 'string', format: 'uuid', description: 'Saved job UUID read from its current status.' },
+        action: { type: 'string', enum: ['pause', 'resume', 'cancel'] },
+      }, required: ['job_id', 'action'], additionalProperties: false,
+    },
+  },
+  {
     name: 'research_merchant',
     description:
       'Read-only public-web research for the merchant on one recorded transaction. Supply its journal ID; the server selects and sanitises the stored merchant name, never sending amounts, dates, account details or raw bank memos to public search. Skips transfers and private or missing merchant identities. Returns actual cited sources or an explicit unavailable/no-match status. Public business identity does not establish what was bought, tax deductibility, owner or property attribution. Does not categorise or change financial records.',
@@ -342,7 +380,7 @@ export const TOOL_DEFINITIONS: Tool[] = [
   {
     name: 'auto_categorize',
     description:
-      'Process a bounded batch of uncategorised transactions using existing confirmed rules, context-specific learned mappings, fast AI and limited public merchant research for eligible ambiguous matches. Applies only eligible confident decisions; uncertain results go to review. Returns honest processed, remaining, review, conflict, hasMore and model-availability counts. A time_budget deferral is a resumable processing limit, not proof of provider capacity or zero saved changes. Does not overwrite existing categories or change amounts, transfers, accounts, owners, property links or create broad rules. Call only when the user asks to process or categorise data; a financial analysis alone does not authorise writes.',
+      'Process one bounded batch of explicitly selected or scoped uncategorised transactions using confirmed rules, learned mappings, fast AI and limited public merchant research. Prefer start_categorization_job for a whole backlog so the user need not restart chat batches. Applies only eligible confident decisions; uncertain results go to review. A time_budget deferral is a resumable processing limit, not proof of provider capacity or zero saved changes. Preserves amounts, transfers, accounts, owners and property links; creates no broad rules. Call only for user-authorised processing, never general financial analysis alone.',
     input_schema: {
       type: 'object' as const,
       properties: {
@@ -900,6 +938,9 @@ export const TOOL_LABELS: Record<string, string> = {
   list_uncategorized_in_month: 'Reading uncategorized for the month',
   apply_categorizations_bulk: 'Applying categorisations',
   auto_categorize: 'Auto-categorising transactions',
+  start_categorization_job: 'Starting automatic transaction processing',
+  get_categorization_job: 'Reading automatic processing progress',
+  control_categorization_job: 'Updating automatic processing',
   research_merchant: 'Researching the public merchant identity',
   create_category: 'Creating category',
   add_categorization_rule: 'Adding categorisation rule',
@@ -949,6 +990,12 @@ export async function executeTool(
       return executeListUncategorized(input);
     case 'auto_categorize':
       return executeAutoCategorize(input);
+    case 'start_categorization_job':
+      return executeStartCategorizationJob(input);
+    case 'get_categorization_job':
+      return executeGetCategorizationJob(input);
+    case 'control_categorization_job':
+      return executeControlCategorizationJob(input);
     case 'research_merchant':
       return executeResearchMerchant(input);
     case 'get_data_intelligence': {
@@ -1595,6 +1642,61 @@ async function executeAutoCategorize(input: Record<string, unknown>) {
       available: null, conflicts: null, hasMore: null, reviewUrl: '/data',
       error: 'Data processing could not finish or verify its final counts. Reload the Data assistant before retrying.',
       basis: 'Some decisions may have been saved before the failure. No completion or unchanged-record count can be inferred from this failed run.',
+    };
+  }
+}
+
+function categorizationJobToolResult(job: CategorizationJob | null, wake = false) {
+  // Validate the public state before registering a worker: an unreadable
+  // acknowledgement must not silently start work behind an error response.
+  job = job === null ? null : categorizationJobSchema.parse(job);
+  const capability = getCategorizationBackgroundCapability();
+  const scheduled = wake && job?.status === 'queued' && !job.cancelRequested && !job.pauseRequested
+    ? scheduleCategorizationJob(job.id) : { scheduled: false, reason: null };
+  return {
+    job, ...capability, scheduled: scheduled.scheduled, processingUrl: '/data',
+    issue: scheduled.reason === 'context_unavailable'
+      ? 'The processing job was saved, but this request could not schedule a worker. Check its status in the Data assistant.'
+      : capability.issue,
+    basis: 'Progress totals belong only to this saved job and count acknowledged passes. When countsExact is false, an interrupted pass has unconfirmed counts; never infer zero changes or approximate historical totals. Fresh backlog counts are separate observations and may include later imports. Completed automatic processing can leave manual reviews. A scheduled handoff is not proof a worker started or that processing finished.',
+  };
+}
+
+async function executeStartCategorizationJob(input: Record<string, unknown>) {
+  const parsed = startCategorizationJobInputSchema.safeParse(input);
+  if (!parsed.success) return { status: 'rejected', error: financialPlanValidationError(parsed.error) };
+  try {
+    return categorizationJobToolResult(await startCategorizationJob(), true);
+  } catch {
+    return { status: 'unavailable', job: null, processingUrl: '/data',
+      error: 'The processing job could not be saved or its result verified. Read the latest job before trying another start.',
+      basis: 'A job may have been saved before acknowledgement failed. Do not repeat the start automatically or infer that no record changes are possible.',
+    };
+  }
+}
+
+async function executeGetCategorizationJob(input: Record<string, unknown>) {
+  const parsed = categorizationJobInputSchema.safeParse(input);
+  if (!parsed.success) return { status: 'rejected', error: financialPlanValidationError(parsed.error) };
+  try {
+    return categorizationJobToolResult(await getCategorizationJob(parsed.data.job_id));
+  } catch {
+    return { status: 'unavailable', job: null, processingUrl: '/data', error: 'Saved processing progress could not be read. No job control was performed.' };
+  }
+}
+
+async function executeControlCategorizationJob(input: Record<string, unknown>) {
+  const parsed = controlCategorizationJobInputSchema.safeParse(input);
+  if (!parsed.success) return { status: 'rejected', error: financialPlanValidationError(parsed.error) };
+  try {
+    const { job_id: id, action } = parsed.data;
+    const job = action === 'pause' ? await pauseCategorizationJob(id)
+      : action === 'cancel' ? await cancelCategorizationJob(id) : await resumeCategorizationJob(id);
+    return categorizationJobToolResult(job, action === 'resume');
+  } catch {
+    return { status: 'unavailable', job: null, processingUrl: '/data',
+      error: 'The processing control could not be confirmed. Read the current job before repeating it.',
+      basis: 'The control may have been saved before acknowledgement failed. Do not retry it automatically.',
     };
   }
 }

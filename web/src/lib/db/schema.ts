@@ -13,12 +13,15 @@ import {
   jsonb,
   check,
   index,
+  uniqueIndex,
   type AnyPgColumn,
 } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 import type { TaxMoneyField, TaxProfileFacts, TaxFieldSource } from '@/lib/tax/profileFacts';
 import type { AdviserMessageMetadata } from '@/lib/ai/specialists/contracts';
 import type { MerchantResearchResult } from '@/lib/merchant-research/types';
+import type { CategorizationResult } from '@/lib/categorization/types';
+import type { CategorizationJobStatus, CategorizationJobTotals } from '@/lib/categorization/jobs/types';
 
 // Custom Postgres BYTEA mapped to Buffer in/out. Drizzle pg-core doesn't
 // ship a binary type and Neon's HTTP driver serialises parameters as
@@ -167,6 +170,46 @@ export const merchantResearchCache = pgTable('merchant_research_cache', {
   expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 }, table => [check('merchant_research_cache_slot_check', sql`${table.cacheSlot} >= 0 AND ${table.cacheSlot} < 2048`)]);
+
+export const categorizationJobs = pgTable('categorization_jobs', {
+  id: uuid('id').primaryKey(),
+  slot: integer('slot').notNull().default(1),
+  status: text('status').$type<CategorizationJobStatus>().notNull(),
+  controlAction: text('control_action').$type<'pause' | 'cancel'>(),
+  maxJournalId: integer('max_journal_id').notNull(),
+  totals: jsonb('totals').$type<CategorizationJobTotals>().notNull(),
+  passes: integer('passes').notNull().default(0),
+  passLimit: integer('pass_limit').notNull().default(200),
+  countsExact: boolean('counts_exact').notNull().default(true),
+  latestResult: jsonb('latest_result').$type<CategorizationResult>(),
+  pauseReason: text('pause_reason'), dispatchIssue: text('dispatch_issue'),
+  leaseToken: uuid('lease_token'), leaseExpiresAt: timestamp('lease_expires_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  finishedAt: timestamp('finished_at', { withTimezone: true }),
+}, table => [
+  check('categorization_jobs_slot_check', sql`${table.slot} = 1`),
+  check('categorization_jobs_status_check', sql`${table.status} IN ('queued', 'running', 'paused', 'completed', 'cancelled')`),
+  check('categorization_jobs_control_action_check', sql`${table.controlAction} IN ('pause', 'cancel')`),
+  check('categorization_jobs_max_journal_id_check', sql`${table.maxJournalId} >= 0`),
+  check('categorization_jobs_passes_check', sql`${table.passes} >= 0`),
+  check('categorization_jobs_pass_limit_check', sql`${table.passLimit} > 0`),
+  uniqueIndex('categorization_jobs_active_idx').on(table.slot).where(sql`${table.status} IN ('queued', 'running', 'paused')`),
+  index('categorization_jobs_created_idx').on(table.createdAt),
+]);
+
+export const categorizationJobPasses = pgTable('categorization_job_passes', {
+  id: uuid('id').primaryKey(),
+  jobId: uuid('job_id').notNull().references(() => categorizationJobs.id, { onDelete: 'cascade' }),
+  workerToken: uuid('worker_token').notNull(),
+  status: text('status').$type<'running' | 'completed' | 'abandoned' | 'failed'>().notNull(),
+  result: jsonb('result').$type<CategorizationResult>(),
+  startedAt: timestamp('started_at', { withTimezone: true }).notNull().defaultNow(),
+  finishedAt: timestamp('finished_at', { withTimezone: true }),
+}, table => [
+  check('categorization_job_passes_status_check', sql`${table.status} IN ('running', 'completed', 'abandoned', 'failed')`),
+  index('categorization_job_passes_job_idx').on(table.jobId, table.status),
+]);
 
 export type TransferKind =
   | 'statement_payment'

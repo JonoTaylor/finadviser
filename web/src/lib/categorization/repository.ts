@@ -41,6 +41,7 @@ export function candidateEligibilitySql(alias = 'je', asOf = londonTodayIso()): 
 
 function scopeSql(options: CategorizationOptions): SQL {
   const clauses: SQL[] = [];
+  if (options.maxJournalId !== undefined) clauses.push(sql`je.id <= ${options.maxJournalId}`);
   if (options.journalIds !== undefined) {
     clauses.push(sql`je.id IN (SELECT value::integer FROM jsonb_array_elements_text(${JSON.stringify(options.journalIds)}::jsonb))`);
   }

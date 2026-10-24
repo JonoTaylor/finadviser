@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import useSWR from 'swr';
-import { Accordion, AccordionDetails, AccordionSummary, Alert, Box, Button, Card, CardContent, Chip, Grid, LinearProgress, Skeleton, Stack, Typography } from '@mui/material';
+import { Accordion, AccordionDetails, AccordionSummary, Alert, Box, Button, Card, CardContent, Chip, Grid, Skeleton, Stack, Typography } from '@mui/material';
 import AutoFixHighRoundedIcon from '@mui/icons-material/AutoFixHighRounded';
 import FileUploadOutlinedIcon from '@mui/icons-material/FileUploadOutlined';
 import ArrowForwardRoundedIcon from '@mui/icons-material/ArrowForwardRounded';
@@ -12,7 +12,7 @@ import PageHeader from '@/components/ui/PageHeader';
 import MetricCard from '@/components/ui/MetricCard';
 import { fetchJson } from '@/lib/http/client';
 import type { DataIntelligenceReport } from '@/lib/data-intelligence/types';
-import ProcessingSummary from './ProcessingSummary';
+import CategorizationJobProgress from './CategorizationJobProgress';
 import CategorizationReviewQueue from './CategorizationReviewQueue';
 import useDataProcessing from './useDataProcessing';
 
@@ -22,12 +22,12 @@ const coverageLabels = { recorded: 'Recorded', empty: 'Not recorded', incomplete
 export default function DataAssistantWorkspace() {
   const { data, error, isLoading, mutate } = useSWR<DataIntelligenceReport>('/api/data-intelligence', fetchJson, { shouldRetryOnError: false });
   const processing = useDataProcessing();
-  const queued = data?.transactions.unprocessedCount;
+  const queued = processing.job?.counts?.available ?? data?.transactions.unprocessedCount;
   const gaps = data?.gaps.slice().sort((a, b) => priorityOrder[a.priority] - priorityOrder[b.priority]) ?? [];
   return <Box sx={{ minWidth: 0 }}>
     <PageHeader title="Data assistant" description="Let AI organise your records, surface unclear transactions and show exactly what your financial plan is missing." actions={<>
       <Button component={Link} href="/import" variant="outlined" startIcon={<FileUploadOutlinedIcon />}>Add information</Button>
-      <Button variant="contained" startIcon={<AutoFixHighRoundedIcon />} disabled={processing.running || !data || data.transactions.status === 'unavailable' || queued == null || queued === 0} onClick={() => void processing.run(true)}>{processing.running ? 'Processing…' : 'Process all queued records'}</Button>
+      <Button variant="contained" startIcon={<AutoFixHighRoundedIcon />} disabled={processing.running || processing.pendingAction !== null || !processing.jobLoaded || !data || data.transactions.status === 'unavailable' || queued == null || (queued === 0 && processing.job?.status !== 'paused')} onClick={() => void processing.run()}>{processing.running ? 'Processing…' : processing.job?.status === 'paused' ? 'Resume processing' : 'Process all queued records'}</Button>
     </>} />
 
     {error && <Alert severity="warning" sx={{ mb: 2 }} action={<Button size="small" onClick={() => void mutate()}>Retry</Button>}>Your data assessment could not be loaded. No coverage or balances have been assumed.</Alert>}
@@ -48,13 +48,10 @@ export default function DataAssistantWorkspace() {
         <Chip size="small" color={data?.processing.modelAvailable ? 'success' : 'default'} variant="outlined" label={isLoading ? 'Checking AI availability…' : data ? data.processing.modelAvailable ? 'AI configured' : 'AI unavailable' : 'Availability unknown'} sx={{ alignSelf: 'flex-start', flexShrink: 0 }} />
       </Stack>
       {data && !data.processing.modelAvailable && <Alert severity="info" sx={{ mt: 2 }}>AI categorisation is unavailable on the server. Processing can still apply saved rules and reviewed matches; the information gaps and review queue remain available.</Alert>}
-      {processing.running && <Box sx={{ mt: 2 }} aria-live="polite">
-        <LinearProgress aria-label="Organising queued records" sx={{ mb: 1.25 }} />
-        <Stack direction="row" justifyContent="space-between" gap={1} flexWrap="wrap" alignItems="center"><Typography variant="body2">{processing.passes ? `${processing.passes} processing pass${processing.passes === 1 ? '' : 'es'} complete. ` : ''}{processing.cancelRequested ? 'Stopping after the current pass…' : 'Working through the next bounded batch…'}</Typography><Button size="small" onClick={processing.cancel} disabled={processing.cancelRequested}>Stop after this pass</Button></Stack>
-      </Box>}
-      {processing.result && <Box sx={{ mt: 2 }}><ProcessingSummary result={processing.result} onContinue={() => void processing.run(true)} running={processing.running} /></Box>}
-      {processing.error && <Alert severity="error" sx={{ mt: 2 }}>{processing.error} Your saved transactions remain available; completed categorisation passes have been retained.</Alert>}
-      {processing.notice && <Alert severity="info" sx={{ mt: 2 }}>{processing.notice}</Alert>}
+      {processing.jobLoading && <Skeleton variant="rounded" height={75} sx={{ mt: 2 }} />}
+      {processing.job && <Box sx={{ mt: 2 }}><CategorizationJobProgress job={processing.job} issue={processing.issue} backgroundAvailable={processing.backgroundAvailable} pending={processing.pendingAction !== null} onPause={() => void processing.pause()} onResume={() => void processing.run()} onCancel={() => void processing.cancel()} /></Box>}
+      {processing.error && <Alert severity="warning" sx={{ mt: 2 }} action={<Button size="small" onClick={() => void processing.refresh()}>Reload status</Button>}>{processing.error}</Alert>}
+      {!processing.job && processing.issue && <Alert severity="info" sx={{ mt: 2 }}>{processing.issue}</Alert>}
       {data && <Typography variant="caption" component="p" sx={{ mt: 2 }}>Household data snapshot · {data.asOf} · Missing information stays unknown until you provide or confirm it.</Typography>}
     </CardContent></Card>
 

@@ -1,85 +1,89 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useSWRConfig } from 'swr';
+import useSWR, { useSWRConfig } from 'swr';
 import { fetchJson } from '@/lib/http/client';
-import type { CategorizationResult } from '@/lib/categorization/types';
+import { categorizationJobsResponseSchema } from '@/lib/categorization/jobs/response';
+import type { CategorizationJob } from '@/lib/categorization/jobs/types';
+
+const JOBS_URL = '/api/categorization/jobs';
+type JobResponse = { job: CategorizationJob | null; backgroundAvailable: boolean; issue: string | null };
+type JobAction = 'start' | 'pause' | 'resume' | 'cancel';
 
 /** Revalidate derived financial views after actual categorisation or review. */
 export function isFinancialDataKey(key: unknown): boolean {
   return typeof key === 'string' && ['/api/data-intelligence', '/api/journal', '/api/plan', '/api/reviews', '/api/finance', '/api/spending', '/api/budgets', '/api/dashboard', '/api/tips', '/api/accounts', '/api/investments', '/api/debts', '/api/portfolio', '/api/pension-records', '/api/property-operations', '/api/properties'].some(prefix => key.startsWith(prefix));
 }
 
+export function canAutomaticallyStartCategorization(job: CategorizationJob | null, available: number | null | undefined): boolean {
+  return available !== null && available !== undefined && available > 0 && (job === null || job.status === 'completed');
+}
+
+async function requestJob(url: string, init?: RequestInit): Promise<JobResponse> {
+  const parsed = categorizationJobsResponseSchema.safeParse(await fetchJson<unknown>(url, init));
+  if (!parsed.success) throw new Error('The server returned an unreadable processing status. Reload the status before starting another run.');
+  return parsed.data;
+}
+
+/** The browser observes a durable server job; navigation never cancels its work. */
 export default function useDataProcessing() {
   const { mutate } = useSWRConfig();
-  const [running, setRunning] = useState(false);
-  const [result, setResult] = useState<CategorizationResult | null>(null);
-  const [error, setError] = useState('');
-  const [passes, setPasses] = useState(0);
-  const [cancelRequested, setCancelRequested] = useState(false);
-  const [notice, setNotice] = useState('');
-  const active = useRef(false);
-  const cancelled = useRef(false);
+  const { data, error: statusError, isLoading, mutate: mutateJob } = useSWR(JOBS_URL, requestJob, {
+    shouldRetryOnError: false, refreshInterval: 5_000, refreshWhenHidden: false,
+  });
+  const [pendingAction, setPendingAction] = useState<JobAction | null>(null);
+  const [actionError, setActionError] = useState('');
+  const activeAction = useRef(false);
   const mounted = useRef(true);
-  useEffect(() => { mounted.current = true; return () => { mounted.current = false; cancelled.current = true; }; }, []);
-  const refresh = useCallback(async () => { await mutate(isFinancialDataKey); }, [mutate]);
+  const observedRevision = useRef<string | null>(null);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
+  const refreshFinancial = useCallback(async () => { await mutate(isFinancialDataKey); }, [mutate]);
+  const refresh = useCallback(async () => { await Promise.all([refreshFinancial(), mutateJob()]); }, [refreshFinancial, mutateJob]);
+  const job = data?.job ?? null;
 
-  const run = useCallback(async (all = false, maxPasses = 100) => {
-    if (active.current) return;
-    active.current = true;
-    cancelled.current = false;
-    setRunning(true);
-    setCancelRequested(false);
-    setPasses(0);
-    setError('');
-    setResult(null);
-    setNotice('');
-    const passLimit = Number.isInteger(maxPasses) ? Math.max(1, Math.min(maxPasses, 100)) : 100;
-    let combined: CategorizationResult | null = null;
-    let pass = 0;
+  useEffect(() => {
+    if (!job) return;
+    const revision = `${job.id}:${job.updatedAt}`;
+    if (revision === observedRevision.current) return;
+    observedRevision.current = revision;
+    if (job.passes > 0 || ['completed', 'paused', 'cancelled'].includes(job.status)) void refreshFinancial().catch(() => undefined);
+  }, [job, refreshFinancial]);
+
+  const control = useCallback(async (action: JobAction) => {
+    if (activeAction.current) return;
+    activeAction.current = true;
+    setPendingAction(action);
+    setActionError('');
     try {
-      do {
-        const next = await fetchJson<CategorizationResult>('/api/journal/auto-categorize', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ limit: 100 }),
-        });
-        combined = combined ? {
-          ...next,
-          total: combined.total + next.total,
-          ruleBased: combined.ruleBased + next.ruleBased,
-          aiCategorized: combined.aiCategorized + next.aiCategorized,
-          learned: combined.learned + next.learned,
-          aiNoMatch: combined.aiNoMatch + next.aiNoMatch,
-          reviewQueued: combined.reviewQueued + next.reviewQueued,
-          conflicts: combined.conflicts + next.conflicts,
-          batches: combined.batches + next.batches,
-        } : next;
-        pass++;
-        if (mounted.current) { setResult(combined); setPasses(pass); }
-        await refresh();
-        // A time-budget pause can safely continue in a fresh bounded pass.
-        // Provider failures and unchanged queues must not trigger retries.
-        const progressed = next.ruleBased + next.aiCategorized + next.learned + next.reviewQueued;
-        const deferredReason = next.deferredReason;
-        if (!all || cancelled.current || !mounted.current || next.busy || next.status === 'unavailable' || (next.aiSkippedReason && deferredReason !== 'time_budget') || !next.hasMore || progressed === 0) break;
-        if (document.visibilityState === 'hidden') {
-          if (mounted.current) setNotice('Processing paused while this tab was inactive. You can continue with the remaining records.');
-          break;
-        }
-        if (pass >= passLimit) {
-          if (mounted.current) setNotice('More records remain queued. You can continue processing when you are ready.');
-          break;
-        }
-      } while (mounted.current);
+      if (action !== 'start' && !job) return;
+      const response = await requestJob(action === 'start' ? JOBS_URL : `${JOBS_URL}/${job!.id}`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(action === 'start' ? {} : { action }),
+      });
+      await mutateJob(response, { revalidate: false });
+      // A failed derived-view refresh does not make an acknowledged job
+      // command uncertain. Its authoritative status is already in the cache.
+      void refreshFinancial().catch(() => undefined);
     } catch (cause) {
-      if (mounted.current) setError(cause instanceof Error ? cause.message : 'Data processing could not finish. Please try again.');
-      await refresh().catch(() => undefined);
+      if (mounted.current) setActionError('The processing request could not be confirmed. ' + (cause instanceof Error ? cause.message : 'Reload the current status before trying again.'));
+      // A lost response may follow an accepted action. Observe, never replay it.
+      await mutateJob().catch(() => undefined);
     } finally {
-      active.current = false;
-      if (mounted.current) setRunning(false);
+      activeAction.current = false;
+      if (mounted.current) setPendingAction(null);
     }
-  }, [refresh]);
+  }, [job, mutateJob, refreshFinancial]);
+  const run = useCallback(async () => {
+    if (job?.status === 'queued' || job?.status === 'running') return;
+    await control(job?.status === 'paused' ? 'resume' : 'start');
+  }, [job, control]);
+  const pause = useCallback(() => control('pause'), [control]);
+  const cancel = useCallback(() => control('cancel'), [control]);
 
-  const cancel = useCallback(() => { cancelled.current = true; setCancelRequested(true); }, []);
-  return { run, cancel, refresh, running, result, error, passes, cancelRequested, notice };
+  return {
+    job, run, pause, cancel, refresh, pendingAction,
+    running: pendingAction === 'start' || pendingAction === 'resume' || job?.status === 'queued' || job?.status === 'running',
+    jobLoading: isLoading, jobLoaded: data !== undefined,
+    backgroundAvailable: data?.backgroundAvailable ?? false, issue: data?.issue ?? null,
+    error: actionError || (statusError instanceof Error ? statusError.message : statusError ? 'Processing status could not be loaded.' : ''),
+  };
 }

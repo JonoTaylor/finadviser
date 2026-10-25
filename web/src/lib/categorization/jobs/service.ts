@@ -86,7 +86,7 @@ function nextState(result: CategorizationResult): { status: 'queued' | 'paused' 
   if (result.conflicts > 0) return { status: 'paused', reason: 'conflicts' };
   if (result.aiSkippedReason && result.deferredReason !== 'time_budget') return { status: 'paused', reason: result.deferredReason ?? 'model_failed' };
   if (!result.hasMore) return { status: 'completed', reason: null };
-  const progress = result.ruleBased + result.aiCategorized + result.learned + result.reviewQueued;
+  const progress = result.ruleBased + result.aiCategorized + result.learned + result.reviewQueued + (result.reviewsRechecked ?? 0);
   return progress > 0 ? { status: 'queued', reason: null } : { status: 'paused', reason: 'no_progress' };
 }
 

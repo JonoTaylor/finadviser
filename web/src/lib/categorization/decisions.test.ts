@@ -91,6 +91,13 @@ describe('cited public merchant evidence', () => {
 });
 
 describe('purchase purpose remains distinct from merchant identity', () => {
+  it('allows the exact Prime membership category without removing the generic Amazon purpose guard', () => {
+    const serviceCategories = [...categories, { id: 20, name: 'Software & Subscriptions', parentId: null }];
+    const prime = candidate({ merchantName: 'Amazon Prime', description: 'Amazon Prime amzn.co.uk/pm GBR' });
+    expect(validateModelDecisions({ decisions: [decision({ categoryId: 20 })] }, [prime], serviceCategories)[0].status).toBe('applied');
+    expect(validateModelDecisions({ decisions: [decision({ categoryId: 1 })] }, [prime], serviceCategories)[0].status).toBe('needs_review');
+    expect(validateModelDecisions({ decisions: [decision({ categoryId: 20, confidence: 0.85 })] }, [prime], serviceCategories)[0].status).toBe('needs_review');
+  });
   it.each(['Amazon Marketplace', 'AMZNMktplace', 'PayPal', 'Klarna', 'eBay'])('reviews a model guess for mixed-purpose merchant %s even at high confidence', merchantName => {
     const result = validateModelDecisions({ decisions: [decision({ confidence: 1 })] }, [candidate({ merchantName })], categories);
     expect(result[0].status).toBe('needs_review');

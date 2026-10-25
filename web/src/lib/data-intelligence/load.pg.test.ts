@@ -30,7 +30,7 @@ describe.skipIf(!url)('data intelligence coverage SQL in disposable PostgreSQL',
       CREATE TEMP TABLE transaction_categorizations (
         journal_entry_id integer PRIMARY KEY, snapshot_hash text, status text, context_key text, source text,
         category_id integer, reason text, updated_at timestamptz DEFAULT now(),
-        payee_memory_id uuid, payee_memory_revision integer
+        payee_memory_id uuid, payee_memory_revision integer, review_policy_version text
       );
       CREATE TEMP TABLE categorization_learning (context_key text PRIMARY KEY, category_id integer, updated_at timestamptz DEFAULT now());
       -- TEMP fixture counterparts for the confirmed-knowledge eligibility query.

@@ -1570,3 +1570,7 @@ ALTER TABLE transaction_categorizations ADD COLUMN IF NOT EXISTS payee_memory_re
 ALTER TABLE transaction_categorizations DROP CONSTRAINT IF EXISTS transaction_categorizations_source_check;
 ALTER TABLE transaction_categorizations ADD CONSTRAINT transaction_categorizations_source_check
     CHECK (source IN ('rule', 'learned', 'ai', 'user', 'payee'));
+
+-- Recheck an unchanged queued review once when deterministic knowledge changes.
+-- NULL marks historical suggestions; this does not reopen human decisions.
+ALTER TABLE transaction_categorizations ADD COLUMN IF NOT EXISTS review_policy_version TEXT;

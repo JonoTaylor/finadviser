@@ -7,10 +7,11 @@ import { categoryRepo } from '@/lib/repos/category.repo';
 import { propertyRepo } from '@/lib/repos/property.repo';
 import { loadActivePayeeMemories, loadPrivatePayeeNames } from './payees/service';
 import { matchingConfirmedPayees } from './payees/matching';
+import { knownServiceMatch } from './known-services';
 import { categorizationRepo } from './repository';
 import {
   categorizationContextKey, confirmedContextReviewReason, MAX_PROCESSING_ENTRIES, MODEL_BATCH_SIZE, PAYEE_MEANINGS_CONFLICT_REASON,
-  needsMovementReview, ruleDecision, validateModelDecisions,
+  movementReviewReason, needsMovementReview, ruleDecision, validateModelDecisions,
 } from './decisions';
 import type {
   CategorizationCandidate, CategorizationDecision, CategorizationOptions, CategorizationResult,
@@ -87,7 +88,7 @@ export async function processCategorization(options: CategorizationOptions = {})
   const token = randomUUID();
   const counters = {
     total: 0, ruleBased: 0, aiCategorized: 0, learned: 0, aiNoMatch: 0,
-    reviewQueued: 0, conflicts: 0, batches: 0,
+    reviewQueued: 0, reviewsRechecked: 0, conflicts: 0, batches: 0,
   };
   let aiSkippedReason: string | null = null;
   let deferredReason: CategorizationResult['deferredReason'] = null;
@@ -111,6 +112,7 @@ export async function processCategorization(options: CategorizationOptions = {})
     ]);
     const validCategories = new Set(categories.map(category => category.id));
     const deterministic: CategorizationDecision[] = [];
+    const policyChecks: CategorizationCandidate[] = [];
     const unmatched: CategorizationCandidate[] = [];
     for (const candidate of candidates) {
       const learnedCategoryId = learned.get(categorizationContextKey(candidate));
@@ -138,10 +140,16 @@ export async function processCategorization(options: CategorizationOptions = {})
         });
       } else {
         const rule = ruleDecision(candidate, rules, categories);
-        if (rule) deterministic.push(rule);
-        // An unchanged review is only eligible for newly confirmed knowledge.
-        // Never send it through the model again merely because a lookup raced.
+        const service = !rule ? knownServiceMatch(candidate, categories) : null;
+        const serviceReason = service ? movementReviewReason(candidate, service.categoryId, categories) : null;
+        if (rule && (!candidate.pendingReview || rule.status === 'applied')) deterministic.push(rule);
+        else if (service && !serviceReason) deterministic.push({
+          journalId: candidate.id, categoryId: service.categoryId, confidence: 1, reason: service.reason, source: 'rule', status: 'applied',
+        });
+        // Revisit queued reviews only with deterministic knowledge. A policy
+        // upgrade or raced lookup must not send old questions back to AI.
         else if (!candidate.pendingReview) unmatched.push(candidate);
+        else policyChecks.push(candidate);
       }
     }
 
@@ -165,7 +173,16 @@ export async function processCategorization(options: CategorizationOptions = {})
       }
     }
 
-    if (Date.now() < deadline) await persist(deterministic);
+    if (Date.now() < deadline) {
+      await persist(deterministic);
+      // A failed/unconfirmed deterministic save must never be hidden behind a
+      // policy stamp. Unresolved reviews retain their exact original evidence.
+      if (policyChecks.length && counters.conflicts === 0 && Date.now() < deadline) {
+        const checked = await categorizationRepo.markReviewPolicyChecked(policyChecks, token);
+        counters.reviewsRechecked += checked.length;
+        counters.conflicts += policyChecks.length - checked.length;
+      }
+    }
     else if (candidates.length) {
       aiSkippedReason = 'The processing time budget was reached. Run another pass to continue.';
       deferredReason = 'time_budget';
@@ -336,7 +353,7 @@ export async function processCategorization(options: CategorizationOptions = {})
     }
 
     const counts = await categorizationRepo.counts(normalized);
-    const changed = counters.ruleBased + counters.aiCategorized + counters.learned + counters.reviewQueued;
+    const changed = counters.ruleBased + counters.aiCategorized + counters.learned + counters.reviewQueued + counters.reviewsRechecked;
     return {
       ...counts, ...counters, aiSkippedReason, deferredReason, hasMore: counts.scopeAvailable > 0,
       busy: false, status: aiSkippedReason ? (changed ? 'partial' : 'unavailable') : (counts.scopeAvailable > 0 ? 'partial' : 'complete'),

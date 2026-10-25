@@ -25,6 +25,12 @@ describe('processing progress summary', () => {
     expect(html).toContain('Processing paused at the time limit.');
     expect(html).not.toContain('Completed decisions have been saved.');
   });
+  it('distinguishes reassessed existing reviews from newly queued questions', () => {
+    const html = render({ ...result, reviewQueued: 0, reviewsRechecked: 100 });
+    expect(html).toContain('100 existing reviews reassessed');
+    expect(html).toContain('0 sent for review');
+    expect(html).not.toContain('100 categorised');
+  });
 
   it('keeps provider failure and an actively continuing run distinct from a paused run', () => {
     const running = render(result, true);

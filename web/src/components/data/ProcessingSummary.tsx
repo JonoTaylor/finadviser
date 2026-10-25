@@ -10,6 +10,7 @@ export default function ProcessingSummary({ result, onContinue, running = false 
     <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap sx={{ mb: 1 }}>
       <Chip label={`${applied} categorised`} color={applied ? 'success' : 'default'} variant="outlined" size="small" />
       <Chip label={`${result.reviewQueued} sent for review`} variant="outlined" size="small" />
+      {(result.reviewsRechecked ?? 0) > 0 && <Chip label={`${result.reviewsRechecked} existing reviews reassessed`} variant="outlined" size="small" />}
       <Chip label={`${result.available} queued`} variant="outlined" size="small" />
     </Stack>
     {paused && <Alert severity="info" sx={{ mb: 1 }} action={onContinue && result.hasMore ? <Button size="small" disabled={running} onClick={onContinue}>Continue processing</Button> : undefined}>

@@ -3,7 +3,7 @@ import type { CategorizationCandidate, CategorizationDecision } from './types';
 import type { MerchantResearchResult } from '@/lib/merchant-research/types';
 
 const mocks = vi.hoisted(() => ({
-  acquireLease: vi.fn(), releaseLease: vi.fn(), listCandidates: vi.fn(), counts: vi.fn(), lookupLearned: vi.fn(), persistDecisions: vi.fn(),
+  acquireLease: vi.fn(), releaseLease: vi.fn(), listCandidates: vi.fn(), counts: vi.fn(), lookupLearned: vi.fn(), persistDecisions: vi.fn(), markReviewPolicyChecked: vi.fn(),
   categories: vi.fn(), rules: vi.fn(), owners: vi.fn(), model: vi.fn(), research: vi.fn(), researchQuery: vi.fn(),
   payees: vi.fn(), payeeNames: vi.fn(), payeeMatch: vi.fn(),
 }));
@@ -54,6 +54,7 @@ beforeEach(() => {
   mocks.researchQuery.mockReturnValue(null);
   mocks.research.mockResolvedValue({ status: 'unavailable', sources: [] });
   mocks.persistDecisions.mockImplementation(async (_candidates: CategorizationCandidate[], decisions: CategorizationDecision[]) => decisions.map(({ journalId, status }) => ({ journalId, status })));
+  mocks.markReviewPolicyChecked.mockImplementation(async (rows: CategorizationCandidate[]) => rows.map(row => row.id));
   mocks.model.mockImplementation(async (candidates: CategorizationCandidate[]) => ({ decisions: candidates.map(row => ({ journalId: row.id, categoryId: 1, confidence: 0.95, reason: 'Example merchant evidence.' })) }));
   vi.spyOn(console, 'warn').mockImplementation(() => {});
 });
@@ -243,6 +244,51 @@ describe('bounded leased categorisation passes', () => {
     await processCategorization();
     expect(mocks.model).not.toHaveBeenCalled();
     expect(mocks.persistDecisions).not.toHaveBeenCalled();
+    expect(mocks.markReviewPolicyChecked).toHaveBeenCalledWith([expect.objectContaining({ id: 1 })], mocks.acquireLease.mock.calls[0][0]);
+  });
+  it('resolves an older precise Prime subscription review without a model call or public research', async () => {
+    mocks.listCandidates.mockResolvedValue([{ ...candidate(), merchantName: 'Amazon Prime', description: 'Amazon Prime amzn.co.uk/pm GBR', pendingReview: true }]);
+    mocks.categories.mockResolvedValue([{ id: 10, name: 'Software & Subscriptions' }]);
+    expect(await processCategorization()).toMatchObject({ ruleBased: 1, reviewQueued: 0, reviewsRechecked: 0 });
+    expect(mocks.persistDecisions.mock.calls[0][1][0]).toMatchObject({ categoryId: 10, source: 'rule', status: 'applied' });
+    expect(mocks.model).not.toHaveBeenCalled();
+    expect(mocks.research).not.toHaveBeenCalled();
+    expect(mocks.markReviewPolicyChecked).not.toHaveBeenCalled();
+  });
+  it('checks an old ambiguous marketplace review once without replacing its question with a new AI guess', async () => {
+    mocks.listCandidates.mockResolvedValue([{ ...candidate(), merchantName: 'Amazon Marketplace', pendingReview: true }]);
+    expect(await processCategorization()).toMatchObject({ reviewsRechecked: 1, reviewQueued: 0, aiCategorized: 0 });
+    expect(mocks.model).not.toHaveBeenCalled();
+    expect(mocks.persistDecisions).not.toHaveBeenCalled();
+  });
+  it('keeps a previously confirmed exact category ahead of built-in service knowledge', async () => {
+    const row = { ...candidate(), merchantName: 'Amazon Prime', description: 'Amazon Prime' };
+    mocks.listCandidates.mockResolvedValue([row]);
+    mocks.categories.mockResolvedValue([{ id: 10, name: 'Software & Subscriptions' }, { id: 20, name: 'Entertainment' }]);
+    mocks.lookupLearned.mockResolvedValue(new Map([[categorizationContextKey(row), 20]]));
+    await processCategorization();
+    expect(mocks.persistDecisions.mock.calls[0][1][0]).toMatchObject({ categoryId: 20, source: 'learned' });
+  });
+  it('preserves an unresolved review when a deterministic rule still needs movement review', async () => {
+    mocks.listCandidates.mockResolvedValue([{ ...candidate(), pendingReview: true, transactionType: 'bank transfer' }]);
+    mocks.rules.mockResolvedValue([{ pattern: 'Example purchase 1', categoryId: 1, matchType: 'exact', source: 'user' }]);
+    expect(await processCategorization()).toMatchObject({ reviewsRechecked: 1, reviewQueued: 0 });
+    expect(mocks.persistDecisions).not.toHaveBeenCalled();
+    expect(mocks.model).not.toHaveBeenCalled();
+  });
+  it('does not stamp remaining reviews after an unconfirmed deterministic write', async () => {
+    mocks.listCandidates.mockResolvedValue([candidate(), { ...candidate(2), pendingReview: true }]);
+    mocks.rules.mockResolvedValue([{ pattern: 'Example purchase 1', categoryId: 1, matchType: 'exact', source: 'user' }]);
+    mocks.persistDecisions.mockRejectedValue(new Error('Unconfirmed save'));
+    await expect(processCategorization()).rejects.toThrow('Unconfirmed save');
+    expect(mocks.markReviewPolicyChecked).not.toHaveBeenCalled();
+  });
+  it('does not stamp remaining reviews after a deterministic compare-and-swap conflict', async () => {
+    mocks.listCandidates.mockResolvedValue([candidate(), { ...candidate(2), pendingReview: true }]);
+    mocks.rules.mockResolvedValue([{ pattern: 'Example purchase 1', categoryId: 1, matchType: 'exact', source: 'user' }]);
+    mocks.persistDecisions.mockResolvedValue([]);
+    expect(await processCategorization()).toMatchObject({ conflicts: 1, reviewsRechecked: 0 });
+    expect(mocks.markReviewPolicyChecked).not.toHaveBeenCalled();
   });
   it('ignores deleted learned categories and uses the model rather than arbitrary IDs', async () => {
     mocks.lookupLearned.mockResolvedValue(new Map([[categorizationContextKey(candidate()), 999]]));

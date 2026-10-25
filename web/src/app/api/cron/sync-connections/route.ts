@@ -9,7 +9,7 @@ import { recoverCategorizationJob } from '@/lib/categorization/jobs/recovery';
  * vercel.json). Auth via the standard `Authorization: Bearer
  * ${CRON_SECRET}` header that Vercel Cron adds to every scheduled
  * request when the env var is set. The route is whitelisted in
- * middleware.ts so the auth-cookie check doesn't block it.
+ * proxy.ts so the auth-cookie check doesn't block it.
  *
  * Idempotent: each run starts a new sync_runs row per connection
  * and the journal-side dedup (provider_txn_id partial UNIQUE +

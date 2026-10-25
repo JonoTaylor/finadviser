@@ -10,7 +10,7 @@
  * Vercel — every existing cookie will fail verification.
  *
  * Uses the Web Crypto API (globalThis.crypto.subtle) so the same code runs
- * in the Edge middleware and the Node API routes.
+ * in the proxy and the API routes.
  */
 
 const COOKIE_NAME = 'finadviser_session';

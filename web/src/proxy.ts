@@ -36,7 +36,7 @@ const PUBLIC_PATHS = new Set([
   '/api/categorization/jobs/worker',
 ]);
 
-export async function middleware(req: NextRequest) {
+export async function proxy(req: NextRequest) {
   const { pathname, search } = req.nextUrl;
 
   const cfg = readAuthConfig();
@@ -83,6 +83,6 @@ export async function middleware(req: NextRequest) {
 
 export const config = {
   // Match every path except Next's internals and common static assets so
-  // the middleware doesn't run for /_next/* CSS, images, favicons, etc.
+  // the proxy doesn't run for /_next/* CSS, images, favicons, etc.
   matcher: ['/((?!_next/static|_next/image|favicon.ico|globals.css).*)'],
 };

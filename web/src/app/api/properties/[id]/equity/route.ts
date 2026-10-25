@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { calculateEquity } from '@/lib/properties/equity-calculator';
+import { parseId, routeErrorResponse } from '@/lib/http/route-errors';
 
 export async function GET(
   request: NextRequest,
@@ -7,7 +8,7 @@ export async function GET(
 ) {
   try {
     const { id } = await params;
-    const equityData = await calculateEquity(parseInt(id));
+    const equityData = await calculateEquity(parseId(id, 'property id'));
     const serialized = equityData.map(e => ({
       ownerId: e.ownerId,
       name: e.name,
@@ -18,6 +19,6 @@ export async function GET(
     }));
     return NextResponse.json(serialized);
   } catch (error) {
-    return NextResponse.json({ error: 'Failed to calculate equity' }, { status: 500 });
+    return routeErrorResponse(error, 'Failed to calculate equity');
   }
 }

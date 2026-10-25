@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { accountRepo } from '@/lib/repos';
+import { routeErrorResponse, readJsonBody } from '@/lib/http/route-errors';
 
 export async function GET(request: NextRequest) {
   try {
@@ -19,13 +20,13 @@ export async function GET(request: NextRequest) {
     const data = await accountRepo.listAll();
     return NextResponse.json(data);
   } catch (error) {
-    return NextResponse.json({ error: 'Failed to fetch accounts' }, { status: 500 });
+    return routeErrorResponse(error, 'Failed to fetch accounts');
   }
 }
 
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json();
+    const body = await readJsonBody(request);
     // Pull paysOffAccountId out before the create so it doesn't get
     // forwarded to accountRepo.create (which doesn't accept it as a
     // creation field). The create-then-update sequence is non-atomic
@@ -42,6 +43,6 @@ export async function POST(request: NextRequest) {
     }
     return NextResponse.json(responseAccount, { status: 201 });
   } catch (error) {
-    return NextResponse.json({ error: 'Failed to create account' }, { status: 500 });
+    return routeErrorResponse(error, 'Failed to create account');
   }
 }

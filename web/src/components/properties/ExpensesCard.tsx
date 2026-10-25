@@ -25,6 +25,7 @@ import Link from 'next/link';
 import { format } from 'date-fns';
 import { currentTaxYear } from '@/lib/tax/ukTaxYear';
 import { formatCurrency } from '@/lib/utils/formatting';
+import { fetchJson } from '@/lib/http/client';
 import { getCategoryColor } from '@/lib/utils/category-colors';
 import { softTokens } from '@/theme/theme';
 import AddExpenseDialog from './AddExpenseDialog';
@@ -44,13 +45,6 @@ interface ExpensesResponse {
   limit: number;
 }
 
-const fetcher = async (url: string) => {
-  const res = await fetch(url);
-  const body = await res.json();
-  if (!res.ok) throw new Error(body?.error ?? `Request failed: ${res.status}`);
-  return body as ExpensesResponse;
-};
-
 export default function ExpensesCard({ propertyId }: { propertyId: number }) {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [linking, setLinking] = useState(false);
@@ -60,9 +54,9 @@ export default function ExpensesCard({ propertyId }: { propertyId: number }) {
   });
   const taxYear = currentTaxYear();
 
-  const { data, isLoading, mutate } = useSWR<ExpensesResponse>(
+  const { data, error: loadError, isLoading, mutate } = useSWR<ExpensesResponse>(
     `/api/properties/${propertyId}/expenses?limit=50`,
-    fetcher,
+    fetchJson,
     { revalidateOnFocus: false },
   );
 
@@ -156,7 +150,11 @@ export default function ExpensesCard({ propertyId }: { propertyId: number }) {
 
         <Divider sx={{ mb: 2 }} />
 
-        {isLoading ? (
+        {loadError ? (
+          <Alert severity="warning" action={<Button color="inherit" size="small" onClick={() => void mutate()}>Retry</Button>}>
+            Expenses could not be loaded. Linked property expenses are unavailable until they load.
+          </Alert>
+        ) : isLoading ? (
           <Box sx={{ py: 3, textAlign: 'center' }}>
             <CircularProgress size={20} />
           </Box>

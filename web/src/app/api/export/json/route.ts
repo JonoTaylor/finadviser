@@ -1,5 +1,5 @@
-import { NextResponse } from 'next/server';
 import { journalRepo, accountRepo, categoryRepo, propertyRepo } from '@/lib/repos';
+import { routeErrorResponse } from '@/lib/http/route-errors';
 
 export async function GET() {
   try {
@@ -25,6 +25,6 @@ export async function GET() {
       },
     });
   } catch (error) {
-    return NextResponse.json({ error: 'Failed to export' }, { status: 500 });
+    return routeErrorResponse(error, 'Failed to export');
   }
 }

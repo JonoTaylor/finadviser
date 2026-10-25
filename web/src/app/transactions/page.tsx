@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import {
   Box, Button, Snackbar, Alert, FormControlLabel, Switch, Badge,
 } from '@mui/material';
@@ -43,7 +43,12 @@ export default function TransactionsPage() {
   const [page, setPage] = useState(0);
   const [pageSize, setPageSize] = useState(25);
   const [hideTransfers, setHideTransfers] = useState(true);
-  const [editEntry, setEditEntry] = useState<{ id: number; categoryId: number | null; description: string } | null>(null);
+  const [editEntry, setEditEntry] = useState<{ id: number; categoryId: number | null; description: string; propertyId: number | null } | null>(null);
+  // Opened from the Data assistant to assign property expenses no property claims.
+  const [unlinkedOnly, setUnlinkedOnly] = useState(false);
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get('unlinked') === 'property-expenses') setUnlinkedOnly(true);
+  }, []);
   const [transferEntry, setTransferEntry] = useState<{ id: number; description: string } | null>(null);
   const [autoCategorizing, setAutoCategorizing] = useState(false);
   const [snackbar, setSnackbar] = useState<{ open: boolean; message: string; severity: 'success' | 'info' | 'warning' | 'error' }>({
@@ -59,12 +64,14 @@ export default function TransactionsPage() {
   if (filters.startDate) queryParams.set('startDate', filters.startDate);
   if (filters.endDate) queryParams.set('endDate', filters.endDate);
   if (hideTransfers) queryParams.set('hideTransfers', 'true');
+  if (unlinkedOnly) queryParams.set('unlinkedPropertyExpenses', 'true');
   queryParams.set('limit', String(pageSize));
   queryParams.set('offset', String(page * pageSize));
 
   const { data, error, isLoading, mutate } = useSWR(`/api/journal?${queryParams}`, fetchJournal, { shouldRetryOnError: false });
   const { data: categories, error: categoriesError } = useSWR<Parameters<typeof TransactionFilters>[0]['categories']>('/api/categories', fetchList, { shouldRetryOnError: false });
   const { data: accounts, error: accountsError } = useSWR<Parameters<typeof TransactionFilters>[0]['accounts']>('/api/accounts', fetchList, { shouldRetryOnError: false });
+  const { data: properties, error: propertiesError } = useSWR<{ id: number; name: string }[]>('/api/properties', fetchList, { shouldRetryOnError: false });
   const { data: review } = useSWR<{ candidates: unknown[] }>('/api/journal/transfers/review', fetcher);
   const reviewCount = review?.candidates?.length ?? 0;
 
@@ -73,12 +80,30 @@ export default function TransactionsPage() {
     setPage(0);
   }, []);
 
-  const handleCategoryUpdate = useCallback(async (journalId: number, categoryId: number, createRule: boolean, description?: string) => {
+  const handleCategoryUpdate = useCallback(async (
+    journalId: number, categoryId: number, createRule: boolean, description: string | undefined,
+    propertyId: number | null | undefined, currentPropertyId: number | null,
+  ) => {
     await fetchJson(`/api/journal/${journalId}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ categoryId, createRule, description }),
     });
+    if (propertyId !== undefined && propertyId !== currentPropertyId) {
+      try {
+        await (propertyId === null
+          ? fetchJson(`/api/properties/journal/${journalId}/untag`, { method: 'POST' })
+          : fetchJson(`/api/properties/journal/${journalId}/tag`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ propertyId }),
+          }));
+      } catch (cause) {
+        // The category did save; show it while the link can be retried.
+        void refreshFinancialData(isFinancialDataKey);
+        throw new Error(`The category was saved, but the property link was not. ${cause instanceof Error ? cause.message : ''}`.trim());
+      }
+    }
     setEditEntry(null);
     void refreshFinancialData(isFinancialDataKey);
   }, [refreshFinancialData]);
@@ -137,6 +162,9 @@ export default function TransactionsPage() {
             {autoCategorizing ? 'Processing…' : 'Process queued records'}
           </Button>
       </>} />
+      {unlinkedOnly && <Alert severity="info" sx={{ mb: 2 }} action={<Button color="inherit" size="small" onClick={() => { setUnlinkedOnly(false); setPage(0); window.history.replaceState(null, '', '/transactions'); }}>Show all</Button>}>
+        Showing property expenses that are not linked to a property, so they appear on no tax-year report. Open each one and choose its property.
+      </Alert>}
       {(categoriesError || accountsError) && <Alert severity="warning" sx={{ mb: 2 }}>Some filter options could not be loaded. Retry when your accounts and categories are available.</Alert>}
       <Box sx={{ display: 'flex', justifyContent: 'flex-end', mb: 1 }}>
         <FormControlLabel
@@ -167,7 +195,7 @@ export default function TransactionsPage() {
         loading={isLoading}
         onPageChange={setPage}
         onPageSizeChange={setPageSize}
-        onRowClick={(entry) => categoriesError ? setSnackbar({ open: true, message: 'Categories could not be loaded. Please reload the page before editing.', severity: 'error' }) : setEditEntry({ id: entry.id, categoryId: entry.category_id, description: entry.description })}
+        onRowClick={(entry) => categoriesError ? setSnackbar({ open: true, message: 'Categories could not be loaded. Please reload the page before editing.', severity: 'error' }) : setEditEntry({ id: entry.id, categoryId: entry.category_id, description: entry.description, propertyId: entry.property_id ?? null })}
         onMarkAsTransfer={(entry) => setTransferEntry({ id: entry.id, description: entry.description })}
       />}
       <CategoryEditDialog
@@ -176,10 +204,13 @@ export default function TransactionsPage() {
         description={editEntry?.description}
         categories={categories ?? []}
         journalId={editEntry?.id}
+        properties={properties ?? []}
+        propertiesUnavailable={Boolean(propertiesError)}
+        currentPropertyId={editEntry?.propertyId ?? null}
         onRemembered={() => { setEditEntry(null); void refreshFinancialData(isFinancialDataKey); setSnackbar({ open: true, message: 'Category and private payment meaning saved.', severity: 'success' }); }}
         onClose={() => setEditEntry(null)}
-        onSave={async (categoryId, createRule) => {
-          if (editEntry) await handleCategoryUpdate(editEntry.id, categoryId, createRule, editEntry.description);
+        onSave={async (categoryId, createRule, propertyId) => {
+          if (editEntry) await handleCategoryUpdate(editEntry.id, categoryId, createRule, editEntry.description, propertyId, editEntry.propertyId);
         }}
       />
       <MarkAsTransferDialog

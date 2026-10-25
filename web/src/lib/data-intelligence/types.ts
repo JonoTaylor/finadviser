@@ -34,7 +34,12 @@ export interface DataIntelligenceInput {
   debts: DataAvailability<{ records: DebtRecord[]; lookup: ContextLookup }>;
   portfolio: DataAvailability<{ data: PortfolioData; lookup: ContextLookup }>;
   pensions: DataAvailability<{ records: PensionRecord[]; lookup: ContextLookup }>;
-  properties: DataAvailability<{ records: PropertyCoverageRecord[]; data: PropertyOperationsData }>;
+  properties: DataAvailability<{
+    records: PropertyCoverageRecord[];
+    data: PropertyOperationsData;
+    /** Property-expense-categorised journals without a property link. Null means it could not be read. */
+    unlinkedExpenseCount?: number | null;
+  }>;
 }
 export interface DataCoverage {
   domain: DataDomain;

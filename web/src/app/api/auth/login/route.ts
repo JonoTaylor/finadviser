@@ -6,6 +6,7 @@ import {
   createSessionCookie,
   readAuthConfig,
 } from '@/lib/auth/session';
+import { routeErrorResponse } from '@/lib/http/route-errors';
 
 export async function POST(request: NextRequest) {
   try {
@@ -38,7 +39,6 @@ export async function POST(request: NextRequest) {
     });
     return res;
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Login failed';
-    return NextResponse.json({ error: message }, { status: 500 });
+    return routeErrorResponse(error, 'Login failed', { exposeMessage: true });
   }
 }

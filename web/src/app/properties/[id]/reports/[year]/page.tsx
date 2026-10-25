@@ -25,8 +25,7 @@ import Link from 'next/link';
 import useSWR from 'swr';
 import { formatCurrency } from '@/lib/utils/formatting';
 import { currentTaxYear } from '@/lib/tax/ukTaxYear';
-
-const fetcher = (url: string) => fetch(url).then(r => r.json());
+import { fetchJson } from '@/lib/http/client';
 
 interface IncomeLine {
   source: 'tenancy_schedule' | 'journal';
@@ -97,8 +96,8 @@ export default function TaxYearReportPage({
   const [ownerId, setOwnerId] = useState<number | null>(null);
 
   const reportUrl = `/api/properties/${id}/tax-year-report?year=${year}${ownerId ? `&ownerId=${ownerId}` : ''}`;
-  const { data: report, isLoading, error } = useSWR<ReportResponse>(reportUrl, fetcher);
-  const { data: property } = useSWR<{ ownership: OwnerRow[] }>(`/api/properties/${id}`, fetcher);
+  const { data: report, isLoading, error, mutate } = useSWR<ReportResponse>(reportUrl, fetchJson);
+  const { data: property } = useSWR<{ ownership: OwnerRow[] }>(`/api/properties/${id}`, fetchJson);
 
   const owners = useMemo(() => property?.ownership ?? [], [property]);
 
@@ -109,10 +108,14 @@ export default function TaxYearReportPage({
 
   if (isLoading) return <Skeleton variant="rounded" height={400} />;
   if (error || !report) {
-    return <Alert severity="error">Failed to load report</Alert>;
-  }
-  if ('error' in report) {
-    return <Alert severity="error">{(report as unknown as { error: string }).error}</Alert>;
+    return <Box>
+      <Button component={Link} href={`/properties/${id}`} startIcon={<ArrowBackIcon />} sx={{ mb: 2 }}>
+        Back to Property
+      </Button>
+      <Alert severity="warning" action={<Button color="inherit" size="small" onClick={() => void mutate()}>Retry</Button>}>
+        The tax-year report could not be loaded.{error instanceof Error && error.message ? ` ${error.message}` : ''}
+      </Alert>
+    </Box>;
   }
 
   const fileBase = `${report.property.name.replace(/\W+/g, '-')}-${report.taxYear.label}`;

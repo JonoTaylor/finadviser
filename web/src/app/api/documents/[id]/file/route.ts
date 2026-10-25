@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { documentRepo } from '@/lib/repos';
+import { routeErrorResponse } from '@/lib/http/route-errors';
 
 /**
  * Streams the raw bytes of a stored document. `?download=1` forces a
@@ -51,7 +52,6 @@ export async function GET(
       },
     });
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Failed to fetch document';
-    return NextResponse.json({ error: message }, { status: 500 });
+    return routeErrorResponse(error, 'Failed to fetch document', { exposeMessage: true });
   }
 }

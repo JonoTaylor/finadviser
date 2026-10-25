@@ -8,6 +8,7 @@ import {
   nextDay,
 } from '@/lib/properties/mortgage-interest';
 import { taxYearRange } from '@/lib/tax/ukTaxYear';
+import { routeErrorResponse } from '@/lib/http/route-errors';
 
 /**
  * Returns the computed mortgage interest for a given UK tax year, broken
@@ -107,7 +108,6 @@ export async function GET(
       basicRateCredit: credit,
     });
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Failed to compute interest';
-    return NextResponse.json({ error: message }, { status: 500 });
+    return routeErrorResponse(error, 'Failed to compute interest', { exposeMessage: true });
   }
 }

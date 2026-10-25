@@ -16,7 +16,7 @@ export async function consumeNdjsonImport<TResult = unknown>(
 ): Promise<TResult> {
   const res = await fetch(url, init);
   if (!res.ok || !res.body) {
-    // Non-streaming error path (e.g. middleware 401, invalid body 400).
+    // Non-streaming error path (e.g. proxy 401, invalid body 400).
     let body: { error?: string } = {};
     try { body = await res.json(); } catch {}
     throw new Error(body.error || `HTTP ${res.status}`);

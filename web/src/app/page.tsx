@@ -18,6 +18,7 @@ import SavingsGoalsCard from '@/components/dashboard/SavingsGoalsCard';
 import PlanningSnapshotCard from '@/components/dashboard/PlanningSnapshotCard';
 import DashboardCardHeader from '@/components/dashboard/DashboardCardHeader';
 import PageHeader from '@/components/ui/PageHeader';
+import SectionBoundary from '@/components/ui/SectionBoundary';
 import { fetchJson } from '@/lib/http/client';
 import DataProcessingCard from '@/components/data/DataProcessingCard';
 
@@ -35,27 +36,27 @@ export default function DashboardPage() {
 
     <Grid container spacing={2.5}>
       {(spendingError || journalError) && <Grid size={{ xs: 12 }}><Alert severity="warning">Some account data could not be loaded. Figures will appear when your accounts are available; missing data is not a zero balance.</Alert></Grid>}
-      <Grid size={{ xs: 12, sm: 6, lg: 3 }}><YourShareCard /></Grid>
+      <Grid size={{ xs: 12, sm: 6, lg: 3 }}><SectionBoundary title="Your share"><YourShareCard /></SectionBoundary></Grid>
       <Grid size={{ xs: 12, sm: 6, lg: 3 }}>
-        {loadingSpending ? <MetricLoading /> : spendingError ? <MetricUnavailable title="Monthly cash flow" detail="Monthly cash flow is unavailable." /> : <MonthlySummaryCard spending={spending ?? []} balances={[]} />}
+        <SectionBoundary title="Monthly cash flow">{loadingSpending ? <MetricLoading /> : spendingError ? <MetricUnavailable title="Monthly cash flow" detail="Monthly cash flow is unavailable." /> : <MonthlySummaryCard spending={spending ?? []} balances={[]} />}</SectionBoundary>
       </Grid>
       <Grid size={{ xs: 12, sm: 6, lg: 3 }}>
-        {loadingSpending ? <MetricLoading /> : spendingError ? <MetricUnavailable title="Savings rate" detail="The savings rate needs account activity." /> : <SavingsRateCard spending={spending ?? []} balances={[]} />}
+        <SectionBoundary title="Savings rate">{loadingSpending ? <MetricLoading /> : spendingError ? <MetricUnavailable title="Savings rate" detail="The savings rate needs account activity." /> : <SavingsRateCard spending={spending ?? []} balances={[]} />}</SectionBoundary>
       </Grid>
       <Grid size={{ xs: 12, sm: 6, lg: 3 }}>
-        {loadingSpending ? <MetricLoading /> : spendingError ? <MetricUnavailable title="Monthly spending" detail="Monthly spending is unavailable." /> : <MonthlySpendingCard spending={spending ?? []} />}
+        <SectionBoundary title="Monthly spending">{loadingSpending ? <MetricLoading /> : spendingError ? <MetricUnavailable title="Monthly spending" detail="Monthly spending is unavailable." /> : <MonthlySpendingCard spending={spending ?? []} />}</SectionBoundary>
       </Grid>
-      <Grid size={{ xs: 12 }}><DataProcessingCard /></Grid>
-      <Grid size={{ xs: 12 }}><PlanningSnapshotCard /></Grid>
+      <Grid size={{ xs: 12 }}><SectionBoundary title="Data processing"><DataProcessingCard /></SectionBoundary></Grid>
+      <Grid size={{ xs: 12 }}><SectionBoundary title="Planning snapshot"><PlanningSnapshotCard /></SectionBoundary></Grid>
       <Grid size={{ xs: 12, md: 7 }}>
-        {loadingSpending ? <Skeleton variant="rounded" height={340} sx={{ borderRadius: '8px' }} /> : spendingError ? <MetricUnavailable title="Category activity" detail="Spending categories are unavailable." /> : <TopCategoriesCard spending={spending ?? []} />}
+        <SectionBoundary title="Category activity">{loadingSpending ? <Skeleton variant="rounded" height={340} sx={{ borderRadius: '8px' }} /> : spendingError ? <MetricUnavailable title="Category activity" detail="Spending categories are unavailable." /> : <TopCategoriesCard spending={spending ?? []} />}</SectionBoundary>
       </Grid>
-      <Grid size={{ xs: 12, md: 5 }}><BudgetOverviewCard /></Grid>
+      <Grid size={{ xs: 12, md: 5 }}><SectionBoundary title="Budgets"><BudgetOverviewCard /></SectionBoundary></Grid>
       <Grid size={{ xs: 12, lg: 8 }}>
-        {loadingJournal ? <Skeleton variant="rounded" height={350} sx={{ borderRadius: '8px' }} /> : journalError ? <MetricUnavailable title="Recent activity" detail="Recent transactions could not be loaded." /> : <RecentTransactionsTable entries={journalData?.entries ?? []} />}
+        <SectionBoundary title="Recent activity">{loadingJournal ? <Skeleton variant="rounded" height={350} sx={{ borderRadius: '8px' }} /> : journalError ? <MetricUnavailable title="Recent activity" detail="Recent transactions could not be loaded." /> : <RecentTransactionsTable entries={journalData?.entries ?? []} />}</SectionBoundary>
       </Grid>
-      <Grid size={{ xs: 12, lg: 4 }}><SavingsGoalsCard /></Grid>
-      <Grid size={{ xs: 12 }}><AiInsightsCard /></Grid>
+      <Grid size={{ xs: 12, lg: 4 }}><SectionBoundary title="Savings goals"><SavingsGoalsCard /></SectionBoundary></Grid>
+      <Grid size={{ xs: 12 }}><SectionBoundary title="Insights"><AiInsightsCard /></SectionBoundary></Grid>
     </Grid>
   </Box>;
 }

@@ -62,6 +62,31 @@ describe('daily bank sync and processing backlog', () => {
     expect(mocks.process).not.toHaveBeenCalled();
   });
 
+  it('keeps syncing the other banks when one connection fails before its sync starts', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    mocks.listConnections.mockResolvedValue([
+      { id: 1, status: 'active', consentExpiresAt: null, providerDisplayName: 'First Bank' },
+      { id: 2, status: 'active', consentExpiresAt: null, providerDisplayName: 'Second Bank' },
+    ]);
+    mocks.listAccounts.mockImplementation(async (id: number) => {
+      if (id === 1) throw new Error('Connection reset');
+      return [{ accountId: 7 }];
+    });
+    const summary = await runDailySync();
+    expect(summary).toMatchObject({ synced: 1, errors: [{ connectionId: 1, provider: 'First Bank', message: 'Connection reset' }] });
+    expect(mocks.sync).toHaveBeenCalledTimes(1);
+    expect(mocks.sync).toHaveBeenCalledWith(2, 12);
+    expect(mocks.process).toHaveBeenCalled();
+  });
+
+  it('still syncs a bank when its advisory expiry banner cannot be written', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    mocks.dismiss.mockRejectedValue(new Error('Tips table unavailable'));
+    const summary = await runDailySync();
+    expect(summary).toMatchObject({ synced: 1, errors: [] });
+    expect(mocks.sync).toHaveBeenCalledWith(1, 12);
+  });
+
   it('returns a deferred outcome when bank sync consumed the cron time budget', async () => {
     vi.spyOn(Date, 'now').mockReturnValueOnce(0).mockReturnValue(54_500);
     const summary = await runDailySync();

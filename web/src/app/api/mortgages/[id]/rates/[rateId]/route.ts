@@ -6,6 +6,7 @@ import {
   RATE_VALIDATION_MESSAGE,
   DATE_VALIDATION_MESSAGE,
 } from '@/lib/properties/mortgage-rate-validation';
+import { routeErrorResponse } from '@/lib/http/route-errors';
 
 export async function PATCH(
   request: NextRequest,
@@ -43,8 +44,7 @@ export async function PATCH(
     }
     return NextResponse.json(updated);
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Failed to update rate';
-    return NextResponse.json({ error: message }, { status: 500 });
+    return routeErrorResponse(error, 'Failed to update rate', { exposeMessage: true });
   }
 }
 
@@ -64,7 +64,6 @@ export async function DELETE(
     }
     return NextResponse.json({ ok: true });
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Failed to delete rate';
-    return NextResponse.json({ error: message }, { status: 500 });
+    return routeErrorResponse(error, 'Failed to delete rate', { exposeMessage: true });
   }
 }

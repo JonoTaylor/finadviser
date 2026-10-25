@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { journalRepo } from '@/lib/repos';
+import { routeErrorResponse } from '@/lib/http/route-errors';
 
 export async function GET(request: NextRequest) {
   try {
@@ -8,6 +9,6 @@ export async function GET(request: NextRequest) {
     const data = await journalRepo.search(q, limit);
     return NextResponse.json(data);
   } catch (error) {
-    return NextResponse.json({ error: 'Failed to search' }, { status: 500 });
+    return routeErrorResponse(error, 'Failed to search');
   }
 }

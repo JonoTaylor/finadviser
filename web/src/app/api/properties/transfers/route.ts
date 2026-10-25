@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { transferEquity } from '@/lib/properties/transfer-engine';
 import { propertyRepo } from '@/lib/repos';
+import { routeErrorResponse, readJsonBody } from '@/lib/http/route-errors';
 
 export async function GET(request: NextRequest) {
   try {
@@ -12,17 +13,16 @@ export async function GET(request: NextRequest) {
     );
     return NextResponse.json(transfers);
   } catch (error) {
-    return NextResponse.json({ error: 'Failed to fetch transfers' }, { status: 500 });
+    return routeErrorResponse(error, 'Failed to fetch transfers');
   }
 }
 
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json();
+    const body = await readJsonBody(request);
     const journalId = await transferEquity(body);
     return NextResponse.json({ journalId }, { status: 201 });
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Failed to transfer equity';
-    return NextResponse.json({ error: message }, { status: 500 });
+    return routeErrorResponse(error, 'Failed to transfer equity', { exposeMessage: true });
   }
 }

@@ -1,13 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { aiMemoryRepo, AI_MEMORY_MAX_CONTENT_LENGTH } from '@/lib/repos';
+import { routeErrorResponse } from '@/lib/http/route-errors';
 
 export async function GET() {
   try {
     const memories = await aiMemoryRepo.list();
     return NextResponse.json(memories);
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Failed to list memories';
-    return NextResponse.json({ error: message }, { status: 500 });
+    return routeErrorResponse(error, 'Failed to list memories', { exposeMessage: true });
   }
 }
 
@@ -33,7 +33,6 @@ export async function POST(request: NextRequest) {
     const memory = await aiMemoryRepo.add(trimmed, 'user');
     return NextResponse.json(memory, { status: 201 });
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Failed to add memory';
-    return NextResponse.json({ error: message }, { status: 500 });
+    return routeErrorResponse(error, 'Failed to add memory', { exposeMessage: true });
   }
 }

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { journalRepo } from '@/lib/repos';
+import { routeErrorResponse, readJsonBody } from '@/lib/http/route-errors';
 
 const TRANSFER_KINDS = [
   'statement_payment',
@@ -17,7 +18,7 @@ function isTransferKind(value: unknown): value is TransferKind {
 
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json();
+    const body = await readJsonBody(request);
     const journalId = body?.journalId;
     const pairedJournalId = body?.pairedJournalId;
     const rawKind = body?.kind;
@@ -41,8 +42,7 @@ export async function POST(request: NextRequest) {
     await journalRepo.markAsTransfer(journalId, kind);
     return NextResponse.json({ success: true, merged: false, journalId, kind });
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Failed to mark transfer';
-    return NextResponse.json({ error: message }, { status: 500 });
+    return routeErrorResponse(error, 'Failed to mark transfer', { exposeMessage: true });
   }
 }
 
@@ -57,8 +57,7 @@ export async function DELETE(request: NextRequest) {
     await journalRepo.unmarkTransfer(journalId);
     return NextResponse.json({ success: true });
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Failed to unmark transfer';
-    return NextResponse.json({ error: message }, { status: 500 });
+    return routeErrorResponse(error, 'Failed to unmark transfer', { exposeMessage: true });
   }
 }
 
@@ -85,7 +84,6 @@ export async function GET(request: NextRequest) {
     const candidates = await journalRepo.findTransferCandidates(journalId, windowDays, 10);
     return NextResponse.json({ journalId, windowDays, candidates });
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Failed to find candidates';
-    return NextResponse.json({ error: message }, { status: 500 });
+    return routeErrorResponse(error, 'Failed to find candidates', { exposeMessage: true });
   }
 }

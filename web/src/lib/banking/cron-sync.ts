@@ -52,80 +52,14 @@ export async function runDailySync(): Promise<CronSummary> {
   };
 
   for (const conn of connections) {
-    const newStatus = computeNewStatus(conn);
-    if (newStatus !== conn.status) {
-      await bankingRepo.setConnectionStatus(conn.id, newStatus);
-    }
-
-    // Tips: write on the transition into expiring / expired, clear
-    // on transition back to active (e.g. after reconnect). The
-    // upsertTagged dedup guarantees one active tip per (connection,
-    // kind) at a time, regardless of cron-run cadence.
-    await reconcileExpiryTips(conn.id, conn.providerDisplayName, newStatus);
-    if (newStatus === 'expiring' && conn.status !== 'expiring') summary.becameExpiring += 1;
-    if (newStatus === 'expired'  && conn.status !== 'expired')  summary.becameExpired += 1;
-
-    // Active + expiring still have valid consent; we sync those
-    // through the existing engine. Pending / expired / revoked /
-    // error are skipped (they need user action first).
-    if (newStatus !== 'active' && newStatus !== 'expiring') {
-      summary.skipped += 1;
-      continue;
-    }
-
-    const linked = await bankingRepo.listProviderAccounts(conn.id);
-    if (linked.length === 0) {
-      summary.skipped += 1;
-      continue;
-    }
-
-    const runId = await bankingRepo.startSyncRun(conn.id);
     try {
-      const outcome = await syncConnection(conn.id, runId);
-      await bankingRepo.finishSyncRun(runId, {
-        status: 'success',
-        txnsAdded: outcome.txnsAdded,
-        txnsUpdated: outcome.txnsUpdated,
-      });
-      summary.synced += 1;
-
-      // Bookkeeping after a successful sync: stamp last_synced_at,
-      // clear any persisted last_error, dismiss the prior sync-error
-      // tip. Each runs in its own try/catch so a transient blip on
-      // any one of them does NOT re-mark the already-finished run as
-      // status='error' with zero counts. The summary stays correct.
-      try {
-        await bankingRepo.markSynced(conn.id);
-      } catch (e) {
-        console.error(`[cron] markSynced failed for connection ${conn.id}:`, e);
-      }
-      try {
-        await bankingRepo.setConnectionStatus(conn.id, newStatus, { lastError: null });
-      } catch (e) {
-        console.error(`[cron] clear lastError failed for connection ${conn.id}:`, e);
-      }
-      try {
-        await tipRepo.dismissByTag(`connection:${conn.id}:sync-error`);
-      } catch (e) {
-        console.error(`[cron] dismiss sync-error tip failed for connection ${conn.id}:`, e);
-      }
+      await syncOneConnection(conn, summary);
     } catch (err) {
+      // Status, tip and sync-run bookkeeping happen before the sync's own
+      // error handling. A failure there belongs to this connection only;
+      // the remaining banks and the processing pass still run.
       const msg = err instanceof Error ? err.message : 'unknown error';
-      await bankingRepo.finishSyncRun(runId, {
-        status: 'error',
-        txnsAdded: 0,
-        txnsUpdated: 0,
-        errorMessage: msg,
-      }).catch(() => { /* swallow; we still want the next iteration to run */ });
-      // Persist the last error on the connection so the UI can show
-      // it inline without trawling sync_runs.
-      await bankingRepo.setConnectionStatus(conn.id, newStatus, { lastError: msg }).catch(() => { /* ditto */ });
-      await tipRepo.upsertTagged({
-        tag: `connection:${conn.id}:sync-error`,
-        tipType: 'warning',
-        priority: 5,
-        content: `${conn.providerDisplayName} sync failed: ${msg.slice(0, 200)}. Check /settings/connections for details.`,
-      }).catch(() => { /* ditto */ });
+      console.error(`[cron] connection ${conn.id} could not be prepared for sync:`, msg);
       summary.errors.push({ connectionId: conn.id, provider: conn.providerDisplayName, message: msg });
     }
   }
@@ -160,6 +94,90 @@ export async function runDailySync(): Promise<CronSummary> {
       });
 
   return summary;
+}
+
+async function syncOneConnection(conn: ConnectionRow, summary: CronSummary): Promise<void> {
+  const newStatus = computeNewStatus(conn);
+  if (newStatus !== conn.status) {
+    await bankingRepo.setConnectionStatus(conn.id, newStatus);
+  }
+
+  // Tips: write on the transition into expiring / expired, clear
+  // on transition back to active (e.g. after reconnect). The
+  // upsertTagged dedup guarantees one active tip per (connection,
+  // kind) at a time, regardless of cron-run cadence. The banner is
+  // advisory, so failing to write it does not skip today's sync.
+  try {
+    await reconcileExpiryTips(conn.id, conn.providerDisplayName, newStatus);
+  } catch (e) {
+    console.error(`[cron] expiry tips failed for connection ${conn.id}:`, e);
+  }
+  if (newStatus === 'expiring' && conn.status !== 'expiring') summary.becameExpiring += 1;
+  if (newStatus === 'expired'  && conn.status !== 'expired')  summary.becameExpired += 1;
+
+  // Active + expiring still have valid consent; we sync those
+  // through the existing engine. Pending / expired / revoked /
+  // error are skipped (they need user action first).
+  if (newStatus !== 'active' && newStatus !== 'expiring') {
+    summary.skipped += 1;
+    return;
+  }
+
+  const linked = await bankingRepo.listProviderAccounts(conn.id);
+  if (linked.length === 0) {
+    summary.skipped += 1;
+    return;
+  }
+
+  const runId = await bankingRepo.startSyncRun(conn.id);
+  try {
+    const outcome = await syncConnection(conn.id, runId);
+    await bankingRepo.finishSyncRun(runId, {
+      status: 'success',
+      txnsAdded: outcome.txnsAdded,
+      txnsUpdated: outcome.txnsUpdated,
+    });
+    summary.synced += 1;
+
+    // Bookkeeping after a successful sync: stamp last_synced_at,
+    // clear any persisted last_error, dismiss the prior sync-error
+    // tip. Each runs in its own try/catch so a transient blip on
+    // any one of them does NOT re-mark the already-finished run as
+    // status='error' with zero counts. The summary stays correct.
+    try {
+      await bankingRepo.markSynced(conn.id);
+    } catch (e) {
+      console.error(`[cron] markSynced failed for connection ${conn.id}:`, e);
+    }
+    try {
+      await bankingRepo.setConnectionStatus(conn.id, newStatus, { lastError: null });
+    } catch (e) {
+      console.error(`[cron] clear lastError failed for connection ${conn.id}:`, e);
+    }
+    try {
+      await tipRepo.dismissByTag(`connection:${conn.id}:sync-error`);
+    } catch (e) {
+      console.error(`[cron] dismiss sync-error tip failed for connection ${conn.id}:`, e);
+    }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'unknown error';
+    await bankingRepo.finishSyncRun(runId, {
+      status: 'error',
+      txnsAdded: 0,
+      txnsUpdated: 0,
+      errorMessage: msg,
+    }).catch(() => { /* swallow; we still want the next iteration to run */ });
+    // Persist the last error on the connection so the UI can show
+    // it inline without trawling sync_runs.
+    await bankingRepo.setConnectionStatus(conn.id, newStatus, { lastError: msg }).catch(() => { /* ditto */ });
+    await tipRepo.upsertTagged({
+      tag: `connection:${conn.id}:sync-error`,
+      tipType: 'warning',
+      priority: 5,
+      content: `${conn.providerDisplayName} sync failed: ${msg.slice(0, 200)}. Check /settings/connections for details.`,
+    }).catch(() => { /* ditto */ });
+    summary.errors.push({ connectionId: conn.id, provider: conn.providerDisplayName, message: msg });
+  }
 }
 
 function computeNewStatus(conn: ConnectionRow): ConnectionStatus {

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { backfillMetadata } from '@/lib/import/backfill-metadata';
 import { accountRepo } from '@/lib/repos';
 import { getBankConfig } from '@/lib/config/bank-configs';
+import { routeErrorResponse } from '@/lib/http/route-errors';
 
 export const runtime = 'nodejs';
 export const maxDuration = 60;
@@ -64,7 +65,6 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json(result);
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Failed to backfill metadata';
-    return NextResponse.json({ error: message }, { status: 500 });
+    return routeErrorResponse(error, 'Failed to backfill metadata', { exposeMessage: true });
   }
 }

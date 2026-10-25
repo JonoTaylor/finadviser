@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { journalRepo } from '@/lib/repos';
+import { routeErrorResponse, readJsonBody } from '@/lib/http/route-errors';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -17,14 +18,13 @@ export async function GET(request: NextRequest) {
     const candidates = await journalRepo.listTransferReviewQueue(limit);
     return NextResponse.json({ candidates });
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Failed to load review queue';
-    return NextResponse.json({ error: message }, { status: 500 });
+    return routeErrorResponse(error, 'Failed to load review queue', { exposeMessage: true });
   }
 }
 
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json();
+    const body = await readJsonBody(request);
     const groupId = body?.groupId;
     const action = body?.action;
     if (typeof groupId !== 'string' || !UUID_RE.test(groupId)) {
@@ -41,7 +41,6 @@ export async function POST(request: NextRequest) {
     await journalRepo.dismissTransferGroup(groupId);
     return NextResponse.json({ success: true, action });
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Failed to update review item';
-    return NextResponse.json({ error: message }, { status: 500 });
+    return routeErrorResponse(error, 'Failed to update review item', { exposeMessage: true });
   }
 }

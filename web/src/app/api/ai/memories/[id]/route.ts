@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { aiMemoryRepo, AI_MEMORY_MAX_CONTENT_LENGTH } from '@/lib/repos';
 import { z } from 'zod';
+import { routeErrorResponse } from '@/lib/http/route-errors';
 
 const updateMemorySchema = z.object({
   content: z.string().trim().min(1).max(AI_MEMORY_MAX_CONTENT_LENGTH),
@@ -46,7 +47,6 @@ export async function DELETE(
     }
     return NextResponse.json({ ok: true });
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Failed to delete memory';
-    return NextResponse.json({ error: message }, { status: 500 });
+    return routeErrorResponse(error, 'Failed to delete memory', { exposeMessage: true });
   }
 }

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { categoryRepo } from '@/lib/repos';
+import { routeErrorResponse, readJsonBody } from '@/lib/http/route-errors';
 
 export async function GET(request: NextRequest) {
   try {
@@ -11,17 +12,16 @@ export async function GET(request: NextRequest) {
     const data = await categoryRepo.listAll();
     return NextResponse.json(data);
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Failed to fetch categories';
-    return NextResponse.json({ error: message }, { status: 500 });
+    return routeErrorResponse(error, 'Failed to fetch categories', { exposeMessage: true });
   }
 }
 
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json();
+    const body = await readJsonBody(request);
     const category = await categoryRepo.create(body);
     return NextResponse.json(category, { status: 201 });
   } catch (error) {
-    return NextResponse.json({ error: 'Failed to create category' }, { status: 500 });
+    return routeErrorResponse(error, 'Failed to create category');
   }
 }

@@ -1,5 +1,8 @@
 import { and, desc, eq, gte, isNull, lte, or } from 'drizzle-orm';
 import { getDb, schema } from '@/lib/db';
+import { ClientError } from '@/lib/errors';
+import { isValidCalendarDate } from '@/lib/properties/mortgage-rate-validation';
+import { nonNegativeMoney } from '@/lib/tax/moneyInput';
 
 const { tenancies } = schema;
 
@@ -20,8 +23,41 @@ export interface TenancyInput {
   notes?: string | null;
 }
 
+/**
+ * Tenancies drive the rent schedule and tax-year reports, which compare
+ * dates as YYYY-MM-DD strings, so malformed values are refused here for
+ * every caller. `existing` supplies the other date when a patch changes one.
+ */
+export function validateTenancyFields(
+  fields: Partial<TenancyInput>,
+  existing?: Pick<Tenancy, 'startDate' | 'endDate'>,
+): void {
+  if (fields.tenantName !== undefined && (typeof fields.tenantName !== 'string' || !fields.tenantName.trim())) {
+    throw new ClientError('Enter the tenant name.');
+  }
+  if (fields.startDate !== undefined && !isValidCalendarDate(fields.startDate)) {
+    throw new ClientError('Enter the tenancy start date as YYYY-MM-DD.');
+  }
+  if (fields.endDate != null && !isValidCalendarDate(fields.endDate)) {
+    throw new ClientError('Enter the tenancy end date as YYYY-MM-DD, or leave it empty.');
+  }
+  const start = fields.startDate ?? existing?.startDate;
+  const end = fields.endDate !== undefined ? fields.endDate : existing?.endDate;
+  if (start && end && isValidCalendarDate(start) && isValidCalendarDate(end) && end < start) {
+    throw new ClientError('The tenancy end date cannot be before its start date.');
+  }
+  if (fields.rentAmount !== undefined && !nonNegativeMoney(fields.rentAmount, 'Rent amount').gt(0)) {
+    throw new ClientError('Rent amount must be more than zero.');
+  }
+  if (fields.rentFrequency !== undefined && !schema.rentFrequencyEnum.enumValues.includes(fields.rentFrequency)) {
+    throw new ClientError(`Rent frequency must be one of: ${schema.rentFrequencyEnum.enumValues.join(', ')}.`);
+  }
+  if (fields.depositAmount != null) nonNegativeMoney(fields.depositAmount, 'Deposit amount');
+}
+
 export const tenancyRepo = {
   async create(input: TenancyInput): Promise<Tenancy> {
+    validateTenancyFields({ ...input, startDate: input.startDate ?? '', rentAmount: input.rentAmount ?? '' });
     const db = getDb();
     const [row] = await db
       .insert(tenancies)
@@ -51,6 +87,9 @@ export const tenancyRepo = {
     if (patch.notes !== undefined) updates.notes = patch.notes;
 
     if (Object.keys(updates).length === 0) return this.get(id);
+    const existing = await this.get(id);
+    if (!existing) return null;
+    validateTenancyFields(updates as Partial<TenancyInput>, existing);
 
     const [row] = await db
       .update(tenancies)

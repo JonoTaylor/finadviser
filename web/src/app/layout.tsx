@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import localFont from 'next/font/local';
 import ThemeRegistry from '@/theme/ThemeRegistry';
 import Sidebar from '@/components/layout/Sidebar';
+import SessionRedirect from '@/components/auth/SessionRedirect';
 import './globals.css';
 
 const inter = localFont({
@@ -26,6 +27,7 @@ export default function RootLayout({
     <html lang="en" className={inter.variable}>
       <body>
         <ThemeRegistry>
+          <SessionRedirect />
           <Sidebar>{children}</Sidebar>
         </ThemeRegistry>
       </body>

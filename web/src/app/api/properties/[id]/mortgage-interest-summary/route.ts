@@ -7,6 +7,7 @@ import {
   nextDay,
 } from '@/lib/properties/mortgage-interest';
 import { taxYearRange } from '@/lib/tax/ukTaxYear';
+import { routeErrorResponse } from '@/lib/http/route-errors';
 
 /**
  * Aggregates computed mortgage interest across every mortgage tagged to
@@ -138,7 +139,6 @@ export async function GET(
       },
     });
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Failed to compute summary';
-    return NextResponse.json({ error: message }, { status: 500 });
+    return routeErrorResponse(error, 'Failed to compute summary', { exposeMessage: true });
   }
 }

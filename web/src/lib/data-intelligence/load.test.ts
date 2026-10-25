@@ -20,7 +20,9 @@ beforeEach(() => {
   vi.stubEnv('AI_GATEWAY_API_KEY', '');
   execute.mockImplementation(async query => {
     const text = dialect.sqlToQuery(query).sql;
-    return text.includes('WITH recorded') ? { rows: [ledgerRow] } : { rows: [{ id: 1, name: 'Home', valuation_date: asOf, active_tenancy_count: '0', ownership_count: '1' }] };
+    if (text.includes('WITH recorded')) return { rows: [ledgerRow] };
+    if (text.includes('unlinked_count')) return { rows: [{ unlinked_count: '0' }] };
+    return { rows: [{ id: 1, name: 'Home', valuation_date: asOf, active_tenancy_count: '0', ownership_count: '1' }] };
   });
   counts.mockResolvedValue({ remaining: 5, needsReview: 2, available: 2, dismissed: 1, scopeAvailable: 2 });
   loadContextLookup.mockResolvedValue({ asOf, owners: [{ id: 2, name: 'Jono' }], accounts: [] });
@@ -77,9 +79,33 @@ describe('bounded data intelligence loading', () => {
     expect(report.asOf).toBe(asOf);
     expect(loadContextLookup).toHaveBeenCalledOnce();
     expect(readWorkspace).toHaveBeenCalledTimes(4);
-    expect(execute).toHaveBeenCalledTimes(2);
+    expect(execute).toHaveBeenCalledTimes(3);
     expect(report.processing).toEqual({ modelAvailable: false, reviewUrl: '/data' });
     for (const call of execute.mock.calls) expect(dialect.sqlToQuery(call[0]).sql).not.toMatch(/\b(UPDATE|INSERT|DELETE)\b/i);
+  });
+  it('flags property-expense transactions that no property claims, without linking them', async () => {
+    execute.mockImplementation(async query => {
+      const text = dialect.sqlToQuery(query).sql;
+      if (text.includes('WITH recorded')) return { rows: [ledgerRow] };
+      if (text.includes('unlinked_count')) return { rows: [{ unlinked_count: '4' }] };
+      return { rows: [{ id: 1, name: 'Home', valuation_date: asOf, active_tenancy_count: '0', ownership_count: '1' }] };
+    });
+    const report = await loadDataIntelligence(new Date('2026-10-12T12:00:00Z'));
+    expect(report.gaps.find(gap => gap.id === 'property-expenses-unlinked')).toMatchObject({ affectedCount: 4, action: { href: '/properties/1', kind: 'confirm' } });
+    const unlinkedQuery = execute.mock.calls.map(call => dialect.sqlToQuery(call[0]).sql).find(text => text.includes('unlinked_count'))!;
+    expect(unlinkedQuery).toMatch(/property_id IS NULL/);
+    expect(unlinkedQuery).not.toMatch(/\b(UPDATE|INSERT|DELETE)\b/i);
+  });
+  it('keeps property records available when the unlinked-expense count cannot be read', async () => {
+    execute.mockImplementation(async query => {
+      const text = dialect.sqlToQuery(query).sql;
+      if (text.includes('WITH recorded')) return { rows: [ledgerRow] };
+      if (text.includes('unlinked_count')) throw new Error('categories unavailable');
+      return { rows: [{ id: 1, name: 'Home', valuation_date: asOf, active_tenancy_count: '0', ownership_count: '1' }] };
+    });
+    const report = await loadDataIntelligence(new Date('2026-10-12T12:00:00Z'));
+    expect(report.coverage.find(source => source.domain === 'properties')?.status).not.toBe('unavailable');
+    expect(report.gaps.map(gap => gap.id)).not.toContain('property-expenses-unlinked');
   });
   it('isolates an invalid saved pension inventory without treating it as absent', async () => {
     readWorkspace.mockImplementation(async (key, _schema, initial) => {

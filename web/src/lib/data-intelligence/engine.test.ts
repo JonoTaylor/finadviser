@@ -26,6 +26,23 @@ function completeInput(): DataIntelligenceInput {
 }
 
 describe('data intelligence evidence', () => {
+  it('asks the user to assign unlinked property expenses instead of choosing a property itself', () => {
+    const single = completeInput();
+    if (single.properties.status === 'ready') single.properties.data.unlinkedExpenseCount = 3;
+    expect(buildDataIntelligence(single).gaps.find(gap => gap.id === 'property-expenses-unlinked')).toMatchObject({
+      domain: 'properties', priority: 'medium', affectedCount: 3, action: { label: 'Review Recorded property expenses', href: '/properties/1', kind: 'confirm' },
+    });
+    const several = completeInput();
+    if (several.properties.status === 'ready') {
+      several.properties.data.records.push({ ...several.properties.data.records[0], id: 2, name: 'Second property' });
+      several.properties.data.data.reserveTargets.push({ propertyId: 2, targetAmount: '0.00' });
+      several.properties.data.unlinkedExpenseCount = 3;
+    }
+    expect(buildDataIntelligence(several).gaps.find(gap => gap.id === 'property-expenses-unlinked')?.action.href).toBe('/chat');
+    const unknown = completeInput();
+    if (unknown.properties.status === 'ready') unknown.properties.data.unlinkedExpenseCount = null;
+    expect(buildDataIntelligence(unknown).gaps).toEqual([]);
+  });
   it('keeps explicitly recorded zeros and zero fees distinct from missing data', () => {
     const report = buildDataIntelligence(completeInput());
     expect(report.gaps).toEqual([]);

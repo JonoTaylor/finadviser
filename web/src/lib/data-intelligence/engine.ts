@@ -158,6 +158,20 @@ export function buildDataIntelligence(input: DataIntelligenceInput, modelAvailab
     const noTenancy = records.filter(property => property.activeTenancyCount === 0);
     if (noTenancy.length) add('properties', 'property-tenancies', 'low', 'missing', 'Confirm current property use and tenancy details', 'The app cannot tell whether a property without an active tenancy is a home, vacant or has a missing rental agreement. Confirm its use before interpreting rent coverage.', [`${noTenancy.length} properties have no active recorded tenancy.`], noTenancy.length, 'Review properties', '/properties', 'confirm');
     const stale = records.filter(property => property.valuationDate !== null && dayAge(property.valuationDate, input.asOf) > 365);
+    const unlinked = input.properties.data.unlinkedExpenseCount ?? 0;
+    if (unlinked > 0) {
+      // Linking is never automatic: a "Property expenses" category does not
+      // say which property, or establish that a cost belongs to a rental.
+      const single = records.length === 1 ? records[0] : null;
+      add('properties', 'property-expenses-unlinked', 'medium', 'incomplete',
+        records.length === 0 ? 'Add the property these expenses belong to' : 'Assign property expenses to a property',
+        'These transactions are categorised as property expenses but are not linked to a property, so they appear on no property\'s tax-year report.',
+        [`${unlinked} property-expense transactions have no property link.`, 'A property-expense category does not establish that a cost is tax-deductible.'],
+        unlinked,
+        records.length === 0 ? 'Add a property' : single ? `Review ${single.name} expenses` : 'Ask the adviser to assign them',
+        records.length === 0 ? '/properties' : single ? `/properties/${single.id}` : '/chat',
+        'confirm');
+    }
     if (stale.length) add('properties', 'property-values-stale', 'low', 'stale', 'Review older property valuations', 'Valuations more than a year old may not reflect current property values. This does not establish a market price.', [`${stale.length} property valuations are more than 365 days old.`], stale.length, 'Review valuations', '/properties');
     record('properties', records.length, [`${records.length} property records.`, 'No recorded property does not prove that you own no property; homes are not assumed to be rentals.']);
   }

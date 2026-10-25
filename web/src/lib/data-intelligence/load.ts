@@ -104,6 +104,29 @@ export async function loadPropertyCoverage(asOf: string): Promise<PropertyCovera
   });
 }
 
+/**
+ * Journals categorised under "Property expenses" that no property claims.
+ * The tax-year reports select by property, so these appear on none of them.
+ * Categorisation deliberately never chooses the property, so this is a gap
+ * for the user to confirm rather than something to fix automatically.
+ */
+export async function loadUnlinkedPropertyExpenseCount(asOf: string): Promise<number> {
+  const result = await getDb().execute(sql`
+    WITH RECURSIVE subtree AS (
+      SELECT id FROM categories WHERE name = 'Property expenses' AND parent_id IS NULL
+      UNION ALL
+      SELECT c.id FROM categories c JOIN subtree s ON c.parent_id = s.id
+    )
+    SELECT COUNT(*)::text AS unlinked_count
+      FROM journal_entries je
+     WHERE je.property_id IS NULL AND je.date <= ${asOf}
+       AND COALESCE(je.is_transfer, FALSE) = FALSE
+       AND je.category_id IN (SELECT id FROM subtree)
+  `);
+  if (result.rows.length !== 1) throw new Error('Unlinked property expense count is unavailable');
+  return count(result.rows[0].unlinked_count);
+}
+
 /** Every read is isolated so unavailable sources are never replaced with defaults. */
 export async function loadDataIntelligence(now = new Date()): Promise<DataIntelligenceReport> {
   const asOf = londonTodayIso(now);
@@ -129,8 +152,13 @@ export async function loadDataIntelligence(now = new Date()): Promise<DataIntell
       return { records: workspace.data, lookup: references };
     }),
     available(async () => {
-      const [workspace, records] = await Promise.all([readWorkspace(PROPERTY_OPERATIONS_KEY, propertyOperationsSchema, initialPropertyOperations), loadPropertyCoverage(asOf)]);
-      return { records, data: workspace.data };
+      const [workspace, records, unlinked] = await Promise.all([
+        readWorkspace(PROPERTY_OPERATIONS_KEY, propertyOperationsSchema, initialPropertyOperations),
+        loadPropertyCoverage(asOf),
+        // Optional evidence: failing to count it must not hide the property records.
+        available(() => loadUnlinkedPropertyExpenseCount(asOf)),
+      ]);
+      return { records, data: workspace.data, unlinkedExpenseCount: unlinked.status === 'ready' ? unlinked.data : null };
     }),
   ]);
   return buildDataIntelligence({ asOf, ledger, context, planning, debts, portfolio, pensions, properties }, Boolean(process.env.AI_GATEWAY_API_KEY?.trim()));

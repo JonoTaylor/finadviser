@@ -26,8 +26,9 @@ describe.skipIf(!url)('private payee knowledge in disposable PostgreSQL', () => 
     fixture = new Client({ connectionString: url }); await fixture.connect();
     await fixture.query(`CREATE SCHEMA "${namespace}"`); await fixture.query(`SET search_path TO "${namespace}",public`);
     await fixture.query(`
+      CREATE TYPE account_type AS ENUM ('ASSET', 'LIABILITY', 'EQUITY', 'INCOME', 'EXPENSE');
       CREATE TABLE categories(id integer PRIMARY KEY,name text NOT NULL,parent_id integer);
-      CREATE TABLE accounts(id integer PRIMARY KEY,name text NOT NULL,account_type text NOT NULL,owner_id integer);
+      CREATE TABLE accounts(id integer PRIMARY KEY,name text NOT NULL,account_type account_type NOT NULL,owner_id integer);
       CREATE TABLE journal_entries(id integer PRIMARY KEY,date text NOT NULL,description text NOT NULL,reference text,property_id integer,category_id integer REFERENCES categories(id),is_transfer boolean NOT NULL DEFAULT false,transfer_group_id uuid,transfer_partner_journal_id integer,sync_run_id integer);
       CREATE TABLE book_entries(id integer GENERATED ALWAYS AS IDENTITY PRIMARY KEY,journal_entry_id integer REFERENCES journal_entries(id),account_id integer REFERENCES accounts(id),amount numeric(14,2) NOT NULL);
       CREATE TABLE transaction_metadata(journal_entry_id integer PRIMARY KEY REFERENCES journal_entries(id),merchant_name text,bank_category text,transaction_type text,currency text);
@@ -57,6 +58,12 @@ describe.skipIf(!url)('private payee knowledge in disposable PostgreSQL', () => 
     const [record] = await getCategorizationRecords([1]);
     return saveConfirmedPayee({ journalId: 1, snapshot: record.snapshot, categoryId: 1, payeeName: 'Avery', purpose: 'Household cleaner', identityKind: 'bank_payee', ...extra });
   };
+  it('loads empty knowledge and current payment context with the native account type enum before the first save', async () => {
+    expect(await listPayeeMemories()).toEqual([]);
+    expect(await getPayeeLearningContext(1)).toMatchObject({
+      record: { journalId: 1 }, scope: { accountType: 'ASSET' }, eligible: true, existingMemory: null,
+    });
+  });
   it('atomically confirms a payment and remembers a recipient across changing references without changing ledger amounts', async () => {
     const before = (await fixture.query('SELECT * FROM book_entries ORDER BY id')).rows;
     const result = await save();

@@ -20,6 +20,7 @@ export function payeeCandidateMatchSql(memoryAlias = 'pm', journalAlias = 'je'):
       AND (SELECT count(*) FROM regexp_matches(${journal}.description, '\\mREF(?:ERENCE)?[.:]?(?=\\s)', 'gi')) = 1
       THEN (regexp_match(btrim(${journal}.description), ${BANK_PAYEE_PATTERN}, 'i'))[1] ELSE NULL END
     ELSE NULL END`;
+  // accounts.account_type is a native enum; the saved scope stores text.
   return sql`${memory}.status = 'active'
     AND ${journal}.property_id IS NOT DISTINCT FROM ${memory}.property_id
     AND upper(NULLIF(btrim((SELECT currency FROM transaction_metadata WHERE journal_entry_id = ${journal}.id)), '')) IS NOT DISTINCT FROM ${memory}.currency
@@ -27,7 +28,7 @@ export function payeeCandidateMatchSql(memoryAlias = 'pm', journalAlias = 'je'):
       WHERE pbe.journal_entry_id = ${journal}.id AND pa.account_type IN ('ASSET', 'LIABILITY')) = 1
     AND EXISTS (SELECT 1 FROM book_entries pbe JOIN accounts pa ON pa.id = pbe.account_id
       WHERE pbe.journal_entry_id = ${journal}.id AND pa.id = ${memory}.account_id
-        AND pa.account_type = ${memory}.account_type AND pa.owner_id IS NOT DISTINCT FROM ${memory}.owner_id
+        AND pa.account_type::text = ${memory}.account_type AND pa.owner_id IS NOT DISTINCT FROM ${memory}.owner_id
         AND sign(pbe.amount) = ${memory}.direction AND pbe.amount <> 0)
     AND EXISTS (SELECT 1 FROM categorization_payee_aliases p_alias WHERE p_alias.memory_id = ${memory}.id
       AND p_alias.active = TRUE AND p_alias.identity_kind = ${memory}.identity_kind

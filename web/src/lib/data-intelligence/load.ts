@@ -11,6 +11,7 @@ import { INITIAL_PORTFOLIO, PORTFOLIO_KEY, portfolioDataSchema } from '@/lib/por
 import { PENSION_RECORDS_KEY, pensionRecordsDataSchema } from '@/lib/pension-records/schema';
 import { PROPERTY_OPERATIONS_KEY, initialPropertyOperations, propertyOperationsSchema } from '@/lib/property-operations/types';
 import { categorizationRepo } from '@/lib/categorization/repository';
+import { propertyExpenseCategoryIdsSql } from '@/lib/properties/property-expense-link';
 import { buildDataIntelligence, completedRecentMonths } from './engine';
 import type { DataAvailability, DataIntelligenceReport, LedgerCoverage, PropertyCoverageRecord } from './types';
 
@@ -112,16 +113,11 @@ export async function loadPropertyCoverage(asOf: string): Promise<PropertyCovera
  */
 export async function loadUnlinkedPropertyExpenseCount(asOf: string): Promise<number> {
   const result = await getDb().execute(sql`
-    WITH RECURSIVE subtree AS (
-      SELECT id FROM categories WHERE name = 'Property expenses' AND parent_id IS NULL
-      UNION ALL
-      SELECT c.id FROM categories c JOIN subtree s ON c.parent_id = s.id
-    )
     SELECT COUNT(*)::text AS unlinked_count
       FROM journal_entries je
      WHERE je.property_id IS NULL AND je.date <= ${asOf}
        AND COALESCE(je.is_transfer, FALSE) = FALSE
-       AND je.category_id IN (SELECT id FROM subtree)
+       AND je.category_id IN ${propertyExpenseCategoryIdsSql()}
   `);
   if (result.rows.length !== 1) throw new Error('Unlinked property expense count is unavailable');
   return count(result.rows[0].unlinked_count);

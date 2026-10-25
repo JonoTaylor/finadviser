@@ -168,8 +168,8 @@ export function buildDataIntelligence(input: DataIntelligenceInput, modelAvailab
         'These transactions are categorised as property expenses but are not linked to a property, so they appear on no property\'s tax-year report.',
         [`${unlinked} property-expense transactions have no property link.`, 'A property-expense category does not establish that a cost is tax-deductible.'],
         unlinked,
-        records.length === 0 ? 'Add a property' : single ? `Review ${single.name} expenses` : 'Ask the adviser to assign them',
-        records.length === 0 ? '/properties' : single ? `/properties/${single.id}` : '/chat',
+        records.length === 0 ? 'Add a property' : single ? `Review ${single.name} expenses` : 'Assign them in Transactions',
+        records.length === 0 ? '/properties' : single ? `/properties/${single.id}` : '/transactions?unlinked=property-expenses',
         'confirm');
     }
     if (stale.length) add('properties', 'property-values-stale', 'low', 'stale', 'Review older property valuations', 'Valuations more than a year old may not reflect current property values. This does not establish a market price.', [`${stale.length} property valuations are more than 365 days old.`], stale.length, 'Review valuations', '/properties');

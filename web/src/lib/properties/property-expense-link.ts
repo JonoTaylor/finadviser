@@ -1,5 +1,6 @@
-import { sql } from 'drizzle-orm';
+import { sql, type SQL } from 'drizzle-orm';
 import { getDb } from '@/lib/db';
+import { ClientError, NotFoundError } from '@/lib/errors';
 
 /**
  * Helpers for stamping `journal_entries.property_id` when a journal
@@ -13,6 +14,22 @@ import { getDb } from '@/lib/db';
  * (single-property setup today; explicit propertyId once the user has
  * more than one property).
  */
+
+/**
+ * Ids in the "Property expenses" subtree at any depth, as a subquery.
+ * Shared by the journal list filter and the Data assistant's count so
+ * they always agree on what an unlinked property expense is.
+ */
+export function propertyExpenseCategoryIdsSql(): SQL {
+  return sql`(
+    WITH RECURSIVE subtree AS (
+      SELECT id FROM categories WHERE name = 'Property expenses' AND parent_id IS NULL
+      UNION ALL
+      SELECT c.id FROM categories c JOIN subtree s ON c.parent_id = s.id
+    )
+    SELECT id FROM subtree
+  )`;
+}
 
 let cachedSubtreeIds: { ids: number[]; fetchedAt: number } | null = null;
 const SUBTREE_TTL_MS = 60_000;
@@ -119,13 +136,13 @@ export async function tagJournalAsPropertyExpense(params: {
     SELECT id FROM properties WHERE id = ${params.propertyId} LIMIT 1
   `);
   if (propertyCheck.rows.length === 0) {
-    throw new Error(`Property ${params.propertyId} not found`);
+    throw new NotFoundError(`Property ${params.propertyId} not found`);
   }
 
   if (params.categoryId !== undefined) {
     const subtree = await getPropertyExpenseCategoryIds();
     if (!subtree.includes(params.categoryId)) {
-      throw new Error(
+      throw new ClientError(
         `Category ${params.categoryId} is not in the "Property expenses" subtree. ` +
         `Pick a child of "Property expenses" (e.g. "Repairs & maintenance", "Letting agent fees").`,
       );
@@ -136,7 +153,7 @@ export async function tagJournalAsPropertyExpense(params: {
     SELECT id, category_id FROM journal_entries WHERE id = ${params.journalId} LIMIT 1
   `);
   if (journalCheck.rows.length === 0) {
-    throw new Error(`Journal entry ${params.journalId} not found`);
+    throw new NotFoundError(`Journal entry ${params.journalId} not found`);
   }
 
   if (params.categoryId !== undefined) {
@@ -244,7 +261,7 @@ export async function untagJournalPropertyExpense(journalId: number): Promise<{ 
     UPDATE journal_entries SET property_id = NULL WHERE id = ${journalId}
   `);
   if ((result.rowCount ?? 0) === 0) {
-    throw new Error(`Journal entry ${journalId} not found`);
+    throw new NotFoundError(`Journal entry ${journalId} not found`);
   }
   return { journalId };
 }

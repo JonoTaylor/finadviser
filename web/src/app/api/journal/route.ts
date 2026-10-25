@@ -17,6 +17,7 @@ export async function GET(request: NextRequest) {
       accountId: params.get('accountId') ? parseId(params.get('accountId'), 'account') : undefined,
       query: params.get('q') ?? undefined,
       hideTransfers: params.get('hideTransfers') === 'true',
+      unlinkedPropertyExpenses: params.get('unlinkedPropertyExpenses') === 'true',
       // Bounded so a stray parameter cannot request the whole ledger at once.
       limit: boundedInt(params.get('limit'), 100, 1, 500),
       offset: boundedInt(params.get('offset'), 0, 0, Number.MAX_SAFE_INTEGER),

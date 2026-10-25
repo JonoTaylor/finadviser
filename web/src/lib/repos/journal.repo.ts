@@ -1,8 +1,9 @@
-import { eq, sql, and, gte, lte, desc } from 'drizzle-orm';
+import { eq, sql, type SQL } from 'drizzle-orm';
 import { getDb, schema } from '@/lib/db';
 import { londonTodayIso } from '@/lib/dates/today';
+import { propertyExpenseCategoryIdsSql } from '@/lib/properties/property-expense-link';
 
-const { journalEntries, bookEntries, categories, accounts } = schema;
+const { journalEntries, bookEntries } = schema;
 
 // Allowed values for journal_entries.transfer_kind. Mirrors the CHECK
 // constraint declared in migration.sql; kept in sync so an invalid kind
@@ -17,6 +18,35 @@ export const TRANSFER_KINDS = [
   'manual',
 ] as const;
 export type TransferKind = (typeof TRANSFER_KINDS)[number];
+
+interface EntryFilters {
+  startDate?: string;
+  endDate?: string;
+  categoryId?: number;
+  accountId?: number;
+  query?: string;
+  hideTransfers?: boolean;
+  unlinkedPropertyExpenses?: boolean;
+}
+
+/** One WHERE clause for the list and its count, so pagination totals match. */
+function entryFilterSql({ startDate, endDate, categoryId, accountId, query, hideTransfers, unlinkedPropertyExpenses }: EntryFilters): SQL {
+  let whereClause = sql`1=1`;
+  if (startDate) whereClause = sql`${whereClause} AND je.date >= ${startDate}`;
+  if (endDate) whereClause = sql`${whereClause} AND je.date <= ${endDate}`;
+  if (categoryId !== undefined) whereClause = sql`${whereClause} AND je.category_id = ${categoryId}`;
+  if (accountId !== undefined) {
+    whereClause = sql`${whereClause} AND je.id IN (SELECT journal_entry_id FROM book_entries WHERE account_id = ${accountId})`;
+  }
+  if (query) whereClause = sql`${whereClause} AND je.description ILIKE ${'%' + query + '%'}`;
+  if (hideTransfers) whereClause = sql`${whereClause} AND COALESCE(je.is_transfer, FALSE) = FALSE`;
+  if (unlinkedPropertyExpenses) {
+    // Same definition as the Data assistant's "assign property expenses" gap.
+    whereClause = sql`${whereClause} AND je.property_id IS NULL AND COALESCE(je.is_transfer, FALSE) = FALSE
+      AND je.category_id IN ${propertyExpenseCategoryIdsSql()}`;
+  }
+  return whereClause;
+}
 
 export const journalRepo = {
   async createEntry(
@@ -154,21 +184,13 @@ export const journalRepo = {
     accountId?: number;
     query?: string;
     hideTransfers?: boolean;
+    unlinkedPropertyExpenses?: boolean;
     limit?: number;
     offset?: number;
   } = {}) {
     const db = getDb();
-    const { startDate, endDate, categoryId, accountId, query, hideTransfers, limit = 100, offset = 0 } = filters;
-
-    let whereClause = sql`1=1`;
-    if (startDate) whereClause = sql`${whereClause} AND je.date >= ${startDate}`;
-    if (endDate) whereClause = sql`${whereClause} AND je.date <= ${endDate}`;
-    if (categoryId !== undefined) whereClause = sql`${whereClause} AND je.category_id = ${categoryId}`;
-    if (accountId !== undefined) {
-      whereClause = sql`${whereClause} AND je.id IN (SELECT journal_entry_id FROM book_entries WHERE account_id = ${accountId})`;
-    }
-    if (query) whereClause = sql`${whereClause} AND je.description ILIKE ${'%' + query + '%'}`;
-    if (hideTransfers) whereClause = sql`${whereClause} AND COALESCE(je.is_transfer, FALSE) = FALSE`;
+    const { limit = 100, offset = 0 } = filters;
+    const whereClause = entryFilterSql(filters);
 
     const rows = await db.execute(sql`
       SELECT je.id, je.date, je.description, je.reference, je.category_id,
@@ -176,17 +198,20 @@ export const journalRepo = {
              je.is_transfer, je.transfer_kind,
              je.transfer_group_id::text AS transfer_group_id,
              je.transfer_partner_journal_id,
+             je.property_id, p.name AS property_name,
              STRING_AGG(a.name || ':' || be.amount, '|' ORDER BY CASE a.account_type WHEN 'ASSET' THEN 0 ELSE 1 END) AS entries_summary,
              tm.merchant_name, tm.merchant_emoji, tm.transaction_type,
              tm.bank_category, tm.notes, tm.address
       FROM journal_entries je
       LEFT JOIN categories c ON c.id = je.category_id
+      LEFT JOIN properties p ON p.id = je.property_id
       LEFT JOIN book_entries be ON be.journal_entry_id = je.id
       LEFT JOIN accounts a ON a.id = be.account_id
       LEFT JOIN transaction_metadata tm ON tm.journal_entry_id = je.id
       WHERE ${whereClause}
       GROUP BY je.id, je.date, je.description, je.reference, je.category_id, c.name,
                je.is_transfer, je.transfer_kind, je.transfer_group_id, je.transfer_partner_journal_id,
+               je.property_id, p.name,
                tm.merchant_name, tm.merchant_emoji, tm.transaction_type,
                tm.bank_category, tm.notes, tm.address
       ORDER BY je.date DESC, je.id DESC
@@ -202,19 +227,10 @@ export const journalRepo = {
     accountId?: number;
     query?: string;
     hideTransfers?: boolean;
+    unlinkedPropertyExpenses?: boolean;
   } = {}) {
     const db = getDb();
-    const { startDate, endDate, categoryId, accountId, query, hideTransfers } = filters;
-
-    let whereClause = sql`1=1`;
-    if (startDate) whereClause = sql`${whereClause} AND je.date >= ${startDate}`;
-    if (endDate) whereClause = sql`${whereClause} AND je.date <= ${endDate}`;
-    if (categoryId !== undefined) whereClause = sql`${whereClause} AND je.category_id = ${categoryId}`;
-    if (accountId !== undefined) {
-      whereClause = sql`${whereClause} AND je.id IN (SELECT journal_entry_id FROM book_entries WHERE account_id = ${accountId})`;
-    }
-    if (query) whereClause = sql`${whereClause} AND je.description ILIKE ${'%' + query + '%'}`;
-    if (hideTransfers) whereClause = sql`${whereClause} AND COALESCE(je.is_transfer, FALSE) = FALSE`;
+    const whereClause = entryFilterSql(filters);
 
     const rows = await db.execute(sql`
       SELECT COUNT(DISTINCT je.id) AS count

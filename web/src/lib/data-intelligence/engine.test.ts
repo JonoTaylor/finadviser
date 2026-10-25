@@ -38,7 +38,7 @@ describe('data intelligence evidence', () => {
       several.properties.data.data.reserveTargets.push({ propertyId: 2, targetAmount: '0.00' });
       several.properties.data.unlinkedExpenseCount = 3;
     }
-    expect(buildDataIntelligence(several).gaps.find(gap => gap.id === 'property-expenses-unlinked')?.action.href).toBe('/chat');
+    expect(buildDataIntelligence(several).gaps.find(gap => gap.id === 'property-expenses-unlinked')?.action.href).toBe('/transactions?unlinked=property-expenses');
     const unknown = completeInput();
     if (unknown.properties.status === 'ready') unknown.properties.data.unlinkedExpenseCount = null;
     expect(buildDataIntelligence(unknown).gaps).toEqual([]);

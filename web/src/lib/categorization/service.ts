@@ -8,6 +8,7 @@ import { propertyRepo } from '@/lib/repos/property.repo';
 import { loadActivePayeeMemories, loadPrivatePayeeNames } from './payees/service';
 import { matchingConfirmedPayees } from './payees/matching';
 import { knownServiceMatch } from './known-services';
+import { assessAutomaticSpending, hasMovementDescription, isFinancialOrBarePaymentProvider, isProtectedSpendingCategory } from './autonomy';
 import { categorizationRepo } from './repository';
 import {
   categorizationContextKey, confirmedContextReviewReason, MAX_PROCESSING_ENTRIES, MODEL_BATCH_SIZE, PAYEE_MEANINGS_CONFLICT_REASON,
@@ -22,7 +23,7 @@ import type {
 const INITIAL_MODEL_BATCH_SIZE = Math.min(5, MODEL_BATCH_SIZE);
 const MODEL_ATTEMPT_TIMEOUT_MS = 8_000;
 const MIN_RETRY_BUDGET_MS = 1_000;
-const MAX_RESEARCH_QUERIES = 2;
+const MAX_RESEARCH_QUERIES = 5;
 const RESEARCH_TIMEOUT_MS = 6_000;
 
 class CategorizationBatchTimeoutError extends Error {
@@ -74,6 +75,30 @@ function normalizeOptions(options: CategorizationOptions): CategorizationOptions
     deadlineMs: bounded(options.deadlineMs, 45000, 45000),
     modelTimeoutMs: bounded(options.modelTimeoutMs, 20000, 30000),
   };
+}
+
+/** An AI spending label cannot establish a sender or reconcile an account. */
+function essentialContextReason(candidate: CategorizationCandidate): string | null {
+  const movement = movementReviewReason(candidate);
+  if (movement) return movement;
+  if (hasMovementDescription(candidate)) return 'The statement describes a payment or account movement. Identify its purpose or destination before counting it as ordinary spending.';
+  if (isFinancialOrBarePaymentProvider(candidate)) return 'Identify the destination or underlying payment before counting this financial service or payment-provider entry as spending.';
+  const financial = candidate.legs.find(leg => leg.accountType === 'ASSET' || leg.accountType === 'LIABILITY');
+  const incoming = financial?.accountType === 'ASSET' && Number(financial.amount) > 0;
+  const incomeHint = `${candidate.bankCategory ?? ''} ${candidate.transactionType ?? ''}`.replace(/[_-]/g, ' ');
+  if (incoming && !/\b(?:salary|payroll|wages|dividends?|interest paid|pension income)\b/i.test(incomeHint)) {
+    return 'Identify who sent this payment and why. It could be income, a reimbursement or a movement between accounts; an incoming amount alone does not establish income.';
+  }
+  return null;
+}
+
+function canReassessSpending(candidate: CategorizationCandidate): boolean {
+  if (candidate.propertyId !== null || essentialContextReason(candidate)) return false;
+  const financial = candidate.legs.find(leg => leg.accountType === 'ASSET' || leg.accountType === 'LIABILITY');
+  if (!financial || Number(financial.amount) >= 0) return false;
+  const type = (candidate.transactionType ?? '').replace(/[_-]/g, ' ').trim();
+  return /^(?:(?:(?:debit|credit) )?card(?: payment| purchase| transaction)?|pos(?: payment| purchase)?|point of sale(?: payment| purchase)?)$/i.test(type)
+    || merchantResearchInputFromCandidate(candidate) !== null;
 }
 
 /**
@@ -146,10 +171,17 @@ export async function processCategorization(options: CategorizationOptions = {})
         else if (service && !serviceReason) deterministic.push({
           journalId: candidate.id, categoryId: service.categoryId, confidence: 1, reason: service.reason, source: 'rule', status: 'applied',
         });
-        // Revisit queued reviews only with deterministic knowledge. A policy
-        // upgrade or raced lookup must not send old questions back to AI.
-        else if (!candidate.pendingReview) unmatched.push(candidate);
-        else policyChecks.push(candidate);
+        else if (candidate.pendingReview) {
+          // One new policy pass can research old spending. A raced confirmed
+          // lookup must not reopen a policy-current question indefinitely.
+          if (candidate.policyReassessment && canReassessSpending(candidate)) unmatched.push(candidate);
+          else policyChecks.push(candidate);
+        } else {
+          const essential = essentialContextReason(candidate);
+          if (essential) deterministic.push({ journalId: candidate.id, categoryId: null, confidence: 0,
+            reason: essential, source: 'ai', status: 'needs_review' });
+          else unmatched.push(candidate);
+        }
       }
     }
 
@@ -161,7 +193,8 @@ export async function processCategorization(options: CategorizationOptions = {})
       for (const row of persisted) {
         const decision = decisionById.get(row.journalId)!;
         if (row.status === 'needs_review') {
-          counters.reviewQueued++;
+          if (candidates.find(candidate => candidate.id === row.journalId)?.pendingReview) counters.reviewsRechecked++;
+          else counters.reviewQueued++;
           if (decision.source === 'ai') counters.aiNoMatch++;
         } else if (decision.source === 'rule') {
           counters.ruleBased++;
@@ -207,6 +240,17 @@ export async function processCategorization(options: CategorizationOptions = {})
         let ownerLookupFailed = false;
         const remainingModelMs = () => Math.min(modelBudgetMs, deadline - persistenceMargin - Date.now());
 
+        // Local private identities apply to every automatic result, including
+        // confident results which never need a public merchant lookup.
+        const privateLookupStarted = Date.now();
+        try {
+          const [owners, payeeNames] = await boundedOperation(() => Promise.all([
+            propertyRepo.listOwners(), loadPrivatePayeeNames(),
+          ]), Math.max(1, Math.min(350, remainingModelMs())));
+          privateNames = [...owners.map(owner => owner.name), ...payeeNames];
+        } catch { ownerLookupFailed = true; }
+        finally { researchBudgetMs -= Math.max(0, Date.now() - privateLookupStarted); }
+
         async function classify(batch: CategorizationCandidate[], evidence?: ReadonlyMap<number, MerchantResearchResult>) {
           const remainingMs = remainingModelMs();
           if (remainingMs <= 0) throw new CategorizationBatchTimeoutError();
@@ -232,6 +276,10 @@ export async function processCategorization(options: CategorizationOptions = {})
           const decisionById = new Map(decisions.map(decision => [decision.journalId, decision]));
           const ambiguous = batch.filter(candidate => {
             const decision = decisionById.get(candidate.id)!;
+            const local = !ownerLookupFailed ? assessAutomaticSpending(candidate, categories, decision, { privateNames }) : null;
+            // Research the unresolved business identity, not an already useful
+            // bank-supported label or a broad retail classification.
+            if (local && local.assignmentKind !== 'broad') return false;
             return decision.status === 'needs_review' && !needsMovementReview(candidate, decision.categoryId, categories)
               && merchantResearchInputFromCandidate(candidate) !== null;
           });
@@ -339,6 +387,26 @@ export async function processCategorization(options: CategorizationOptions = {})
             break;
           }
           decisions = await enrichAmbiguous(batch, decisions);
+          decisions = decisions.map(decision => {
+            const candidate = batch.find(candidate => candidate.id === decision.journalId)!;
+            const essential = essentialContextReason(candidate);
+            if (essential) return { ...decision, categoryId: null, status: 'needs_review' as const, reason: essential };
+            const financial = candidate.legs.find(leg => leg.accountType === 'ASSET' || leg.accountType === 'LIABILITY');
+            if (candidate.propertyId === null && Number(financial?.amount) < 0 && decision.categoryId !== null
+              && isProtectedSpendingCategory(decision.categoryId, categories)) {
+              return { ...decision, categoryId: null, status: 'needs_review' as const,
+                reason: 'A spending label cannot establish income, a financial-account movement, property use or tax treatment. More account or payment context is needed.' };
+            }
+            const identity = `${candidate.merchantName ?? ''} ${candidate.description}`.normalize('NFKC').toLocaleLowerCase('en-GB').replace(/\s+/g, ' ');
+            if (privateNames?.some(name => { const value = name.normalize('NFKC').toLocaleLowerCase('en-GB').replace(/\s+/g, ' ').trim(); return value.length >= 3 && identity.includes(value); })) {
+              return { ...decision, categoryId: null, status: 'needs_review' as const,
+                reason: 'This matches a private payment identity. Confirm its purpose in this account context once so future payments can use the saved meaning.' };
+            }
+            const assessment = ownerLookupFailed ? null : assessAutomaticSpending(candidate, categories, decision, { research: decision.evidence, privateNames });
+            return assessment && !movementReviewReason(candidate, assessment.categoryId, categories)
+              ? { ...decision, ...assessment, status: 'applied' as const }
+              : decision;
+          });
           if (Date.now() >= deadline) {
             aiSkippedReason = 'The processing time budget was reached. Run another pass to continue.';
             deferredReason = 'time_budget';

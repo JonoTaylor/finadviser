@@ -27,6 +27,21 @@ const services = [
     categoryNames: ['Bank Fees & Charges', 'Bank Fees', 'Banking Fees', 'Bank Charges', 'Fees & Charges', 'Subscriptions', 'Software & Subscriptions'],
     reason: 'The statement identifies a Monzo account membership fee, rather than a transfer to a Monzo account.',
   },
+  {
+    id: 'plex-subscription',
+    merchantNames: [],
+    merchantDescriptor: /^plex sub invoice \d{1,12}$/i,
+    descriptor: /^plex sub\* invoice \d{1,12}(?: (?:\+\d{7,15}|mcalester))? usa$/i,
+    categoryNames: ['Entertainment', 'Software & Subscriptions', 'Subscriptions'],
+    reason: 'The statement identifies a Plex subscription invoice. Changing invoice numbers do not change the service identity.',
+  },
+  {
+    id: 'google-storage',
+    merchantNames: ['google one', 'google storage'],
+    descriptor: /^google (?:one|storage)(?: london)?(?: gbr)?$/i,
+    categoryNames: ['Software & Subscriptions', 'Subscriptions'],
+    reason: 'The statement identifies Google One or Google Storage, a cloud storage subscription.',
+  },
 ] as const;
 
 export type KnownServiceId = typeof services[number]['id'];
@@ -43,6 +58,7 @@ export function knownServiceIdentity(candidate: Pick<CategorizationCandidate, 'm
   const merchant = normalized(candidate.merchantName);
   const description = normalized(candidate.description);
   const matches = services.filter(service => (service.merchantNames as readonly string[]).includes(merchant)
+    || ('merchantDescriptor' in service && service.merchantDescriptor.test(merchant))
     || service.descriptor.test(description));
   return matches.length === 1 ? matches[0].id : null;
 }

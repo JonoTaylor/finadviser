@@ -33,7 +33,7 @@ export default function DataProcessingCard() {
   const gaps = data?.gaps.filter(gap => gap.status !== 'unavailable') ?? [];
   const urgent = gaps.filter(gap => gap.priority === 'high').length;
   return <Card><CardContent>
-    <DashboardCardHeader title="Your data assistant" subtitle="AI organises supported matches and brings the questions that need you into one place."
+    <DashboardCardHeader title="Your data assistant" subtitle="AI organises ordinary spending and brings unresolved context into one place."
       action={<Button component={Link} href="/data" variant="outlined" size="small" endIcon={<ArrowForwardRoundedIcon sx={{ fontSize: 16 }} />}>Open assistant</Button>} />
     {isLoading && <Skeleton variant="rounded" height={56} />}
     {error && <Alert severity="warning" action={<Button size="small" onClick={() => void mutate()}>Retry</Button>}>Data readiness could not be loaded. Your records have not been treated as complete.</Alert>}
@@ -42,7 +42,7 @@ export default function DataProcessingCard() {
         <Box sx={{ width: 34, height: 34, display: 'grid', placeItems: 'center', bgcolor: '#F0FDFA', color: 'primary.main', borderRadius: '7px', flexShrink: 0 }}><AutoFixHighRoundedIcon sx={{ fontSize: 20 }} /></Box>
         <Box sx={{ minWidth: 0 }}>
           <Typography variant="body2" sx={{ fontWeight: 600 }}>{processing.job?.status === 'queued' ? 'Transaction processing is queued' : processing.running ? 'Organising your transactions…' : data.transactions.status === 'unavailable' ? 'Transaction coverage unavailable' : data.transactions.unprocessedCount == null ? 'Processing backlog unavailable' : data.transactions.unprocessedCount > 0 ? `${data.transactions.unprocessedCount} records queued for processing` : 'No records queued for automatic processing'}</Typography>
-          <Typography variant="caption" component="p" sx={{ mt: 0.5 }}>{data.processing.modelAvailable ? 'Strong matches are categorised automatically. Ambiguous records stay in your review queue.' : 'AI processing is unavailable. Saved rules can still match records; the assistant shows the information you need to add.'}</Typography>
+          <Typography variant="caption" component="p" sx={{ mt: 0.5 }}>{data.processing.modelAvailable ? 'Spending is organised automatically. Estimates and unknown details stay visible; you can refine them later.' : 'AI processing is unavailable. Saved rules can still match records; the assistant shows the information you need to add.'}</Typography>
         </Box>
       </Box>
       <Stack direction="row" gap={1} flexWrap="wrap">

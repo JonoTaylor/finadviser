@@ -1,23 +1,37 @@
 Saved transactions are processed through `processCategorization` and
 `POST /api/journal/auto-categorize`. Each pass is bounded, holds a short lease,
-and applies only validated decisions to unchanged eligible journals. Uncertain
-results stay in the review queue. Confirmed exact-context mappings can resolve
+and applies only validated decisions to unchanged eligible journals. Missing
+financial facts stay in the review queue. Confirmed exact-context mappings can resolve
 matching queued transactions on a later pass.
 
-Exact Prime membership, Xbox Game Pass and Monzo membership descriptors have
+Exact Prime, Xbox Game Pass, Monzo, Plex and Google storage descriptors have
 deterministic service matches. Explicit user-confirmed knowledge and saved rules
-take precedence. Generic marketplaces, refunds, property-linked purchases and
-possible account movements retain their review guards; model confidence is not
-promoted by business identity alone.
+take precedence. Ordinary purchases can receive reversible estimated categories
+from a matching bank hint, specific merchant description or bound public research.
+Generic retail purchases can use an estimated Shopping category. Otherwise a
+screened card purchase can use the visible `Spending details unknown` root bucket.
+These assignments never establish income, transfers, property use or tax treatment.
+`assignment_kind` distinguishes standard, estimated and broad labels; estimated
+and broad labels persist no model probability for the assigned category.
 
 `REVIEW_POLICY_VERSION` makes historical current-snapshot reviews eligible for
-one deterministic reassessment. Pending reviews never return to the model for
-this pass. Unsupported questions are stamped through `markReviewPolicyChecked`
+one automatic reassessment. `policyReassessment` distinguishes these candidates
+from a policy-current question selected by new confirmed knowledge. Eligible old
+spending questions can return to research and the model once; both SQL write
+guards require the stale policy and the exact current context. Hard context
+questions are stamped through `markReviewPolicyChecked`
 under a snapshot and lease guard, preserving their evidence and review revision.
 `reviewsRechecked` tracks these checks separately from new review questions or
 applied categories. Human-reviewed, dismissed and applied rows stay protected.
 New exact/private payee confirmations retain their separate refresh mechanism;
 editing a general rule alone does not reopen policy-current questions.
+
+`/api/categorization/activity` provides a read-only, optional-refinement view of
+automatic labels and their reasons. It requires both the current category and
+the original pre-assignment context fingerprint (with a null category override),
+so later changes to amounts, ownership or merchant metadata do not present old
+evidence as a current decision. The Data assistant starts eligible work once per
+visible page visit, preserving explicit paused and cancelled job states.
 
 `/api/data-intelligence/review-groups` groups canonical exact payment contexts,
 including account, owner, direction, currency and property boundaries. It returns

@@ -12,7 +12,7 @@ type JobAction = 'start' | 'pause' | 'resume' | 'cancel';
 
 /** Revalidate derived financial views after actual categorisation or review. */
 export function isFinancialDataKey(key: unknown): boolean {
-  return typeof key === 'string' && ['/api/data-intelligence', '/api/journal', '/api/plan', '/api/reviews', '/api/finance', '/api/spending', '/api/budgets', '/api/dashboard', '/api/tips', '/api/accounts', '/api/investments', '/api/debts', '/api/portfolio', '/api/pension-records', '/api/property-operations', '/api/properties'].some(prefix => key.startsWith(prefix));
+  return typeof key === 'string' && ['/api/categorization/activity', '/api/data-intelligence', '/api/journal', '/api/plan', '/api/reviews', '/api/finance', '/api/spending', '/api/budgets', '/api/dashboard', '/api/tips', '/api/accounts', '/api/investments', '/api/debts', '/api/portfolio', '/api/pension-records', '/api/property-operations', '/api/properties'].some(prefix => key.startsWith(prefix));
 }
 
 export function canAutomaticallyStartCategorization(job: CategorizationJob | null, available: number | null | undefined): boolean {

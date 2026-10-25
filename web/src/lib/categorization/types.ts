@@ -20,8 +20,10 @@ export type CategorizationCandidate = {
   currency: string | null;
   legs: CategorizationLeg[];
   snapshot: string;
-  /** An unchanged review is revisited only for confirmed knowledge or one deterministic policy check. */
+  /** An unchanged review is revisited only for confirmed knowledge or one versioned policy check. */
   pendingReview?: boolean;
+  /** The current queued suggestion has not yet received this policy's reassessment. */
+  policyReassessment?: boolean;
 };
 
 export type CategorizationCategory = { id: number; name: string; parentId?: number | null };
@@ -40,6 +42,8 @@ export type CategorizationDecision = {
   reason: string;
   source: 'rule' | 'learned' | 'ai' | 'payee';
   status: 'applied' | 'needs_review';
+  /** Automatic spending labels stay distinguishable from a confirmed category. */
+  assignmentKind?: 'standard' | 'estimated' | 'broad';
   /** Public merchant identity evidence; never proof of a specific purchase. */
   evidence?: MerchantResearchResult;
   /** Private user-confirmed payee provenance; never sent to public search. */

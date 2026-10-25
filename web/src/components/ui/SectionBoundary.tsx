@@ -35,7 +35,7 @@ export default class SectionBoundary extends Component<SectionBoundaryProps, Sec
     return <Alert
       severity="warning"
       action={<Button color="inherit" size="small" onClick={this.retry}>Retry</Button>}
-      sx={{ height: '100%', mb: this.props.gutterBottom ? 3 : 0 }}
+      sx={{ mb: this.props.gutterBottom ? 3 : 0 }}
     >
       {this.props.title} could not be displayed. The rest of this page is unaffected and your saved data has not changed.
     </Alert>;

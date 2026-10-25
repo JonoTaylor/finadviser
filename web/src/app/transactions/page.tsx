@@ -82,10 +82,10 @@ export default function TransactionsPage() {
   }, []);
 
   const handleCategoryUpdate = useCallback(async (
-    journalId: number, categoryId: number, createRule: boolean, description: string | undefined,
+    journalId: number, categoryId: number, currentCategoryId: number | null, createRule: boolean, description: string | undefined,
     propertyId: number | null | undefined, currentPropertyId: number | null,
   ) => {
-    await saveCategoryWithPropertyLink({ journalId, categoryId, createRule, description, propertyId, currentPropertyId });
+    await saveCategoryWithPropertyLink({ journalId, categoryId, currentCategoryId, createRule, description, propertyId, currentPropertyId });
     setEditEntry(null);
     void refreshFinancialData(isFinancialDataKey);
   }, [refreshFinancialData]);
@@ -192,7 +192,7 @@ export default function TransactionsPage() {
         onRemembered={() => { setEditEntry(null); void refreshFinancialData(isFinancialDataKey); setSnackbar({ open: true, message: 'Category and private payment meaning saved.', severity: 'success' }); }}
         onClose={() => setEditEntry(null)}
         onSave={async (categoryId, createRule, propertyId) => {
-          if (editEntry) await handleCategoryUpdate(editEntry.id, categoryId, createRule, editEntry.description, propertyId, editEntry.propertyId);
+          if (editEntry) await handleCategoryUpdate(editEntry.id, categoryId, editEntry.categoryId, createRule, editEntry.description, propertyId, editEntry.propertyId);
         }}
       />
       <MarkAsTransferDialog

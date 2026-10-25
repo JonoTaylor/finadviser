@@ -20,7 +20,7 @@ export type CategorizationCandidate = {
   currency: string | null;
   legs: CategorizationLeg[];
   snapshot: string;
-  /** An unchanged review may only be revisited with newly confirmed knowledge. */
+  /** An unchanged review is revisited only for confirmed knowledge or one deterministic policy check. */
   pendingReview?: boolean;
 };
 
@@ -69,6 +69,8 @@ export type CategorizationResult = CategorizationCounts & {
   learned: number;
   aiNoMatch: number;
   reviewQueued: number;
+  /** Existing reviews checked against a new deterministic policy, still awaiting user evidence. */
+  reviewsRechecked?: number;
   conflicts: number;
   aiSkippedReason: string | null;
   hasMore: boolean;

@@ -10,6 +10,7 @@ import type { ReviewItem, ReviewQueue } from '@/lib/categorization/review';
 import { buildCategoryLabels } from './categoryLabels';
 import MerchantResearchEvidence from './MerchantResearchEvidence';
 import RememberPayeeDialog from './RememberPayeeDialog';
+import GroupedCategorizationReviewQueue from './GroupedCategorizationReviewQueue';
 
 type ReviewAction = 'accept' | 'correct' | 'dismiss';
 function postingAmount(amount: string): string {
@@ -96,6 +97,14 @@ function GridlessRecord({ children }: { children: ReactNode }) {
 }
 
 export default function CategorizationReviewQueue({ onReviewed }: { onReviewed: () => Promise<void> }) {
+  const [individual, setIndividual] = useState(false);
+  return <>
+    <Stack direction="row" gap={1} sx={{ mb: 2 }}><Button variant={individual ? 'outlined' : 'contained'} aria-pressed={!individual} size="small" onClick={() => setIndividual(false)}>Grouped questions</Button><Button variant={individual ? 'contained' : 'outlined'} aria-pressed={individual} size="small" onClick={() => setIndividual(true)}>Individual payments</Button></Stack>
+    {individual ? <IndividualCategorizationReviewQueue onReviewed={onReviewed} /> : <GroupedCategorizationReviewQueue onReviewed={onReviewed} />}
+  </>;
+}
+
+function IndividualCategorizationReviewQueue({ onReviewed }: { onReviewed: () => Promise<void> }) {
   const [cursors, setCursors] = useState<number[]>([]);
   const [announcement, setAnnouncement] = useState('');
   const [rememberPayee, setRememberPayee] = useState<RememberPayeeChoice | null>(null);

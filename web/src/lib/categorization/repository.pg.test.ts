@@ -11,7 +11,8 @@ const mocks = vi.hoisted(() => ({ execute: vi.fn() }));
 vi.mock('@/lib/db', async () => ({ getDb: () => ({ execute: mocks.execute }), schema: await import('@/lib/db/schema') }));
 import { categorizationRepo } from './repository';
 import { CategorizationConflictError, InvalidCategorizationError, confirmedCategorize, decideReview, getCategorizationRecords, loadReviewQueue } from './review';
-import { categorizationContextKey, confirmedContextReviewReason, PAYEE_MEANINGS_CONFLICT_REASON } from './decisions';
+import { categorizationContextKey, confirmedContextReviewReason, movementReviewReason, PAYEE_MEANINGS_CONFLICT_REASON, REVIEW_POLICY_VERSION } from './decisions';
+import { knownServiceMatch } from './known-services';
 
 const url = process.env.DATA_PLAN_TEST_PG_URL;
 
@@ -184,6 +185,79 @@ describe.skipIf(!url)('categorisation persistence in disposable PostgreSQL', () 
     expect(await categorizationRepo.counts()).toMatchObject({ remaining: 2, available: 1, needsReview: 1 });
     expect(await categorizationRepo.persistDecisions([entry], [decision(entry)])).toEqual([]);
     expect((await rawJournal()).category_id).toBeNull();
+  });
+
+  it('revisits an old Prime membership suggestion once and applies precise service knowledge with the native account enum', async () => {
+    await fixture.query("INSERT INTO categories(id,name) VALUES(10,'Software & Subscriptions'); UPDATE journal_entries SET description='Amazon Prime amzn.co.uk/pm GBR' WHERE id=2; UPDATE transaction_metadata SET merchant_name='Amazon Prime' WHERE journal_entry_id=2");
+    const entry = await candidate(2);
+    await categorizationRepo.persistDecisions([entry], [decision(entry, { categoryId: 10, confidence: 0.9, status: 'needs_review', reason: 'Marketplace purchase requires review.' })]);
+    await fixture.query('UPDATE transaction_categorizations SET review_policy_version=NULL WHERE journal_entry_id=2');
+    const [reconsidered] = await categorizationRepo.listCandidates({ journalIds: [2] });
+    expect(reconsidered.pendingReview).toBe(true);
+    const categories = [{ id: 10, name: 'Software & Subscriptions' }];
+    const service = knownServiceMatch(reconsidered, categories)!;
+    expect(movementReviewReason(reconsidered, service.categoryId, categories)).toBeNull();
+    expect(await categorizationRepo.persistDecisions([reconsidered], [decision(reconsidered, {
+      categoryId: service.categoryId, confidence: 1, source: 'rule', status: 'applied', reason: service.reason,
+    })])).toEqual([{ journalId: 2, status: 'applied' }]);
+    expect(await rawDecision(2)).toMatchObject({ status: 'applied', source: 'rule', category_id: 10, review_policy_version: REVIEW_POLICY_VERSION });
+    expect((await rawJournal(2)).category_id).toBe(10);
+    expect(await categorizationRepo.listCandidates({ journalIds: [2] })).toEqual([]);
+  });
+
+  it('stamps an unresolved historical marketplace question once without changing its reason, evidence or review revision', async () => {
+    const token = '73109d11-e4b3-440c-b02a-e2a5e7d18562';
+    await fixture.query("UPDATE journal_entries SET description='Amazon Marketplace purchase' WHERE id=2; UPDATE transaction_metadata SET merchant_name='Amazon Marketplace' WHERE journal_entry_id=2");
+    const entry = await candidate(2);
+    await categorizationRepo.persistDecisions([entry], [decision(entry, { confidence: 0.5, status: 'needs_review', evidence: { ...publicEvidence(), query: 'Amazon Marketplace business merchant' } })]);
+    await fixture.query('UPDATE transaction_categorizations SET review_policy_version=NULL WHERE journal_entry_id=2');
+    const before = await rawDecision(2);
+    const [reconsidered] = await categorizationRepo.listCandidates({ journalIds: [2] });
+    expect(knownServiceMatch(reconsidered, [{ id: 1, name: 'Groceries' }, { id: 10, name: 'Software & Subscriptions' }])).toBeNull();
+    expect(await categorizationRepo.acquireLease(token)).toBe(true);
+    expect(await categorizationRepo.markReviewPolicyChecked([reconsidered], token)).toEqual([2]);
+    expect(await rawDecision(2)).toEqual({ ...before, review_policy_version: REVIEW_POLICY_VERSION });
+    expect(await categorizationRepo.listCandidates({ journalIds: [2] })).toEqual([]);
+    expect(await categorizationRepo.markReviewPolicyChecked([reconsidered], token)).toEqual([]);
+    expect((await rawJournal(2)).category_id).toBeNull();
+    await categorizationRepo.releaseLease(token);
+  });
+
+  it('does not allow a fresh model guess to replace the same historical review during a policy refresh', async () => {
+    const entry = await candidate(2);
+    await categorizationRepo.persistDecisions([entry], [decision(entry, { confidence: 0.5, status: 'needs_review' })]);
+    await fixture.query('UPDATE transaction_categorizations SET review_policy_version=NULL WHERE journal_entry_id=2');
+    const [reconsidered] = await categorizationRepo.listCandidates({ journalIds: [2] });
+    expect(await categorizationRepo.persistDecisions([reconsidered], [decision(reconsidered)])).toEqual([]);
+    expect(await rawDecision(2)).toMatchObject({ status: 'needs_review', confidence: '0.5000', review_policy_version: null });
+  });
+
+  it.each(['reviewed', 'dismissed', 'applied'] as const)('does not reopen %s decisions with an old policy version', async status => {
+    const entry = await candidate(2);
+    await categorizationRepo.persistDecisions([entry], [decision(entry, { confidence: 0.5, status: 'needs_review' })]);
+    await fixture.query('UPDATE transaction_categorizations SET status=$1,review_policy_version=NULL WHERE journal_entry_id=2', [status]);
+    const before = await rawDecision(2);
+    expect(await categorizationRepo.listCandidates({ journalIds: [2] })).toEqual([]);
+    expect(await categorizationRepo.persistDecisions([entry], [decision(entry, { source: 'rule' })])).toEqual([]);
+    expect(await rawDecision(2)).toEqual(before);
+  });
+
+  it('guards policy stamps against changed context, expired leases and later user decisions', async () => {
+    const token = '73109d11-e4b3-440c-b02a-e2a5e7d18562';
+    const entry = await candidate(2);
+    await categorizationRepo.persistDecisions([entry], [decision(entry, { confidence: 0.5, status: 'needs_review' })]);
+    await fixture.query('UPDATE transaction_categorizations SET review_policy_version=NULL WHERE journal_entry_id=2');
+    expect(await categorizationRepo.markReviewPolicyChecked([entry], token)).toEqual([]);
+    expect(await categorizationRepo.acquireLease(token)).toBe(true);
+    await fixture.query("UPDATE categorization_processing_lease SET expires_at=now()-interval '1 second'");
+    expect(await categorizationRepo.markReviewPolicyChecked([entry], token)).toEqual([]);
+    expect(await categorizationRepo.acquireLease(token)).toBe(true);
+    await fixture.query("UPDATE transaction_metadata SET merchant_name='Different merchant' WHERE journal_entry_id=2");
+    expect(await categorizationRepo.markReviewPolicyChecked([entry], token)).toEqual([]);
+    await fixture.query("UPDATE transaction_metadata SET merchant_name='Example merchant' WHERE journal_entry_id=2; UPDATE transaction_categorizations SET status='reviewed',source='user' WHERE journal_entry_id=2");
+    expect(await categorizationRepo.markReviewPolicyChecked([entry], token)).toEqual([]);
+    expect(await rawDecision(2)).toMatchObject({ status: 'reviewed', source: 'user', review_policy_version: null });
+    await categorizationRepo.releaseLease(token);
   });
 
   it('stores actual public citations atomically with a category without learning merchant rules', async () => {

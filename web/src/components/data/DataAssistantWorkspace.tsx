@@ -28,14 +28,14 @@ export default function DataAssistantWorkspace() {
   return <Box sx={{ minWidth: 0 }}>
     <PageHeader title="Data assistant" description="Let AI organise your records, surface unclear transactions and show exactly what your financial plan is missing." actions={<>
       <Button component={Link} href="/import" variant="outlined" startIcon={<FileUploadOutlinedIcon />}>Add information</Button>
-      <Button variant="contained" startIcon={<AutoFixHighRoundedIcon />} disabled={processing.running || processing.pendingAction !== null || !processing.jobLoaded || !data || data.transactions.status === 'unavailable' || queued == null || (queued === 0 && processing.job?.status !== 'paused')} onClick={() => void processing.run()}>{processing.running ? 'Processing…' : processing.job?.status === 'paused' ? 'Resume processing' : 'Process all queued records'}</Button>
+      <Button variant="contained" startIcon={<AutoFixHighRoundedIcon />} disabled={processing.running || processing.pendingAction !== null || !processing.jobLoaded || !data || data.transactions.status === 'unavailable' || queued == null || (queued === 0 && processing.job?.status !== 'paused')} onClick={() => void processing.run()}>{processing.running ? 'Processing…' : processing.job?.status === 'paused' ? 'Resume processing' : 'Reassess and organise'}</Button>
     </>} />
 
     {error && <Alert severity="warning" sx={{ mb: 2 }} action={<Button size="small" onClick={() => void mutate()}>Retry</Button>}>Your data assessment could not be loaded. No coverage or balances have been assumed.</Alert>}
     <Grid container spacing={2} sx={{ mb: 3 }}>
       <Grid size={{ xs: 6, lg: 3 }}><MetricCard label="Transaction records" value={data?.transactions.totalCount ?? '—'} loading={isLoading} detail="Recorded household activity" /></Grid>
       <Grid size={{ xs: 6, lg: 3 }}><MetricCard label="Queued for processing" value={queued ?? '—'} loading={isLoading} detail="Eligible for automatic processing" /></Grid>
-      <Grid size={{ xs: 6, lg: 3 }}><MetricCard label="Needs your review" value={data?.transactions.reviewNeededCount ?? '—'} loading={isLoading} detail="Questions AI could not resolve" tone="warning" /></Grid>
+      <Grid size={{ xs: 6, lg: 3 }}><MetricCard label="Payments needing context" value={data?.transactions.reviewNeededCount ?? '—'} loading={isLoading} detail="Repeated payments are grouped below" tone="warning" /></Grid>
       <Grid size={{ xs: 6, lg: 3 }}><MetricCard label="Information gaps" value={data ? gaps.filter(gap => gap.status !== 'unavailable').length : '—'} loading={isLoading} detail={data ? `${gaps.filter(gap => gap.status === 'unavailable').length} source${gaps.filter(gap => gap.status === 'unavailable').length === 1 ? '' : 's'} unavailable` : 'Based on your saved records'} tone="accent" /></Grid>
     </Grid>
 
@@ -44,6 +44,7 @@ export default function DataAssistantWorkspace() {
         <Box sx={{ flex: 1, minWidth: 0 }}>
           <Typography component="h2" variant="h6" sx={{ mb: 0.75 }}>Heavy lifting, with the evidence kept visible</Typography>
           <Typography variant="body2" color="text.secondary">Saved rules and reviewed matches organise repeat activity. AI reads each transaction’s actual account context and applies strongly supported categories. Unclear merchants and possible money movements come to you for a quick decision.</Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>Reassessment checks older questions against your saved meanings and recognised services such as Prime membership. Repeated exact payment contexts share one decision below, so you can confirm the displayed payments together and remember the choice for future matches.</Typography>
           <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>For eligible unclear merchants, AI can search public business information and keep its sources with the suggestion. Searches use the merchant name and public location details, without transaction amounts or account details.</Typography>
         </Box>
         <Chip size="small" color={data?.processing.modelAvailable ? 'success' : 'default'} variant="outlined" label={isLoading ? 'Checking AI availability…' : data ? data.processing.modelAvailable ? 'AI configured' : 'AI unavailable' : 'Availability unknown'} sx={{ alignSelf: 'flex-start', flexShrink: 0 }} />

@@ -4,6 +4,7 @@ import { matchRule } from '@/lib/import/categorizer';
 import type { MerchantResearchResult } from '@/lib/merchant-research/types';
 import { parseMerchantResearchEvidence } from '@/lib/merchant-research/schema';
 import { buildMerchantResearchQuery, merchantResearchInputFromCandidate } from '@/lib/merchant-research/privacy';
+import { knownServiceMatch } from './known-services';
 import type {
   CategorizationCandidate, CategorizationCategory, CategorizationDecision, CategorizationRule,
 } from './types';
@@ -12,6 +13,8 @@ export const AUTO_APPLY_CONFIDENCE = 0.9;
 export const MODEL_BATCH_SIZE = 25;
 export const MAX_PROCESSING_ENTRIES = 100;
 export const PAYEE_MEANINGS_CONFLICT_REASON = 'Your confirmed private payee meanings conflict. Confirm which meaning applies before reusing them.';
+/** Unchanged queued reviews receive one deterministic pass per policy revision. */
+export const REVIEW_POLICY_VERSION = 'known-services-v1';
 
 const modelDecisionSchema = z.object({
   journalId: z.number().int().positive(),
@@ -155,7 +158,9 @@ export function validateModelDecisions(
       throw new InvalidCategorizationResponseError();
     }
     seen.add(decision.journalId);
-    const movementReason = movementReviewReason(candidate, decision.categoryId, categories) ?? merchantPurposeReviewReason(candidate);
+    const service = knownServiceMatch(candidate, categories);
+    const movementReason = movementReviewReason(candidate, decision.categoryId, categories)
+      ?? (service?.categoryId === decision.categoryId ? null : merchantPurposeReviewReason(candidate));
     const evidence = evidenceForCandidate(candidate, research);
     if (research?.has(decision.journalId) && !evidence) throw new InvalidCategorizationResponseError();
     return {

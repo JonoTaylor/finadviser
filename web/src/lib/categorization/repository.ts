@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { getDb } from '@/lib/db';
 import { londonTodayIso } from '@/lib/dates/today';
 import { parseMerchantResearchEvidence } from '@/lib/merchant-research/schema';
-import { categorizationContextKey, PAYEE_MEANINGS_CONFLICT_REASON } from './decisions';
+import { categorizationContextKey, PAYEE_MEANINGS_CONFLICT_REASON, REVIEW_POLICY_VERSION } from './decisions';
 import { payeeCandidateMatchSql, payeeSourceValiditySql } from './payees/sql';
 import type { CategorizationCandidate, CategorizationDecision, CategorizationOptions } from './types';
 
@@ -75,6 +75,7 @@ const noCurrentDecision = sql`NOT EXISTS (
    WHERE tc.journal_entry_id = je.id
      AND (tc.status IN ('reviewed', 'dismissed', 'applied') OR (
        tc.snapshot_hash = ${candidateSnapshotSql()} AND NOT (${refreshedConfirmation})
+         AND NOT (tc.status = 'needs_review' AND tc.review_policy_version IS DISTINCT FROM ${REVIEW_POLICY_VERSION})
      ))
 )`;
 
@@ -164,6 +165,25 @@ export const categorizationRepo = {
     return new Map(rows.rows.map(row => [row.context_key as string, row.category_id as number]));
   },
 
+  /** A policy check keeps the original question, evidence and review revision. */
+  async markReviewPolicyChecked(candidates: CategorizationCandidate[], leaseToken: string): Promise<number[]> {
+    if (!candidates.length) return [];
+    const payload = candidates.map(candidate => ({ journalId: candidate.id, snapshot: candidate.snapshot }));
+    const rows = await getDb().execute(sql`WITH proposed AS (
+      SELECT * FROM jsonb_to_recordset(${JSON.stringify(payload)}::jsonb) AS p("journalId" integer, snapshot text)
+    ), locked AS MATERIALIZED (
+      SELECT je.id, p.snapshot FROM journal_entries je JOIN proposed p ON p."journalId" = je.id
+      WHERE ${candidateEligibilitySql()} AND ${candidateSnapshotSql()} = p.snapshot
+        AND EXISTS (SELECT 1 FROM categorization_processing_lease lease
+          WHERE lease.id = 1 AND lease.token = ${leaseToken}::uuid AND lease.expires_at > now())
+      ORDER BY je.id FOR UPDATE OF je
+    ) UPDATE transaction_categorizations tc SET review_policy_version = ${REVIEW_POLICY_VERSION}
+      FROM locked WHERE tc.journal_entry_id = locked.id AND tc.snapshot_hash = locked.snapshot
+        AND tc.status = 'needs_review' AND tc.review_policy_version IS DISTINCT FROM ${REVIEW_POLICY_VERSION}
+      RETURNING tc.journal_entry_id AS "journalId"`);
+    return rows.rows.map(row => Number(row.journalId));
+  },
+
   /** Journal locking + snapshot check + provenance + category in one statement. */
   async persistDecisions(
     candidates: CategorizationCandidate[], decisions: CategorizationDecision[], leaseToken?: string,
@@ -207,7 +227,9 @@ export const categorizationRepo = {
             WHERE learning.context_key = p."contextKey" AND learning.category_id = p."categoryId"))
           AND NOT EXISTS (SELECT 1 FROM transaction_categorizations current_decision
             WHERE current_decision.journal_entry_id = je.id AND current_decision.snapshot_hash = p.snapshot
-              AND (p.source NOT IN ('learned', 'payee') OR current_decision.context_key <> p."contextKey"))
+              AND ((p.source NOT IN ('learned', 'payee') AND NOT (p.source = 'rule' AND p.status = 'applied'
+                AND current_decision.status = 'needs_review' AND current_decision.review_policy_version IS DISTINCT FROM ${REVIEW_POLICY_VERSION}))
+                OR current_decision.context_key <> p."contextKey"))
           AND (p."categoryId" IS NULL OR EXISTS (SELECT 1 FROM categories c WHERE c.id = p."categoryId"))
         ORDER BY je.id FOR UPDATE OF je
       ), locked_payee_sources AS MATERIALIZED (
@@ -225,16 +247,17 @@ export const categorizationRepo = {
         ORDER BY pm.id FOR UPDATE OF pm
       ), stored AS (
         INSERT INTO transaction_categorizations (journal_entry_id, snapshot_hash, context_key,
-          category_id, confidence, reason, source, status, evidence, payee_memory_id, payee_memory_revision, created_at, updated_at)
+          category_id, confidence, reason, source, status, evidence, payee_memory_id, payee_memory_revision, review_policy_version, created_at, updated_at)
         SELECT id, snapshot, "contextKey", "categoryId", confidence, reason, source, status, evidence,
-          "payeeMemoryId", "payeeMemoryRevision", now(), now()
+          "payeeMemoryId", "payeeMemoryRevision", ${REVIEW_POLICY_VERSION}, now(), now()
           FROM locked p WHERE p.source <> 'payee' OR EXISTS (SELECT 1 FROM confirmed_payees cp
             WHERE cp.id = p."payeeMemoryId" AND cp.revision = p."payeeMemoryRevision")
         ON CONFLICT (journal_entry_id) DO UPDATE SET snapshot_hash = EXCLUDED.snapshot_hash,
           context_key = EXCLUDED.context_key, category_id = EXCLUDED.category_id,
           confidence = EXCLUDED.confidence, reason = EXCLUDED.reason, source = EXCLUDED.source,
           status = EXCLUDED.status, evidence = EXCLUDED.evidence,
-          payee_memory_id = EXCLUDED.payee_memory_id, payee_memory_revision = EXCLUDED.payee_memory_revision, updated_at = now()
+          payee_memory_id = EXCLUDED.payee_memory_id, payee_memory_revision = EXCLUDED.payee_memory_revision,
+          review_policy_version = EXCLUDED.review_policy_version, updated_at = now()
         WHERE transaction_categorizations.status = 'needs_review'
           AND (transaction_categorizations.snapshot_hash <> EXCLUDED.snapshot_hash OR (
             EXCLUDED.source = 'learned' AND transaction_categorizations.context_key = EXCLUDED.context_key
@@ -243,6 +266,10 @@ export const categorizationRepo = {
           ) OR (
             EXCLUDED.source = 'payee' AND transaction_categorizations.context_key = EXCLUDED.context_key
             AND EXISTS (SELECT 1 FROM confirmed_payees cp WHERE cp.id = EXCLUDED.payee_memory_id AND cp.revision = EXCLUDED.payee_memory_revision)
+          ) OR (
+            EXCLUDED.source = 'rule' AND EXCLUDED.status = 'applied'
+            AND transaction_categorizations.context_key = EXCLUDED.context_key
+            AND transaction_categorizations.review_policy_version IS DISTINCT FROM ${REVIEW_POLICY_VERSION}
           ))
         RETURNING journal_entry_id, status, category_id
       ), updated AS (

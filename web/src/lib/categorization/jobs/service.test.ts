@@ -85,6 +85,15 @@ describe('automatic durable categorisation worker', () => {
     expect(mocks.process).toHaveBeenCalledOnce();
     expect(run.job).toMatchObject({ status: 'paused', pauseReason: 'no_progress' });
   });
+  it('continues a finite policy reassessment without counting unchanged reviews as new categories or questions', async () => {
+    mocks.process.mockResolvedValueOnce(result({ ruleBased: 0, aiCategorized: 0, learned: 0, reviewQueued: 0, reviewsRechecked: 100 }))
+      .mockResolvedValueOnce(result({ ruleBased: 0, aiCategorized: 0, learned: 0, reviewQueued: 0, reviewsRechecked: 16,
+        hasMore: false, available: 0, scopeAvailable: 0, aiSkippedReason: null, deferredReason: null }));
+    const run = await runCategorizationJob(id);
+    expect(mocks.process).toHaveBeenCalledTimes(2);
+    expect(run.job).toMatchObject({ status: 'completed', passes: 2,
+      totals: { ruleBased: 0, aiCategorized: 0, learned: 0, reviewQueued: 0 }, latestResult: { reviewsRechecked: 16 } });
+  });
   it('backs off when another processing lease owns the ledger', async () => {
     mocks.process.mockResolvedValue(result({ busy: true, total: 0, ruleBased: 0, aiCategorized: 0, reviewQueued: 0, deferredReason: 'busy' }));
     const run = await runCategorizationJob(id);

@@ -9,6 +9,7 @@ const resultSchema = z.object({
   reviewUrl: z.literal('/data'),
   deferredReason: z.enum(['time_budget', 'model_unavailable', 'model_failed', 'no_categories', 'busy']).nullable().optional(),
   scopeAvailable: count.optional(),
+  reviewsRechecked: count.optional(),
 }).strip();
 
 export const categorizationJobSchema = z.object({

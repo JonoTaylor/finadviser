@@ -17,6 +17,7 @@ import { fetchJson } from '@/lib/http/client';
 import type { Entry } from '@/components/transactions/TransactionTable';
 import type { CategorizationResult } from '@/lib/categorization/types';
 import { isFinancialDataKey } from '@/components/data/useDataProcessing';
+import { saveCategoryWithPropertyLink } from '@/components/transactions/save-category';
 
 const fetcher = fetchJson;
 async function fetchList<T>(url: string): Promise<T[]> {
@@ -84,26 +85,7 @@ export default function TransactionsPage() {
     journalId: number, categoryId: number, createRule: boolean, description: string | undefined,
     propertyId: number | null | undefined, currentPropertyId: number | null,
   ) => {
-    await fetchJson(`/api/journal/${journalId}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ categoryId, createRule, description }),
-    });
-    if (propertyId !== undefined && propertyId !== currentPropertyId) {
-      try {
-        await (propertyId === null
-          ? fetchJson(`/api/properties/journal/${journalId}/untag`, { method: 'POST' })
-          : fetchJson(`/api/properties/journal/${journalId}/tag`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ propertyId }),
-          }));
-      } catch (cause) {
-        // The category did save; show it while the link can be retried.
-        void refreshFinancialData(isFinancialDataKey);
-        throw new Error(`The category was saved, but the property link was not. ${cause instanceof Error ? cause.message : ''}`.trim());
-      }
-    }
+    await saveCategoryWithPropertyLink({ journalId, categoryId, createRule, description, propertyId, currentPropertyId });
     setEditEntry(null);
     void refreshFinancialData(isFinancialDataKey);
   }, [refreshFinancialData]);

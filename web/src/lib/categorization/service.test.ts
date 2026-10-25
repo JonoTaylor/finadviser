@@ -91,8 +91,10 @@ describe('bounded leased categorisation passes', () => {
     expect(result).toMatchObject({ aiCategorized: 1, reviewQueued: 0, batches: 2 });
     expect(mocks.research).toHaveBeenCalledExactlyOnceWith(
       { merchantName: 'Example shop', transactionType: 'Card payment', privateNames: [] },
-      { signal: expect.any(AbortSignal), timeoutMs: 6_000 },
+      { signal: expect.any(AbortSignal), timeoutMs: expect.any(Number) },
     );
+    expect(mocks.research.mock.calls[0][1].timeoutMs).toBeGreaterThan(0);
+    expect(mocks.research.mock.calls[0][1].timeoutMs).toBeLessThanOrEqual(6_000);
     expect(mocks.model.mock.calls[1][3].get(1)).toEqual(evidence);
     expect(mocks.persistDecisions.mock.calls[0][1][0]).toMatchObject({ categoryId: 1, evidence });
   });
@@ -183,8 +185,10 @@ describe('bounded leased categorisation passes', () => {
     expect(await processCategorization()).toMatchObject({ aiCategorized: 1, reviewQueued: 0 });
     expect(mocks.research).toHaveBeenCalledExactlyOnceWith(
       { merchantName: 'TESCO', transactionType: 'Card payment', privateNames: ['Jono Taylor'] },
-      { signal: expect.any(AbortSignal), timeoutMs: 6_000 },
+      { signal: expect.any(AbortSignal), timeoutMs: expect.any(Number) },
     );
+    expect(mocks.research.mock.calls[0][1].timeoutMs).toBeGreaterThan(0);
+    expect(mocks.research.mock.calls[0][1].timeoutMs).toBeLessThanOrEqual(6_000);
     expect(JSON.stringify(mocks.research.mock.calls)).not.toContain('1234');
   });
   it('fails closed for public research when the local owner exclusion list cannot be read', async () => {

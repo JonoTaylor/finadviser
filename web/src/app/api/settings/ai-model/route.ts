@@ -6,6 +6,7 @@ import {
   isValidModelId,
   resolveModelId,
 } from '@/lib/ai/model';
+import { routeErrorResponse } from '@/lib/http/route-errors';
 
 /**
  * Settings page reads + writes the active AI model here. GET returns the
@@ -22,8 +23,7 @@ export async function GET() {
     ]);
     return NextResponse.json({ modelId, source, options });
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Failed to load AI model setting';
-    return NextResponse.json({ error: message }, { status: 500 });
+    return routeErrorResponse(error, 'Failed to load AI model setting', { exposeMessage: true });
   }
 }
 
@@ -51,8 +51,7 @@ export async function PUT(request: NextRequest) {
     await appSettingsRepo.set(MODEL_SETTING_KEY, body.modelId);
     return NextResponse.json({ ok: true, modelId: body.modelId });
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Failed to update AI model';
-    return NextResponse.json({ error: message }, { status: 500 });
+    return routeErrorResponse(error, 'Failed to update AI model', { exposeMessage: true });
   }
 }
 
@@ -62,7 +61,6 @@ export async function DELETE() {
     const { modelId, source } = await resolveModelId();
     return NextResponse.json({ ok: true, modelId, source });
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Failed to clear AI model';
-    return NextResponse.json({ error: message }, { status: 500 });
+    return routeErrorResponse(error, 'Failed to clear AI model', { exposeMessage: true });
   }
 }

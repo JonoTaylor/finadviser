@@ -8,6 +8,7 @@ import {
 import { alpha } from '@mui/material/styles';
 import SearchOffRoundedIcon from '@mui/icons-material/SearchOffRounded';
 import SwapHorizRoundedIcon from '@mui/icons-material/SwapHorizRounded';
+import HomeWorkOutlinedIcon from '@mui/icons-material/HomeWorkOutlined';
 import { formatCurrency } from '@/lib/utils/formatting';
 import { getCategoryColor } from '@/lib/utils/category-colors';
 
@@ -25,6 +26,14 @@ export interface Entry {
   transfer_kind?: string | null;
   transfer_group_id?: string | null;
   transfer_partner_journal_id?: number | null;
+  property_id?: number | null;
+  property_name?: string | null;
+}
+
+function PropertyChip({ name }: { name: string }) {
+  return <Tooltip title={`Linked to ${name}: included in its expenses and tax-year report`}>
+    <Chip size="small" variant="outlined" icon={<HomeWorkOutlinedIcon />} label={name} sx={{ maxWidth: 180 }} />
+  </Tooltip>;
 }
 
 function parseAmount(summary: string | null): string {
@@ -95,6 +104,7 @@ export default function TransactionTable({
                 </Stack>
                 <Stack direction="row" alignItems="center" gap={1} flexWrap="wrap" sx={{ mt: 1 }}>
                   <Tooltip title={entry.category_name || 'Uncategorised'}><Chip size="small" label={entry.category_name || 'Uncategorised'} sx={{ maxWidth: '100%' }} /></Tooltip>
+                  {entry.property_name && <PropertyChip name={entry.property_name} />}
                   {entry.is_transfer && <Chip size="small" variant="outlined" label="Transfer" />}
                   {!entry.is_transfer && entry.transfer_group_id && <Chip size="small" color="warning" label="Review transfer" />}
                   {onMarkAsTransfer && !entry.is_transfer && <IconButton size="small" onClick={() => onMarkAsTransfer(entry)} aria-label={`Mark ${entry.description} as transfer`} sx={{ ml: 'auto' }}><SwapHorizRoundedIcon fontSize="small" /></IconButton>}
@@ -180,6 +190,7 @@ export default function TransactionTable({
                         }}
                       />
                       </Tooltip>
+                      {entry.property_name && <Box sx={{ mt: 0.5 }}><PropertyChip name={entry.property_name} /></Box>}
                     </TableCell>
                     <TableCell sx={{ color: 'text.secondary' }}><Typography variant="body2" sx={{ maxWidth: 160, overflowWrap: 'anywhere' }}>{entry.reference || ''}</Typography></TableCell>
                     <TableCell

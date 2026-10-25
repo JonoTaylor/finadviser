@@ -5,7 +5,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 
 const mocks = vi.hoisted(() => ({ execute: vi.fn() }));
 vi.mock('@/lib/db', async () => ({ getDb: () => ({ execute: mocks.execute }), schema: await import('@/lib/db/schema') }));
-import { loadLedgerCoverage, loadPropertyCoverage } from './load';
+import { loadLedgerCoverage, loadPropertyCoverage, loadUnlinkedPropertyExpenseCount } from './load';
 
 const url = process.env.DATA_PLAN_TEST_PG_URL;
 
@@ -47,6 +47,7 @@ describe.skipIf(!url)('data intelligence coverage SQL in disposable PostgreSQL',
       CREATE TEMP TABLE property_valuations (property_id integer, valuation_date text);
       CREATE TEMP TABLE tenancies (property_id integer, start_date text, end_date text);
       CREATE TEMP TABLE property_ownership (property_id integer, owner_id integer);
+      CREATE TEMP TABLE categories (id integer PRIMARY KEY, name text NOT NULL, parent_id integer);
     `);
     const dialect = new PgDialect();
     mocks.execute.mockImplementation((statement: SQL) => {
@@ -63,7 +64,7 @@ describe.skipIf(!url)('data intelligence coverage SQL in disposable PostgreSQL',
     await client.query(`
       TRUNCATE accounts, journal_entries, book_entries, transaction_metadata,
         transaction_categorizations, categorization_learning, categorization_payee_aliases, categorization_payee_memories,
-        properties, property_valuations, tenancies, property_ownership RESTART IDENTITY;
+        properties, property_valuations, tenancies, property_ownership, categories RESTART IDENTITY;
       INSERT INTO accounts VALUES (1,'Example bank','ASSET',NULL), (2,'Expenses','EXPENSE',NULL),
         (3,'Income','INCOME',NULL), (4,'Investment adjustments','EQUITY',NULL);
       INSERT INTO journal_entries(id,date,description) VALUES
@@ -74,6 +75,22 @@ describe.skipIf(!url)('data intelligence coverage SQL in disposable PostgreSQL',
         (1,1,-10),(1,2,10),(2,1,-20),(2,2,20),(3,1,100),(3,4,-100),
         (4,1,0),(4,2,0),(5,1,-30),(5,2,30),(6,1,-40),(6,2,40);
     `);
+  });
+
+  it('counts property-expense journals at any depth that no property claims', async () => {
+    await client.query(`
+      INSERT INTO categories VALUES (1,'Property expenses',NULL), (2,'Repairs & maintenance',1), (3,'Boiler',2),
+        (4,'Groceries',NULL), (5,'Property expenses',4);
+      INSERT INTO journal_entries(id,date,description,category_id,property_id,is_transfer) VALUES
+        (20,'2026-10-01','Unlinked repair',2,NULL,false),
+        (21,'2026-10-02','Unlinked grandchild category',3,NULL,false),
+        (22,'2026-10-03','Linked repair',2,7,false),
+        (23,'2026-10-04','Groceries',4,NULL,false),
+        (24,'2026-10-05','Same name under another parent',5,NULL,false),
+        (25,'2026-10-06','Transfer with a property category',2,NULL,true),
+        (26,'2026-10-11','Future repair',2,NULL,false);
+    `);
+    expect(await loadUnlinkedPropertyExpenseCount('2026-10-10')).toBe(2);
   });
 
   it('distinguishes actual household journal coverage from eligible category backlog and excludes future postings', async () => {

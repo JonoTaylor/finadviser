@@ -15,12 +15,28 @@ import {
   Checkbox,
   Alert,
   Typography,
+  MenuItem,
 } from '@mui/material';
 
 interface Category {
   id: number;
   name: string;
   parentId?: number | null;
+}
+
+interface PropertyOption { id: number; name: string }
+
+/** "Property expenses" and every category below it, at any depth. */
+export function propertyExpenseCategoryIds(categories: Category[]): Set<number> {
+  const ids = new Set(categories.filter(c => c.name === 'Property expenses' && c.parentId == null).map(c => c.id));
+  let grew = ids.size > 0;
+  while (grew) {
+    grew = false;
+    for (const category of categories) {
+      if (category.parentId != null && ids.has(category.parentId) && !ids.has(category.id)) { ids.add(category.id); grew = true; }
+    }
+  }
+  return ids;
 }
 
 export default function CategoryEditDialog({
@@ -32,15 +48,22 @@ export default function CategoryEditDialog({
   onSave,
   journalId,
   onRemembered,
+  properties = [],
+  propertiesUnavailable = false,
+  currentPropertyId = null,
 }: {
   open: boolean;
   currentCategoryId: number | null;
   description?: string;
   categories: Category[];
   onClose: () => void;
-  onSave: (categoryId: number, createRule: boolean) => Promise<void>;
+  /** `propertyId` is undefined when the property link is not being changed. */
+  onSave: (categoryId: number, createRule: boolean, propertyId?: number | null) => Promise<void>;
   journalId?: number;
   onRemembered?: () => void | Promise<void>;
+  properties?: PropertyOption[];
+  propertiesUnavailable?: boolean;
+  currentPropertyId?: number | null;
 }) {
   const [selected, setSelected] = useState<Category | null>(null);
   const [createRule, setCreateRule] = useState(false);
@@ -49,11 +72,21 @@ export default function CategoryEditDialog({
   const [rememberPayeeOpen, setRememberPayeeOpen] = useState(false);
   const writing = useRef(false);
   const categoryLabels = useMemo(() => buildCategoryLabels(categories), [categories]);
+  const propertyExpenseIds = useMemo(() => propertyExpenseCategoryIds(categories), [categories]);
+  // null until the user picks; '' means "not linked to a property".
+  const [propertyPick, setPropertyPick] = useState<number | '' | null>(null);
+  const isPropertyExpense = selected !== null && propertyExpenseIds.has(selected.id);
+  // Offered for property expenses, and for anything already linked (such as
+  // rent) so a link is never changed or dropped without the user choosing.
+  const showProperty = properties.length > 0 && (isPropertyExpense || currentPropertyId !== null);
+  const suggestedProperty: number | '' = currentPropertyId ?? (isPropertyExpense && properties.length === 1 ? properties[0].id : '');
+  const propertyChoice = propertyPick ?? suggestedProperty;
 
   const handleEnter = () => {
     const cat = currentCategoryId ? categories.find(c => c.id === currentCategoryId) ?? null : null;
     setSelected(cat);
     setCreateRule(false);
+    setPropertyPick(null);
     setError('');
   };
 
@@ -62,7 +95,7 @@ export default function CategoryEditDialog({
     writing.current = true;
     setSaving(true);
     setError('');
-    try { await onSave(selected.id, createRule); }
+    try { await onSave(selected.id, createRule, showProperty ? (propertyChoice === '' ? null : propertyChoice) : undefined); }
     catch (caught) { setError(caught instanceof Error ? caught.message : 'The category could not be saved.'); }
     finally { writing.current = false; setSaving(false); }
   };
@@ -90,6 +123,26 @@ export default function CategoryEditDialog({
           onChange={(_, val) => setSelected(val)}
           renderInput={(params) => <TextField {...params} label="Category" />}
         />
+        {showProperty && (
+          <TextField
+            select
+            fullWidth
+            sx={{ mt: 2 }}
+            label="Property"
+            value={propertyChoice}
+            disabled={saving}
+            onChange={event => setPropertyPick(event.target.value === '' ? '' : Number(event.target.value))}
+            // Show "Not linked" rather than a blank field when nothing is chosen.
+            slotProps={{ select: { displayEmpty: true }, inputLabel: { shrink: true } }}
+            helperText="A linked transaction appears in that property's expenses and tax-year report. A category alone does not make a cost tax-deductible."
+          >
+            <MenuItem value="">Not linked to a property</MenuItem>
+            {properties.map(property => <MenuItem key={property.id} value={property.id}>{property.name}</MenuItem>)}
+          </TextField>
+        )}
+        {isPropertyExpense && propertiesUnavailable && (
+          <Alert severity="warning" sx={{ mt: 2 }}>Your properties could not be loaded, so this transaction cannot be linked to one right now. The category can still be saved.</Alert>
+        )}
         {description && (
           <FormControlLabel
             sx={{ mt: 1 }}

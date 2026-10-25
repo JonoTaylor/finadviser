@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { documentRepo, propertyRepo, tenancyRepo } from '@/lib/repos';
 import type { RentFrequency } from '@/lib/repos/tenancy.repo';
 import { schema } from '@/lib/db';
+import { routeErrorResponse } from '@/lib/http/route-errors';
 
 // Single source of truth: the rent_frequency enum on the schema. Keeps
 // the API in sync with whatever the DB will actually accept.
@@ -96,7 +97,6 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ tenancy: created, documentId }, { status: 201 });
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Failed to create tenancy from document';
-    return NextResponse.json({ error: message }, { status: 500 });
+    return routeErrorResponse(error, 'Failed to create tenancy from document', { exposeMessage: true });
   }
 }

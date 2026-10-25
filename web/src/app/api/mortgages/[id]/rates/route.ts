@@ -6,6 +6,7 @@ import {
   RATE_VALIDATION_MESSAGE,
   DATE_VALIDATION_MESSAGE,
 } from '@/lib/properties/mortgage-rate-validation';
+import { routeErrorResponse } from '@/lib/http/route-errors';
 
 export async function GET(
   _request: NextRequest,
@@ -25,8 +26,7 @@ export async function GET(
     const rates = await propertyRepo.getMortgageRates(mortgageId);
     return NextResponse.json(rates);
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Failed to list rates';
-    return NextResponse.json({ error: message }, { status: 500 });
+    return routeErrorResponse(error, 'Failed to list rates', { exposeMessage: true });
   }
 }
 
@@ -54,7 +54,6 @@ export async function POST(
     const created = await propertyRepo.addMortgageRate(mortgageId, body.rate, body.effectiveDate);
     return NextResponse.json(created, { status: 201 });
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Failed to add rate';
-    return NextResponse.json({ error: message }, { status: 500 });
+    return routeErrorResponse(error, 'Failed to add rate', { exposeMessage: true });
   }
 }

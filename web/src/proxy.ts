@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import {
   SESSION_COOKIE_NAME,
+  SESSION_REQUIRED_HEADER,
+  SESSION_REQUIRED_VALUE,
   isAuthEnabled,
   readAuthConfig,
   verifySessionCookie,
@@ -34,7 +36,7 @@ const PUBLIC_PATHS = new Set([
   '/api/categorization/jobs/worker',
 ]);
 
-export async function middleware(req: NextRequest) {
+export async function proxy(req: NextRequest) {
   const { pathname, search } = req.nextUrl;
 
   const cfg = readAuthConfig();
@@ -63,10 +65,11 @@ export async function middleware(req: NextRequest) {
   if (valid) return NextResponse.next();
 
   // API requests: respond 401 JSON so callers can handle it programmatically.
+  // The header lets the browser send an expired session back to sign-in.
   if (pathname.startsWith('/api/')) {
     return new NextResponse(
-      JSON.stringify({ error: 'Unauthenticated' }),
-      { status: 401, headers: { 'Content-Type': 'application/json' } },
+      JSON.stringify({ error: 'Your session has expired. Sign in again to continue.' }),
+      { status: 401, headers: { 'Content-Type': 'application/json', [SESSION_REQUIRED_HEADER]: SESSION_REQUIRED_VALUE } },
     );
   }
 
@@ -80,6 +83,6 @@ export async function middleware(req: NextRequest) {
 
 export const config = {
   // Match every path except Next's internals and common static assets so
-  // the middleware doesn't run for /_next/* CSS, images, favicons, etc.
+  // the proxy doesn't run for /_next/* CSS, images, favicons, etc.
   matcher: ['/((?!_next/static|_next/image|favicon.ico|globals.css).*)'],
 };

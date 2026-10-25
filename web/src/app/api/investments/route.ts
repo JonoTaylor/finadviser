@@ -4,6 +4,7 @@ import { getDb } from '@/lib/db';
 import { accountBalanceAsOf } from '@/lib/db/account-balance-as-of';
 import { londonTodayIso } from '@/lib/dates/today';
 import { accountRepo, propertyRepo } from '@/lib/repos';
+import { routeErrorResponse } from '@/lib/http/route-errors';
 
 const VALID_KINDS = ['pension', 'isa', 'lisa', 'savings', 'crypto', 'other'] as const;
 type InvestmentKind = typeof VALID_KINDS[number];
@@ -40,8 +41,7 @@ export async function GET() {
       balanceAsOf: asOf,
     })));
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Failed to list investments';
-    return NextResponse.json({ error: message }, { status: 500 });
+    return routeErrorResponse(error, 'Failed to list investments', { exposeMessage: true });
   }
 }
 

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { propertyRepo } from '@/lib/repos';
 import { backfillPropertyExpensesForProperty } from '@/lib/properties/property-expense-link';
+import { routeErrorResponse } from '@/lib/http/route-errors';
 
 /**
  * One-shot backfill: link every existing journal that sits under the
@@ -26,7 +27,6 @@ export async function POST(
     const linked = await backfillPropertyExpensesForProperty(propertyId);
     return NextResponse.json({ propertyId, linked });
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Failed to auto-link expenses';
-    return NextResponse.json({ error: message }, { status: 500 });
+    return routeErrorResponse(error, 'Failed to auto-link expenses', { exposeMessage: true });
   }
 }

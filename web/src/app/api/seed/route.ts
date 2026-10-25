@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { accountRepo, journalRepo, propertyRepo, categoryRepo } from '@/lib/repos';
+import { routeErrorResponse } from '@/lib/http/route-errors';
 
 export async function POST() {
   try {
@@ -247,7 +248,6 @@ export async function POST() {
 
     return NextResponse.json({ success: true, message: 'Database seeded successfully' });
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Seed failed';
-    return NextResponse.json({ error: message }, { status: 500 });
+    return routeErrorResponse(error, 'Seed failed', { exposeMessage: true });
   }
 }

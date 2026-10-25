@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import crypto from 'crypto';
 import { documentRepo, propertyRepo } from '@/lib/repos';
 import { parseTenancyPDF } from '@/lib/import/tenancy-pdf-parser';
+import { routeErrorResponse } from '@/lib/http/route-errors';
 
 export const runtime = 'nodejs';
 export const maxDuration = 60;
@@ -98,7 +99,6 @@ export async function POST(request: NextRequest) {
       reused: !created,
     });
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Failed to import tenancy PDF';
-    return NextResponse.json({ error: message }, { status: 500 });
+    return routeErrorResponse(error, 'Failed to import tenancy PDF', { exposeMessage: true });
   }
 }

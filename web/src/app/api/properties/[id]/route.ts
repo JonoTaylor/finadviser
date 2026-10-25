@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { propertyRepo } from '@/lib/repos';
 import { formatZodIssues, propertyPatchBodySchema } from '@/lib/tax/apiSchemas';
+import { routeErrorResponse } from '@/lib/http/route-errors';
 
 export async function GET(
   request: NextRequest,
@@ -8,14 +9,17 @@ export async function GET(
 ) {
   try {
     const { id } = await params;
-    const property = await propertyRepo.getProperty(parseInt(id));
+    const propertyId = /^\d+$/.test(id) ? Number(id) : NaN;
+    // A malformed id can never match a property, so it is simply not found.
+    if (!Number.isSafeInteger(propertyId) || propertyId < 1) return NextResponse.json({ error: 'Not found' }, { status: 404 });
+    const property = await propertyRepo.getProperty(propertyId);
     if (!property) return NextResponse.json({ error: 'Not found' }, { status: 404 });
 
     const [ownership, valuations, mortgages, allocations] = await Promise.all([
-      propertyRepo.getOwnership(parseInt(id)),
-      propertyRepo.getValuations(parseInt(id)),
-      propertyRepo.getMortgages(parseInt(id)),
-      propertyRepo.getAllocationRules(parseInt(id)),
+      propertyRepo.getOwnership(propertyId),
+      propertyRepo.getValuations(propertyId),
+      propertyRepo.getMortgages(propertyId),
+      propertyRepo.getAllocationRules(propertyId),
     ]);
 
     return NextResponse.json({
@@ -26,7 +30,7 @@ export async function GET(
       allocations,
     });
   } catch (error) {
-    return NextResponse.json({ error: 'Failed to fetch property' }, { status: 500 });
+    return routeErrorResponse(error, 'Failed to fetch property');
   }
 }
 
@@ -62,7 +66,6 @@ export async function PATCH(
     if (!updated) return NextResponse.json({ error: 'Property not found' }, { status: 404 });
     return NextResponse.json(updated);
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Failed to update property';
-    return NextResponse.json({ error: message }, { status: 500 });
+    return routeErrorResponse(error, 'Failed to update property', { exposeMessage: true });
   }
 }

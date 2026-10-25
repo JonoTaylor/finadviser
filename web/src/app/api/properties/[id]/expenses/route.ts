@@ -3,6 +3,7 @@ import { sql } from 'drizzle-orm';
 import { getDb } from '@/lib/db';
 import { recordPropertyExpense } from '@/lib/properties/property-expense';
 import { ClientError } from '@/lib/errors';
+import { routeErrorResponse } from '@/lib/http/route-errors';
 
 /**
  * GET /api/properties/[id]/expenses?limit=50
@@ -62,8 +63,7 @@ export async function GET(
 
     return NextResponse.json({ expenses, count: expenses.length, limit });
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Failed to load expenses';
-    return NextResponse.json({ error: message }, { status: 500 });
+    return routeErrorResponse(error, 'Failed to load expenses', { exposeMessage: true });
   }
 }
 

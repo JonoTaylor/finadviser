@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { tenancyRepo, propertyRepo } from '@/lib/repos';
+import { routeErrorResponse, readJsonBody } from '@/lib/http/route-errors';
 
 export async function GET(
   _request: NextRequest,
@@ -13,8 +14,7 @@ export async function GET(
     const tenancies = await tenancyRepo.listByProperty(propertyId);
     return NextResponse.json(tenancies);
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Failed to list tenancies';
-    return NextResponse.json({ error: message }, { status: 500 });
+    return routeErrorResponse(error, 'Failed to list tenancies', { exposeMessage: true });
   }
 }
 
@@ -30,7 +30,7 @@ export async function POST(
     const property = await propertyRepo.getProperty(propertyId);
     if (!property) return NextResponse.json({ error: 'Property not found' }, { status: 404 });
 
-    const body = await request.json();
+    const body = await readJsonBody(request);
     if (!body.tenantName || !body.startDate || !body.rentAmount) {
       return NextResponse.json(
         { error: 'tenantName, startDate, and rentAmount are required' },
@@ -50,7 +50,6 @@ export async function POST(
     });
     return NextResponse.json(created, { status: 201 });
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Failed to create tenancy';
-    return NextResponse.json({ error: message }, { status: 500 });
+    return routeErrorResponse(error, 'Failed to create tenancy', { exposeMessage: true });
   }
 }

@@ -3,6 +3,7 @@ import { accountRepo, journalRepo, propertyRepo } from '@/lib/repos';
 import { getDb, schema } from '@/lib/db';
 import { sql, inArray } from 'drizzle-orm';
 import { isValidCalendarDate } from './mortgage-rate-validation';
+import { ClientError, NotFoundError } from '@/lib/errors';
 
 const { journalEntries } = schema;
 
@@ -43,7 +44,7 @@ export async function recordMortgagePayment(params: {
   // Get mortgage details
   const mortgageRows = await db.execute(sql`SELECT * FROM mortgages WHERE id = ${mortgageId}`);
   const mortgage = mortgageRows.rows[0];
-  if (!mortgage) throw new Error(`Mortgage ${mortgageId} not found`);
+  if (!mortgage) throw new NotFoundError(`Mortgage ${mortgageId} not found`);
 
   const liabilityAccountId = mortgage.liability_account_id as number;
   const propertyId = mortgage.property_id as number;
@@ -58,7 +59,7 @@ export async function recordMortgagePayment(params: {
     }
   }
   if (!payerCapitalAccountId) {
-    throw new Error(`Owner ${payerOwnerId} does not own property ${propertyId}`);
+    throw new ClientError(`Owner ${payerOwnerId} does not own property ${propertyId}`);
   }
 
   // Get or create interest expense account
@@ -183,7 +184,7 @@ export async function recordMortgagePayments(params: {
   // single bulk call.
   const mortgageRows = await db.execute(sql`SELECT * FROM mortgages WHERE id = ${mortgageId}`);
   const mortgage = mortgageRows.rows[0];
-  if (!mortgage) throw new Error(`Mortgage ${mortgageId} not found`);
+  if (!mortgage) throw new NotFoundError(`Mortgage ${mortgageId} not found`);
   const liabilityAccountId = mortgage.liability_account_id as number;
   const propertyId = mortgage.property_id as number;
   const lender = mortgage.lender as string;
@@ -191,7 +192,7 @@ export async function recordMortgagePayments(params: {
   const ownership = await propertyRepo.getOwnership(propertyId);
   const payerOwn = ownership.find(o => o.owner_id === payerOwnerId);
   if (!payerOwn) {
-    throw new Error(`Owner ${payerOwnerId} does not own property ${propertyId}`);
+    throw new ClientError(`Owner ${payerOwnerId} does not own property ${propertyId}`);
   }
   const payerCapitalAccountId = payerOwn.capital_account_id as number;
 

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { propertyRepo } from '@/lib/repos';
+import { routeErrorResponse } from '@/lib/http/route-errors';
 
 export async function GET(
   _request: NextRequest,
@@ -13,8 +14,7 @@ export async function GET(
     if (!mortgage) return NextResponse.json({ error: 'Mortgage not found' }, { status: 404 });
     return NextResponse.json(mortgage);
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Failed to load mortgage';
-    return NextResponse.json({ error: message }, { status: 500 });
+    return routeErrorResponse(error, 'Failed to load mortgage', { exposeMessage: true });
   }
 }
 
@@ -41,7 +41,6 @@ export async function PATCH(
     if (!updated) return NextResponse.json({ error: 'Mortgage not found' }, { status: 404 });
     return NextResponse.json(updated);
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Failed to update mortgage';
-    return NextResponse.json({ error: message }, { status: 500 });
+    return routeErrorResponse(error, 'Failed to update mortgage', { exposeMessage: true });
   }
 }

@@ -12,11 +12,12 @@ import type { CategorizationCandidate, CategorizationDecision, CategorizationOpt
  * Account ownership, metadata and every book leg are included so changed
  * context invalidates an in-flight decision without changing the ledger.
  */
-export function candidateSnapshotSql(alias = 'je'): SQL {
+export function candidateSnapshotSql(alias = 'je', categoryOverride?: SQL): SQL {
   if (!/^[a-z][a-z0-9_]*$/.test(alias)) throw new Error('Invalid journal SQL alias');
   const journal = sql.raw(alias);
+  const category = categoryOverride ?? sql`${journal}.category_id`;
   return sql`md5(jsonb_build_array(
-    ${journal}.date, ${journal}.description, ${journal}.reference, ${journal}.property_id, ${journal}.category_id,
+    ${journal}.date, ${journal}.description, ${journal}.reference, ${journal}.property_id, ${category},
     (SELECT jsonb_build_array(tm.merchant_name, tm.bank_category, tm.transaction_type, tm.currency)
        FROM transaction_metadata tm WHERE tm.journal_entry_id = ${journal}.id),
     COALESCE((SELECT jsonb_agg(jsonb_build_array(be.id, be.account_id, be.amount::text,
@@ -101,6 +102,8 @@ export const categorizationRepo = {
     const rows = await getDb().execute(sql`
       SELECT je.id, je.date, je.description, je.property_id AS "propertyId",
         (tc.status = 'needs_review' AND tc.snapshot_hash = ${candidateSnapshotSql()}) AS "pendingReview",
+        COALESCE((tc.status = 'needs_review' AND tc.snapshot_hash = ${candidateSnapshotSql()}
+          AND tc.review_policy_version IS DISTINCT FROM ${REVIEW_POLICY_VERSION}), FALSE) AS "policyReassessment",
         tm.merchant_name AS "merchantName", tm.bank_category AS "bankCategory",
         tm.transaction_type AS "transactionType", tm.currency,
         ${candidateSnapshotSql()} AS snapshot,
@@ -194,6 +197,15 @@ export const categorizationRepo = {
       const candidate = candidateById.get(decision.journalId);
       if (!candidate) throw new Error('A categorisation decision is outside the selected batch.');
       if (decision.status === 'applied' && decision.categoryId === null) throw new Error('An applied category must be known.');
+      const assignmentKind = decision.assignmentKind ?? 'standard';
+      if (!z.enum(['standard', 'estimated', 'broad']).safeParse(assignmentKind).success) throw new Error('The automatic assignment kind is invalid.');
+      if (assignmentKind !== 'standard') {
+        const financial = candidate.legs.filter(leg => leg.accountType === 'ASSET' || leg.accountType === 'LIABILITY');
+        if (decision.source !== 'ai' || decision.status !== 'applied' || candidate.propertyId !== null
+          || financial.length !== 1 || !Number.isFinite(Number(financial[0].amount)) || Number(financial[0].amount) >= 0) {
+          throw new Error('An estimated spending label requires one outgoing purchase in an unlinked account context.');
+        }
+      }
       const evidence = decision.evidence === undefined ? null : parseMerchantResearchEvidence(decision.evidence);
       if (decision.evidence !== undefined && (!evidence || decision.source !== 'ai')) {
         throw new Error('Categorisation evidence must contain actual public merchant sources.');
@@ -206,7 +218,8 @@ export const categorizationRepo = {
       } else if (decision.payeeMemoryId !== undefined || decision.payeeMemoryRevision !== undefined) {
         throw new Error('Private payee provenance belongs only to confirmed payee decisions.');
       }
-      return { ...decision, evidence, payeeMemoryId: decision.payeeMemoryId ?? null,
+      return { ...decision, confidence: assignmentKind === 'standard' ? decision.confidence : null,
+        assignmentKind, evidence, payeeMemoryId: decision.payeeMemoryId ?? null,
         payeeMemoryRevision: decision.payeeMemoryRevision ?? null,
         snapshot: candidate.snapshot, contextKey: categorizationContextKey(candidate) };
     });
@@ -215,7 +228,7 @@ export const categorizationRepo = {
         SELECT * FROM jsonb_to_recordset(${JSON.stringify(payload)}::jsonb)
         AS p("journalId" integer, "categoryId" integer, confidence numeric,
           reason text, source text, status text, snapshot text, "contextKey" text, evidence jsonb,
-          "payeeMemoryId" uuid, "payeeMemoryRevision" integer)
+          "payeeMemoryId" uuid, "payeeMemoryRevision" integer, "assignmentKind" text)
       ), locked AS MATERIALIZED (
         SELECT je.id, p.* FROM journal_entries je JOIN proposed p ON p."journalId" = je.id
         WHERE ${candidateEligibilitySql()}
@@ -227,10 +240,12 @@ export const categorizationRepo = {
             WHERE learning.context_key = p."contextKey" AND learning.category_id = p."categoryId"))
           AND NOT EXISTS (SELECT 1 FROM transaction_categorizations current_decision
             WHERE current_decision.journal_entry_id = je.id AND current_decision.snapshot_hash = p.snapshot
-              AND ((p.source NOT IN ('learned', 'payee') AND NOT (p.source = 'rule' AND p.status = 'applied'
+              AND ((p.source NOT IN ('learned', 'payee') AND NOT ((p.source = 'rule' AND p.status = 'applied' OR p.source = 'ai')
                 AND current_decision.status = 'needs_review' AND current_decision.review_policy_version IS DISTINCT FROM ${REVIEW_POLICY_VERSION}))
                 OR current_decision.context_key <> p."contextKey"))
           AND (p."categoryId" IS NULL OR EXISTS (SELECT 1 FROM categories c WHERE c.id = p."categoryId"))
+          AND (p."assignmentKind" <> 'broad' OR EXISTS (SELECT 1 FROM categories c
+            WHERE c.id = p."categoryId" AND c.name = 'Spending details unknown' AND c.parent_id IS NULL))
         ORDER BY je.id FOR UPDATE OF je
       ), locked_payee_sources AS MATERIALIZED (
         SELECT sj.id FROM journal_entries sj
@@ -247,9 +262,9 @@ export const categorizationRepo = {
         ORDER BY pm.id FOR UPDATE OF pm
       ), stored AS (
         INSERT INTO transaction_categorizations (journal_entry_id, snapshot_hash, context_key,
-          category_id, confidence, reason, source, status, evidence, payee_memory_id, payee_memory_revision, review_policy_version, created_at, updated_at)
+          category_id, confidence, reason, source, status, evidence, payee_memory_id, payee_memory_revision, review_policy_version, assignment_kind, created_at, updated_at)
         SELECT id, snapshot, "contextKey", "categoryId", confidence, reason, source, status, evidence,
-          "payeeMemoryId", "payeeMemoryRevision", ${REVIEW_POLICY_VERSION}, now(), now()
+          "payeeMemoryId", "payeeMemoryRevision", ${REVIEW_POLICY_VERSION}, "assignmentKind", now(), now()
           FROM locked p WHERE p.source <> 'payee' OR EXISTS (SELECT 1 FROM confirmed_payees cp
             WHERE cp.id = p."payeeMemoryId" AND cp.revision = p."payeeMemoryRevision")
         ON CONFLICT (journal_entry_id) DO UPDATE SET snapshot_hash = EXCLUDED.snapshot_hash,
@@ -257,7 +272,7 @@ export const categorizationRepo = {
           confidence = EXCLUDED.confidence, reason = EXCLUDED.reason, source = EXCLUDED.source,
           status = EXCLUDED.status, evidence = EXCLUDED.evidence,
           payee_memory_id = EXCLUDED.payee_memory_id, payee_memory_revision = EXCLUDED.payee_memory_revision,
-          review_policy_version = EXCLUDED.review_policy_version, updated_at = now()
+          review_policy_version = EXCLUDED.review_policy_version, assignment_kind = EXCLUDED.assignment_kind, updated_at = now()
         WHERE transaction_categorizations.status = 'needs_review'
           AND (transaction_categorizations.snapshot_hash <> EXCLUDED.snapshot_hash OR (
             EXCLUDED.source = 'learned' AND transaction_categorizations.context_key = EXCLUDED.context_key
@@ -267,7 +282,7 @@ export const categorizationRepo = {
             EXCLUDED.source = 'payee' AND transaction_categorizations.context_key = EXCLUDED.context_key
             AND EXISTS (SELECT 1 FROM confirmed_payees cp WHERE cp.id = EXCLUDED.payee_memory_id AND cp.revision = EXCLUDED.payee_memory_revision)
           ) OR (
-            EXCLUDED.source = 'rule' AND EXCLUDED.status = 'applied'
+            (EXCLUDED.source = 'rule' AND EXCLUDED.status = 'applied' OR EXCLUDED.source = 'ai')
             AND transaction_categorizations.context_key = EXCLUDED.context_key
             AND transaction_categorizations.review_policy_version IS DISTINCT FROM ${REVIEW_POLICY_VERSION}
           ))

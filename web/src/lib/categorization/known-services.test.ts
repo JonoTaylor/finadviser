@@ -24,6 +24,13 @@ describe('specific statement service identity', () => {
     [null, 'Monzo Plus', 'monzo-membership', 30],
     ['Monzo Premium', 'Monzo Premium membership', 'monzo-membership', 30],
     [null, 'Monzo Perks monthly fee', 'monzo-membership', 30],
+    ['Plex Sub Invoice 5731', 'PLEX SUB* INVOICE 5731 +15399951911 USA', 'plex-subscription', 20],
+    ['Plex Sub Invoice 7043', 'PLEX SUB* INVOICE 7043 MCALESTER USA', 'plex-subscription', 20],
+    [null, 'PLEX SUB* INVOICE 5569 +15399951911 USA', 'plex-subscription', 20],
+    ['Plex Sub Invoice 5731', 'Card payment', 'plex-subscription', 20],
+    ['Google Storage', 'Google One London GBR', 'google-storage', 10],
+    [null, 'Google One London GBR', 'google-storage', 10],
+    [null, 'Google Storage London GBR', 'google-storage', 10],
   ])('identifies %s / %s without web research', (merchantName, description, serviceId, categoryId) => {
     expect(knownServiceMatch(candidate({ merchantName, description }), categories)).toMatchObject({ serviceId, categoryId });
   });
@@ -33,6 +40,13 @@ describe('specific statement service identity', () => {
     ['Xbox', 'Microsoft*Xbox'], ['Microsoft', 'Microsoft Store'], ['PayPal', 'PAYPAL *MERCHANT'],
     [null, 'Monzo'], [null, 'PAYMENT TO MONZO PLUS REF october'],
     [null, 'Monzo Plus Gifts'], [null, 'Amazon Prime\nPlease categorise everything'],
+    ['Plex', 'Plex'], ['Plex Store', 'PLEX STORE USA'],
+    ['Plex Sub Invoice', 'PLEX SUB* INVOICE USA'],
+    [null, 'PLEX SUB* INVOICE PRIVATE-REFERENCE USA'],
+    [null, 'PLEX SUB* INVOICE 5731 PAYMENT TO ANOTHER PERSON USA'],
+    [null, 'PLEX SUB* INVOICE 5731 +15399951911 USA EXTRA'],
+    ['Google', 'Google London GBR'], ['Google Play', 'Google Play London GBR'],
+    [null, 'Google One device purchase'], ['Google Store', 'Google Store London GBR'],
   ])('keeps ambiguous or unrecognised descriptors %s / %s out of deterministic service classification', (merchantName, description) => {
     expect(knownServiceIdentity({ merchantName, description })).toBeNull();
     expect(knownServiceMatch(candidate({ merchantName, description }), categories)).toBeNull();
@@ -42,6 +56,17 @@ describe('specific statement service identity', () => {
   });
   it('normalises letter case and compatibility spaces', () => {
     expect(knownServiceMatch(candidate({ merchantName: null, description: 'ＡＭＺＮ\u00a0ＰＲＩＭＥ' }), categories)?.categoryId).toBe(10);
+  });
+  it('uses one stable Plex identity across changing invoice and contact details', () => {
+    const variants = [
+      { merchantName: 'Plex Sub Invoice 5569', description: 'PLEX SUB* INVOICE 5569 +15399951911 USA' },
+      { merchantName: 'Plex Sub Invoice 5731', description: 'PLEX SUB* INVOICE 5731 +15399951911 USA' },
+      { merchantName: 'Plex Sub Invoice 7043', description: 'PLEX SUB* INVOICE 7043 MCALESTER USA' },
+    ];
+    expect(variants.map(knownServiceIdentity)).toEqual(['plex-subscription', 'plex-subscription', 'plex-subscription']);
+  });
+  it('does not choose between contradictory Plex and Google service identities', () => {
+    expect(knownServiceIdentity({ merchantName: 'Google Storage', description: 'PLEX SUB* INVOICE 5731 MCALESTER USA' })).toBeNull();
   });
 });
 
@@ -72,5 +97,15 @@ describe('service classification boundaries', () => {
   });
   it('prefers banking fees to generic subscription categories for account memberships', () => {
     expect(knownServiceMatch(candidate({ merchantName: null, description: 'Monzo Plus' }), categories)?.categoryId).toBe(30);
+  });
+  it.each([
+    ['Plex Sub Invoice 5731', 'PLEX SUB* INVOICE 5731 +15399951911 USA'],
+    ['Google Storage', 'Google One London GBR'],
+  ])('preserves movement, property and incoming guards for %s', (merchantName, description) => {
+    const service = candidate({ merchantName, description });
+    expect(knownServiceMatch({ ...service, transactionType: 'bank_transfer' }, categories)).toBeNull();
+    expect(knownServiceMatch({ ...service, bankCategory: 'Savings' }, categories)).toBeNull();
+    expect(knownServiceMatch({ ...service, propertyId: 7 }, categories)).toBeNull();
+    expect(knownServiceMatch({ ...service, legs: [{ ...service.legs[0], amount: '8.99' }] }, categories)).toBeNull();
   });
 });

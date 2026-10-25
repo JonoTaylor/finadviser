@@ -13,6 +13,7 @@ import { categorizationRepo } from './repository';
 import { CategorizationConflictError, InvalidCategorizationError, confirmedCategorize, decideReview, getCategorizationRecords, loadReviewQueue } from './review';
 import { categorizationContextKey, confirmedContextReviewReason, movementReviewReason, PAYEE_MEANINGS_CONFLICT_REASON, REVIEW_POLICY_VERSION } from './decisions';
 import { knownServiceMatch } from './known-services';
+import { loadCategorizationActivity } from './activity';
 
 const url = process.env.DATA_PLAN_TEST_PG_URL;
 
@@ -223,13 +224,116 @@ describe.skipIf(!url)('categorisation persistence in disposable PostgreSQL', () 
     await categorizationRepo.releaseLease(token);
   });
 
-  it('does not allow a fresh model guess to replace the same historical review during a policy refresh', async () => {
+  it('reassesses an old AI question once under the new policy and then protects its current result', async () => {
     const entry = await candidate(2);
     await categorizationRepo.persistDecisions([entry], [decision(entry, { confidence: 0.5, status: 'needs_review' })]);
-    await fixture.query('UPDATE transaction_categorizations SET review_policy_version=NULL WHERE journal_entry_id=2');
+    await fixture.query("UPDATE transaction_categorizations SET review_policy_version='previous-policy' WHERE journal_entry_id=2");
     const [reconsidered] = await categorizationRepo.listCandidates({ journalIds: [2] });
+    expect(reconsidered).toMatchObject({ pendingReview: true, policyReassessment: true });
+    expect(await categorizationRepo.persistDecisions([reconsidered], [decision(reconsidered, {
+      categoryId: 2, confidence: 0.8, assignmentKind: 'estimated',
+    })])).toEqual([{ journalId: 2, status: 'applied' }]);
+    expect(await rawDecision(2)).toMatchObject({ status: 'applied', source: 'ai', assignment_kind: 'estimated', confidence: null, review_policy_version: REVIEW_POLICY_VERSION });
+    expect(await categorizationRepo.listCandidates({ journalIds: [2] })).toEqual([]);
     expect(await categorizationRepo.persistDecisions([reconsidered], [decision(reconsidered)])).toEqual([]);
-    expect(await rawDecision(2)).toMatchObject({ status: 'needs_review', confidence: '0.5000', review_policy_version: null });
+  });
+
+  it('retains an unresolved AI reassessment as one current question without repeatedly reopening it', async () => {
+    const entry = await candidate(2);
+    await categorizationRepo.persistDecisions([entry], [decision(entry, { confidence: 0.5, status: 'needs_review' })]);
+    await fixture.query("UPDATE transaction_categorizations SET review_policy_version='previous-policy' WHERE journal_entry_id=2");
+    const [reconsidered] = await categorizationRepo.listCandidates({ journalIds: [2] });
+    expect(await categorizationRepo.persistDecisions([reconsidered], [decision(reconsidered, {
+      categoryId: null, confidence: 0.2, status: 'needs_review', reason: 'The destination account remains unknown.',
+    })])).toEqual([{ journalId: 2, status: 'needs_review' }]);
+    expect(await rawDecision(2)).toMatchObject({ status: 'needs_review', review_policy_version: REVIEW_POLICY_VERSION });
+    expect(await categorizationRepo.listCandidates({ journalIds: [2] })).toEqual([]);
+    expect(await categorizationRepo.persistDecisions([reconsidered], [decision(reconsidered)])).toEqual([]);
+  });
+
+  it('rejects an in-flight policy reassessment when its context or policy revision has already changed', async () => {
+    const entry = await candidate(2);
+    await categorizationRepo.persistDecisions([entry], [decision(entry, { confidence: 0.5, status: 'needs_review' })]);
+    await fixture.query("UPDATE transaction_categorizations SET review_policy_version='previous-policy' WHERE journal_entry_id=2");
+    const [reconsidered] = await categorizationRepo.listCandidates({ journalIds: [2] });
+    await fixture.query("UPDATE transaction_metadata SET merchant_name='Changed business' WHERE journal_entry_id=2");
+    expect(await categorizationRepo.persistDecisions([reconsidered], [decision(reconsidered)])).toEqual([]);
+    await fixture.query("UPDATE transaction_metadata SET merchant_name='Example merchant' WHERE journal_entry_id=2");
+    await fixture.query('UPDATE transaction_categorizations SET review_policy_version=$1 WHERE journal_entry_id=2', [REVIEW_POLICY_VERSION]);
+    expect(await categorizationRepo.persistDecisions([reconsidered], [decision(reconsidered)])).toEqual([]);
+    expect(await rawDecision(2)).toMatchObject({ status: 'needs_review', confidence: '0.5000' });
+  });
+
+  it('acknowledges only one simultaneous AI reassessment of the same policy-stale question', async () => {
+    const entry = await candidate(2);
+    await categorizationRepo.persistDecisions([entry], [decision(entry, { confidence: 0.5, status: 'needs_review' })]);
+    await fixture.query("UPDATE transaction_categorizations SET review_policy_version='previous-policy' WHERE journal_entry_id=2");
+    const [reconsidered] = await categorizationRepo.listCandidates({ journalIds: [2] });
+    const results = await Promise.all([
+      categorizationRepo.persistDecisions([reconsidered], [decision(reconsidered, { confidence: 0.6, status: 'needs_review', reason: 'First bounded reassessment.' })]),
+      categorizationRepo.persistDecisions([reconsidered], [decision(reconsidered, { confidence: 0.7, status: 'needs_review', reason: 'Second bounded reassessment.' })]),
+    ]);
+    expect(results.map(rows => rows.length).sort()).toEqual([0, 1]);
+    expect(await rawDecision(2)).toMatchObject({ status: 'needs_review', review_policy_version: REVIEW_POLICY_VERSION });
+    expect((await rawJournal(2)).category_id).toBeNull();
+  });
+
+  it('persists broad spending only in the explicit unknown-details category without changing ledger amounts', async () => {
+    await fixture.query("INSERT INTO categories(id,name) VALUES(10,'Spending details unknown')");
+    const entry = await candidate(2);
+    const ledger = (await fixture.query('SELECT * FROM book_entries ORDER BY id')).rows;
+    expect(await categorizationRepo.persistDecisions([entry], [decision(entry, {
+      categoryId: 2, confidence: 0.1, assignmentKind: 'broad',
+    })])).toEqual([]);
+    expect(await categorizationRepo.persistDecisions([entry], [decision(entry, {
+      categoryId: 10, confidence: 0.1, assignmentKind: 'broad', reason: 'Card spending recorded; purchase detail remains unknown.',
+    })])).toEqual([{ journalId: 2, status: 'applied' }]);
+    expect(await rawDecision(2)).toMatchObject({ category_id: 10, assignment_kind: 'broad', source: 'ai', confidence: null });
+    expect((await fixture.query('SELECT * FROM book_entries ORDER BY id')).rows).toEqual(ledger);
+  });
+
+  it('refuses estimated labels for property, incoming, non-AI or unresolved decisions', async () => {
+    const linked = await candidate(1);
+    const entry = await candidate(2);
+    await expect(categorizationRepo.persistDecisions([linked], [decision(linked, { assignmentKind: 'estimated' })])).rejects.toThrow('one outgoing purchase');
+    const incoming = { ...entry, legs: entry.legs.map(leg => leg.accountType === 'ASSET' ? { ...leg, amount: '12.34' } : leg) };
+    await expect(categorizationRepo.persistDecisions([incoming], [decision(incoming, { assignmentKind: 'estimated' })])).rejects.toThrow('one outgoing purchase');
+    await expect(categorizationRepo.persistDecisions([entry], [decision(entry, { assignmentKind: 'estimated', source: 'rule' })])).rejects.toThrow('one outgoing purchase');
+    await expect(categorizationRepo.persistDecisions([entry], [decision(entry, { assignmentKind: 'estimated', status: 'needs_review' })])).rejects.toThrow('one outgoing purchase');
+    expect(await rawDecision(2)).toBeUndefined();
+  });
+
+  it('reads automatic activity without describing estimates as confirmed and excludes later user corrections', async () => {
+    const first = await candidate(1), second = await candidate(2);
+    await categorizationRepo.persistDecisions([first, second], [decision(first), decision(second, { categoryId: 2, assignmentKind: 'estimated', confidence: 0.8 })]);
+    const activity = await loadCategorizationActivity();
+    expect(activity.counts).toEqual({ standard: 1, estimated: 1, broad: 0 });
+    expect(activity.items.find(item => item.journalId === 2)).toMatchObject({ assignmentKind: 'estimated', categoryName: 'Shopping', amount: '-56.78', currency: 'GBP', confidence: null });
+    await fixture.query("UPDATE transaction_categorizations SET source='user',status='reviewed' WHERE journal_entry_id=2");
+    expect((await loadCategorizationActivity()).counts).toEqual({ standard: 1, estimated: 0, broad: 0 });
+    await fixture.query('UPDATE journal_entries SET category_id=2 WHERE id=1');
+    expect((await loadCategorizationActivity()).counts).toEqual({ standard: 0, estimated: 0, broad: 0 });
+  });
+
+  it.each([
+    ['amount', "UPDATE book_entries SET amount=-99 WHERE journal_entry_id=2 AND account_id=5"],
+    ['owner', 'UPDATE accounts SET owner_id=99 WHERE id=5'],
+    ['property', 'UPDATE journal_entries SET property_id=77 WHERE id=2'],
+    ['merchant', "UPDATE transaction_metadata SET merchant_name='Changed merchant' WHERE journal_entry_id=2"],
+    ['date', "UPDATE journal_entries SET date='2026-09-09' WHERE id=2"],
+    ['description', "UPDATE journal_entries SET description='Changed purchase' WHERE id=2"],
+    ['currency', "UPDATE transaction_metadata SET currency='EUR' WHERE journal_entry_id=2"],
+  ])('does not present an earlier automatic label as current after its %s context changes', async (_label, mutation) => {
+    const entry = await candidate(2);
+    await categorizationRepo.persistDecisions([entry], [decision(entry, { categoryId: 2, assignmentKind: 'estimated', confidence: 0.8 })]);
+    expect((await loadCategorizationActivity()).counts.estimated).toBe(1);
+    await fixture.query(mutation);
+    const current = await loadCategorizationActivity();
+    expect(current.counts).toEqual({ standard: 0, estimated: 0, broad: 0 });
+    expect(current.items).toEqual([]);
+    // Only the read eligibility changes. We never clear a user's ledger or label.
+    expect((await rawJournal(2)).category_id).toBe(2);
+    expect(await rawDecision(2)).toMatchObject({ status: 'applied', category_id: 2, assignment_kind: 'estimated' });
   });
 
   it.each(['reviewed', 'dismissed', 'applied'] as const)('does not reopen %s decisions with an old policy version', async status => {
@@ -239,6 +343,7 @@ describe.skipIf(!url)('categorisation persistence in disposable PostgreSQL', () 
     const before = await rawDecision(2);
     expect(await categorizationRepo.listCandidates({ journalIds: [2] })).toEqual([]);
     expect(await categorizationRepo.persistDecisions([entry], [decision(entry, { source: 'rule' })])).toEqual([]);
+    expect(await categorizationRepo.persistDecisions([entry], [decision(entry)])).toEqual([]);
     expect(await rawDecision(2)).toEqual(before);
   });
 

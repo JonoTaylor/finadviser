@@ -75,6 +75,8 @@ describe('dashboard processing start policy', () => {
   });
   it('does not recursively refresh the job observer when derived financial data is revalidated', () => {
     expect(isFinancialDataKey('/api/categorization/jobs')).toBe(false);
+    expect(isFinancialDataKey('/api/categorization/jobs/worker')).toBe(false);
+    expect(isFinancialDataKey('/api/categorization/activity')).toBe(true);
     expect(isFinancialDataKey('/api/spending')).toBe(true);
   });
 });

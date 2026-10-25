@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import useSWR from 'swr';
 import { Accordion, AccordionDetails, AccordionSummary, Alert, Box, Button, Card, CardContent, Chip, Grid, Skeleton, Stack, Typography } from '@mui/material';
@@ -14,8 +15,9 @@ import { fetchJson } from '@/lib/http/client';
 import type { DataIntelligenceReport } from '@/lib/data-intelligence/types';
 import CategorizationJobProgress from './CategorizationJobProgress';
 import CategorizationReviewQueue from './CategorizationReviewQueue';
-import useDataProcessing from './useDataProcessing';
+import useDataProcessing, { canAutomaticallyStartCategorization } from './useDataProcessing';
 import PaymentKnowledgeCard from './PaymentKnowledgeCard';
+import AutomaticCategorizationActivity from './AutomaticCategorizationActivity';
 
 const priorityOrder = { high: 0, medium: 1, low: 2 };
 const coverageLabels = { recorded: 'Recorded', empty: 'Not recorded', incomplete: 'Needs detail', stale: 'Needs an update', unavailable: 'Unavailable' };
@@ -23,33 +25,52 @@ const coverageLabels = { recorded: 'Recorded', empty: 'Not recorded', incomplete
 export default function DataAssistantWorkspace() {
   const { data, error, isLoading, mutate } = useSWR<DataIntelligenceReport>('/api/data-intelligence', fetchJson, { shouldRetryOnError: false });
   const processing = useDataProcessing();
+  const { run } = processing;
+  const attempted = useRef(false);
+  const [visible, setVisible] = useState(true);
   const queued = processing.job?.counts?.available ?? data?.transactions.unprocessedCount;
+  useEffect(() => {
+    const update = () => setVisible(document.visibilityState !== 'hidden');
+    update();
+    document.addEventListener('visibilitychange', update);
+    return () => document.removeEventListener('visibilitychange', update);
+  }, []);
+  useEffect(() => {
+    // Use the job's observed coverage when a job exists. Missing job counts
+    // cannot authorise another run from an older assessment response.
+    const available = processing.job ? processing.job.counts?.available : data?.transactions.unprocessedCount;
+    if (attempted.current || !visible || !data || error || data.transactions.status === 'unavailable'
+      || !processing.jobLoaded || processing.error || !canAutomaticallyStartCategorization(processing.job, available)
+      || document.visibilityState === 'hidden') return;
+    attempted.current = true;
+    void run();
+  }, [data, error, run, visible, processing.jobLoaded, processing.job, processing.error]);
   const gaps = data?.gaps.slice().sort((a, b) => priorityOrder[a.priority] - priorityOrder[b.priority]) ?? [];
   return <Box sx={{ minWidth: 0 }}>
-    <PageHeader title="Data assistant" description="Let AI organise your records, surface unclear transactions and show exactly what your financial plan is missing." actions={<>
+    <PageHeader title="Data assistant" description="AI organises your spending automatically and brings forward the missing facts that affect your financial plan." actions={<>
       <Button component={Link} href="/import" variant="outlined" startIcon={<FileUploadOutlinedIcon />}>Add information</Button>
-      <Button variant="contained" startIcon={<AutoFixHighRoundedIcon />} disabled={processing.running || processing.pendingAction !== null || !processing.jobLoaded || !data || data.transactions.status === 'unavailable' || queued == null || (queued === 0 && processing.job?.status !== 'paused')} onClick={() => void processing.run()}>{processing.running ? 'Processing…' : processing.job?.status === 'paused' ? 'Resume processing' : 'Reassess and organise'}</Button>
+      <Button variant="contained" startIcon={<AutoFixHighRoundedIcon />} disabled={processing.running || processing.pendingAction !== null || !processing.jobLoaded || !data || data.transactions.status === 'unavailable' || queued == null || (queued === 0 && processing.job?.status !== 'paused')} onClick={() => void processing.run()}>{processing.running ? 'Organising…' : processing.job?.status === 'paused' ? 'Resume processing' : 'Organise automatically'}</Button>
     </>} />
 
     {error && <Alert severity="warning" sx={{ mb: 2 }} action={<Button size="small" onClick={() => void mutate()}>Retry</Button>}>Your data assessment could not be loaded. No coverage or balances have been assumed.</Alert>}
     <Grid container spacing={2} sx={{ mb: 3 }}>
       <Grid size={{ xs: 6, lg: 3 }}><MetricCard label="Transaction records" value={data?.transactions.totalCount ?? '—'} loading={isLoading} detail="Recorded household activity" /></Grid>
       <Grid size={{ xs: 6, lg: 3 }}><MetricCard label="Queued for processing" value={queued ?? '—'} loading={isLoading} detail="Eligible for automatic processing" /></Grid>
-      <Grid size={{ xs: 6, lg: 3 }}><MetricCard label="Payments needing context" value={data?.transactions.reviewNeededCount ?? '—'} loading={isLoading} detail="Repeated payments are grouped below" tone="warning" /></Grid>
+      <Grid size={{ xs: 6, lg: 3 }}><MetricCard label="Unresolved payments" value={data?.transactions.reviewNeededCount ?? '—'} loading={isLoading} detail="Reassessed before asking you" tone="warning" /></Grid>
       <Grid size={{ xs: 6, lg: 3 }}><MetricCard label="Information gaps" value={data ? gaps.filter(gap => gap.status !== 'unavailable').length : '—'} loading={isLoading} detail={data ? `${gaps.filter(gap => gap.status === 'unavailable').length} source${gaps.filter(gap => gap.status === 'unavailable').length === 1 ? '' : 's'} unavailable` : 'Based on your saved records'} tone="accent" /></Grid>
     </Grid>
 
     <Card sx={{ mb: 3 }}><CardContent>
       <Stack direction={{ xs: 'column', md: 'row' }} gap={2} alignItems={{ md: 'flex-start' }}>
         <Box sx={{ flex: 1, minWidth: 0 }}>
-          <Typography component="h2" variant="h6" sx={{ mb: 0.75 }}>Heavy lifting, with the evidence kept visible</Typography>
-          <Typography variant="body2" color="text.secondary">Saved rules and reviewed matches organise repeat activity. AI reads each transaction’s actual account context and applies strongly supported categories. Unclear merchants and possible money movements come to you for a quick decision.</Typography>
-          <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>Reassessment checks older questions against your saved meanings and recognised services such as Prime membership. Repeated exact payment contexts share one decision below, so you can confirm the displayed payments together and remember the choice for future matches.</Typography>
-          <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>For eligible unclear merchants, AI can search public business information and keep its sources with the suggestion. Searches use the merchant name and public location details, without transaction amounts or account details.</Typography>
+          <Typography component="h2" variant="h6" sx={{ mb: 0.75 }}>Your spending, organised automatically</Typography>
+          <Typography variant="body2" color="text.secondary">AI researches eligible merchants, recognises recurring services and organises ordinary spending. Supported estimates are labelled clearly; refining them is optional. Spending whose exact purpose remains unclear stays visible in a broad category.</Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>Processing starts when eligible records are available. Older questions are reassessed as part of the run. A paused or stopped run waits for your instruction.</Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>The assistant still needs facts it cannot establish from the records, such as who sent a personal payment or which account a transfer belongs to. It keeps amounts, ownership and property links unchanged.</Typography>
         </Box>
         <Chip size="small" color={data?.processing.modelAvailable ? 'success' : 'default'} variant="outlined" label={isLoading ? 'Checking AI availability…' : data ? data.processing.modelAvailable ? 'AI configured' : 'AI unavailable' : 'Availability unknown'} sx={{ alignSelf: 'flex-start', flexShrink: 0 }} />
       </Stack>
-      {data && !data.processing.modelAvailable && <Alert severity="info" sx={{ mt: 2 }}>AI categorisation is unavailable on the server. Processing can still apply saved rules and reviewed matches; the information gaps and review queue remain available.</Alert>}
+      {data && !data.processing.modelAvailable && <Alert severity="info" sx={{ mt: 2 }}>AI research is currently unavailable. Saved rules and recognised services can still organise supported records. Unprocessed payments remain queued until the service is available.</Alert>}
       {processing.jobLoading && <Skeleton variant="rounded" height={75} sx={{ mt: 2 }} />}
       {processing.job && <Box sx={{ mt: 2 }}><CategorizationJobProgress job={processing.job} issue={processing.issue} backgroundAvailable={processing.backgroundAvailable} pending={processing.pendingAction !== null} onPause={() => void processing.pause()} onResume={() => void processing.run()} onCancel={() => void processing.cancel()} /></Box>}
       {processing.error && <Alert severity="warning" sx={{ mt: 2 }} action={<Button size="small" onClick={() => void processing.refresh()}>Reload status</Button>}>{processing.error}</Alert>}
@@ -57,6 +78,7 @@ export default function DataAssistantWorkspace() {
       {data && <Typography variant="caption" component="p" sx={{ mt: 2 }}>Household data snapshot · {data.asOf} · Missing information stays unknown until you provide or confirm it.</Typography>}
     </CardContent></Card>
 
+    <Box id="automatic-activity" sx={{ scrollMarginTop: 84, mb: 3 }}><AutomaticCategorizationActivity /></Box>
     <Box id="payment-meanings" sx={{ scrollMarginTop: 84, mb: 3 }}><PaymentKnowledgeCard onChanged={processing.refresh} /></Box>
     <Box id="review" sx={{ scrollMarginTop: 84, mb: 3 }}><CategorizationReviewQueue onReviewed={processing.refresh} /></Box>
 

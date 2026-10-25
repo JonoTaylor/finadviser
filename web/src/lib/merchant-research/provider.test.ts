@@ -42,6 +42,26 @@ describe('bounded native merchant web research', () => {
     await lookupMerchant(input);
     expect(mocks.gateway).toHaveBeenCalledWith('openai/gpt-4.1');
   });
+  it.each([
+    ['Bodo Norway', 'NO'], ['Tangerang Indonesia', 'ID'], ['Petaling Jaya Malaysia', 'MY'],
+    ['Alghero Italy', 'IT'], ['Mauritius', 'MU'], ['United States', 'US'],
+    ['London United Kingdom', 'GB'], ['Belfast Northern Ireland', 'GB'],
+    ['New Zealand', 'NZ'], ['Town Unknownland', 'GB'],
+  ])('uses the explicit public location %s for both search instructions and native tool country %s', async (coarseLocation, country) => {
+    const query = `Example Cafe ${coarseLocation} business merchant`;
+    mocks.generateText.mockResolvedValue(nativeResult({ results: [source] }, { input: { query } }));
+    expect(await lookupMerchant({ ...input, coarseLocation })).toMatchObject({ status: 'matched', query });
+    expect(mocks.search).toHaveBeenCalledExactlyOnceWith({ maxResults: 3, maxTokensPerPage: 256, maxTokens: 1000, country });
+    const request = mocks.generateText.mock.calls[0][0];
+    expect(request.system).toContain(`country ${country},`);
+    expect(request.prompt).toBe(JSON.stringify({ public_query: query }));
+    if (country !== 'GB') expect(request.system).not.toContain('country GB,');
+  });
+  it('retains the UK search default without an explicit recognised public country', async () => {
+    await lookupMerchant(input);
+    expect(mocks.search.mock.calls[0][0].country).toBe('GB');
+    expect(mocks.generateText.mock.calls[0][0].system).toContain('country GB,');
+  });
   it('makes no network/model call for private identity data or unavailable credentials', async () => {
     expect(await lookupMerchant({ merchantName: 'Jono Taylor', privateNames: ['Jono Taylor'] })).toMatchObject({ status: 'skipped_private', query: null });
     vi.stubEnv('AI_GATEWAY_API_KEY', '');

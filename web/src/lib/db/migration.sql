@@ -433,6 +433,7 @@ SELECT v.name, true
     ('Income'),
     ('Transfer'),
     ('Uncategorized'),
+    ('Spending details unknown'),
     ('Property expenses')
   ) AS v(name)
  WHERE NOT EXISTS (
@@ -1574,3 +1575,10 @@ ALTER TABLE transaction_categorizations ADD CONSTRAINT transaction_categorizatio
 -- Recheck an unchanged queued review once when deterministic knowledge changes.
 -- NULL marks historical suggestions; this does not reopen human decisions.
 ALTER TABLE transaction_categorizations ADD COLUMN IF NOT EXISTS review_policy_version TEXT;
+
+-- Spending estimates remain visibly distinct from standard assignments and
+-- user-confirmed categories. No monetary or property records are changed.
+ALTER TABLE transaction_categorizations ADD COLUMN IF NOT EXISTS assignment_kind TEXT NOT NULL DEFAULT 'standard';
+ALTER TABLE transaction_categorizations DROP CONSTRAINT IF EXISTS transaction_categorizations_assignment_kind_check;
+ALTER TABLE transaction_categorizations ADD CONSTRAINT transaction_categorizations_assignment_kind_check
+    CHECK (assignment_kind IN ('standard', 'estimated', 'broad'));

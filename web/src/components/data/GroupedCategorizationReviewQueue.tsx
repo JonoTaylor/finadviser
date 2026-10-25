@@ -216,14 +216,14 @@ export default function GroupedCategorizationReviewQueue({ onReviewed }: { onRev
   const refresh = async () => { await Promise.allSettled([mutate(), onReviewed()]); };
   const saved = async (result: GroupResult) => {
     setSelection(null);
-    setAnnouncement(result.action === 'dismiss' ? `Left ${result.appliedCount} payments uncategorised.` : `Saved the category for ${result.appliedCount} payments${result.remembered ? ' and remembered this exact context' : ''}.`);
+    setAnnouncement(result.action === 'dismiss' ? `Left ${result.appliedCount} payment${result.appliedCount === 1 ? '' : 's'} uncategorised.` : `Saved the category for ${result.appliedCount} payment${result.appliedCount === 1 ? '' : 's'}${result.remembered ? ' and remembered this exact context' : ''}.`);
     await refresh();
     heading.current?.focus({ preventScroll: true });
   };
   const reload = async () => { setSelection(null); await refresh(); };
   return <>
-    <Stack direction="row" gap={1} alignItems="center" flexWrap="wrap" sx={{ mb: 1 }}><Typography component="h2" variant="h6" tabIndex={-1} ref={heading}>Decisions that need you</Typography>{data && <><Chip size="small" variant="outlined" label={`${data.totalGroups} question${data.totalGroups === 1 ? '' : 's'}`} /><Chip size="small" variant="outlined" label={`${data.totalPayments} payment${data.totalPayments === 1 ? '' : 's'}`} /></>}</Stack>
-    <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>Repeated payments with the same exact description and account context share one question. Open a group to check its payments and decide once.</Typography>
+    <Stack direction="row" gap={1} alignItems="center" flexWrap="wrap" sx={{ mb: 1 }}><Typography component="h2" variant="h6" tabIndex={-1} ref={heading}>Information the assistant still needs</Typography>{data && <><Chip size="small" variant="outlined" label={`${data.totalGroups} unresolved question${data.totalGroups === 1 ? '' : 's'}`} /><Chip size="small" variant="outlined" label={`${data.totalPayments} payment${data.totalPayments === 1 ? '' : 's'}`} /></>}</Stack>
+    <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>Automatic processing handles supported spending first. These unresolved records may need a fact only you know, such as the destination of an account movement. If processing has not finished or research is unavailable, more payments may still be resolved automatically.</Typography>
     {announcement && <Alert severity="success" role="status" sx={{ mb: 2 }}>{announcement}</Alert>}
     {isLoading && <Skeleton variant="rounded" height={180} />}
     {error && <Alert severity="warning" sx={{ mb: 2 }} action={<Button size="small" onClick={() => void mutate()}>Reload</Button>}>The grouped review queue could not be loaded. No decisions have been assumed.</Alert>}

@@ -72,13 +72,74 @@ describe('bounded leased categorisation passes', () => {
     expect(mocks.persistDecisions.mock.calls[0][2]).toBe(token);
     expect(mocks.releaseLease).toHaveBeenCalledExactlyOnceWith(token);
     expect(mocks.model.mock.calls[0][2]).toBeInstanceOf(AbortSignal);
-    expect(mocks.owners).not.toHaveBeenCalled();
+    expect(mocks.owners).toHaveBeenCalledOnce();
   });
   it('retains low confidence as a review item and reports global queue counts', async () => {
     mocks.model.mockResolvedValue({ decisions: [{ journalId: 1, categoryId: 1, confidence: 0.5, reason: 'Please clarify what was purchased.' }] });
     mocks.counts.mockResolvedValue({ ...counts, remaining: 3, needsReview: 3 });
     expect(await processCategorization()).toMatchObject({ aiCategorized: 0, aiNoMatch: 1, reviewQueued: 1, needsReview: 3, remaining: 3, hasMore: false });
     expect(mocks.persistDecisions.mock.calls[0][1][0].status).toBe('needs_review');
+  });
+  it('automatically saves an editable Dining estimate for a supported ordinary purchase', async () => {
+    mocks.listCandidates.mockResolvedValue([{ ...candidate(), merchantName: 'Cool Desserts', description: 'SUMUP *COOL DESSERTS LONDON GBR', bankCategory: 'Eating out' }]);
+    mocks.categories.mockResolvedValue([{ id: 4, name: 'Dining' }]);
+    mocks.model.mockResolvedValue({ decisions: [{ journalId: 1, categoryId: 4, confidence: 0.82, reason: 'Dessert shop purchase.' }] });
+    mocks.researchQuery.mockReturnValue({ merchantName: 'Cool Desserts', query: 'Cool Desserts London United Kingdom business merchant', cacheKey: 'desserts' });
+    expect(await processCategorization()).toMatchObject({ aiCategorized: 1, reviewQueued: 0 });
+    expect(mocks.persistDecisions.mock.calls[0][1][0]).toMatchObject({ categoryId: 4, assignmentKind: 'estimated', source: 'ai', status: 'applied' });
+    expect(mocks.research).not.toHaveBeenCalled();
+  });
+  it('keeps an unresolved card purchase visible in a broad spending category without requiring approval', async () => {
+    mocks.categories.mockResolvedValue([{ id: 1, name: 'Groceries' }, { id: 3, name: 'Spending details unknown', parentId: null }]);
+    mocks.model.mockResolvedValue({ decisions: [{ journalId: 1, categoryId: null, confidence: 0.3, reason: 'The goods are unknown.' }] });
+    mocks.researchQuery.mockReturnValue({ merchantName: 'Example shop', query: 'Example shop business merchant', cacheKey: 'unknown-shop' });
+    expect(await processCategorization()).toMatchObject({ aiCategorized: 1, reviewQueued: 0 });
+    expect(mocks.persistDecisions.mock.calls[0][1][0]).toMatchObject({ categoryId: 3, assignmentKind: 'broad', status: 'applied' });
+    expect(mocks.research).toHaveBeenCalledOnce();
+  });
+  it('sends a policy-stale spending question back through AI once and records its automatic result', async () => {
+    mocks.listCandidates.mockResolvedValue([{ ...candidate(), pendingReview: true, policyReassessment: true, merchantName: 'Osaka Sushi', bankCategory: 'Eating out' }]);
+    mocks.categories.mockResolvedValue([{ id: 4, name: 'Dining' }]);
+    mocks.researchQuery.mockReturnValue({ merchantName: 'Osaka Sushi', query: 'Osaka Sushi business merchant', cacheKey: 'sushi' });
+    mocks.model.mockResolvedValue({ decisions: [{ journalId: 1, categoryId: 4, confidence: 0.85, reason: 'Restaurant purchase.' }] });
+    expect(await processCategorization()).toMatchObject({ aiCategorized: 1, reviewQueued: 0, reviewsRechecked: 0 });
+    expect(mocks.model).toHaveBeenCalledOnce();
+    expect(mocks.persistDecisions.mock.calls[0][1][0]).toMatchObject({ categoryId: 4, assignmentKind: 'estimated', status: 'applied' });
+    expect(mocks.markReviewPolicyChecked).not.toHaveBeenCalled();
+  });
+  it('does not let a high-confidence model turn a movement memo into spending', async () => {
+    mocks.listCandidates.mockResolvedValue([{ ...candidate(), description: 'BANK TRANSFER TO AVERY' }]);
+    mocks.model.mockResolvedValue({ decisions: [{ journalId: 1, categoryId: 1, confidence: 0.99, reason: 'Groceries.' }] });
+    expect(await processCategorization()).toMatchObject({ aiCategorized: 0, reviewQueued: 1 });
+    expect(mocks.model).not.toHaveBeenCalled();
+    expect(mocks.persistDecisions.mock.calls[0][1][0]).toMatchObject({ categoryId: null, status: 'needs_review' });
+  });
+  it('rejects high-confidence income or tax categories on an ordinary outgoing purchase', async () => {
+    mocks.categories.mockResolvedValue([{ id: 6, name: 'Salary' }]);
+    mocks.model.mockResolvedValue({ decisions: [{ journalId: 1, categoryId: 6, confidence: 0.99, reason: 'Salary.' }] });
+    expect(await processCategorization()).toMatchObject({ aiCategorized: 0, reviewQueued: 1 });
+    expect(mocks.persistDecisions.mock.calls[0][1][0]).toMatchObject({ categoryId: null, status: 'needs_review' });
+  });
+  it('keeps incoming personal money as a sender question without guessing salary', async () => {
+    mocks.listCandidates.mockResolvedValue([{ ...candidate(), merchantName: 'Example sender', transactionType: null,
+      legs: [{ ...candidate().legs[0], amount: '5088.51' }] }]);
+    expect(await processCategorization()).toMatchObject({ aiCategorized: 0, reviewQueued: 1 });
+    expect(mocks.model).not.toHaveBeenCalled();
+    expect(mocks.persistDecisions.mock.calls[0][1][0]).toMatchObject({ categoryId: null, status: 'needs_review' });
+  });
+  it('keeps known private identities within confirmed account context even at high model confidence', async () => {
+    mocks.payeeNames.mockResolvedValue(['Avery Person']);
+    mocks.listCandidates.mockResolvedValue([{ ...candidate(), merchantName: 'Avery Person', description: 'Avery Person' }]);
+    mocks.model.mockResolvedValue({ decisions: [{ journalId: 1, categoryId: 1, confidence: 0.99, reason: 'A purchase.' }] });
+    expect(await processCategorization()).toMatchObject({ aiCategorized: 0, reviewQueued: 1 });
+    expect(mocks.persistDecisions.mock.calls[0][1][0]).toMatchObject({ categoryId: null, status: 'needs_review' });
+    expect(mocks.research).not.toHaveBeenCalled();
+  });
+  it('counts retained policy questions as reassessed rather than newly queued', async () => {
+    mocks.listCandidates.mockResolvedValue([{ ...candidate(), pendingReview: true, policyReassessment: true }]);
+    mocks.model.mockResolvedValue({ decisions: [{ journalId: 1, categoryId: null, confidence: 0.2, reason: 'More merchant detail needed.' }] });
+    expect(await processCategorization()).toMatchObject({ aiCategorized: 0, reviewQueued: 0, reviewsRechecked: 1 });
+    expect(mocks.persistDecisions).toHaveBeenCalledOnce();
   });
   it('researches an ambiguous public merchant and persists cited evidence with the final decision', async () => {
     const evidence = mockMerchantResearch();
@@ -98,14 +159,14 @@ describe('bounded leased categorisation passes', () => {
     expect(mocks.model.mock.calls[1][3].get(1)).toEqual(evidence);
     expect(mocks.persistDecisions.mock.calls[0][1][0]).toMatchObject({ categoryId: 1, evidence });
   });
-  it('bounds research to two unique safe public queries and never researches account movements', async () => {
+  it('bounds research to five unique safe public queries and never researches account movements', async () => {
     mocks.listCandidates.mockResolvedValue(Array.from({ length: 10 }, (_, i) => ({ ...candidate(i + 1), merchantName: `Public Shop ${i + 1}` })));
     mocks.researchQuery.mockImplementation((input: { merchantName: string | null }) => ({ merchantName: input.merchantName, coarseLocation: null, query: input.merchantName, cacheKey: input.merchantName }));
     mocks.research.mockImplementation(async (input: { merchantName: string }) => mockMerchantResearch(input.merchantName));
     mocks.model.mockImplementation(async (rows: CategorizationCandidate[], _categories, _signal, research?: ReadonlyMap<number, MerchantResearchResult>) => ({ decisions: rows.map(row => ({ journalId: row.id, categoryId: research?.has(row.id) ? 1 : null, confidence: research?.has(row.id) ? 0.95 : 0.3, reason: 'Merchant identity evidence.' })) }));
-    expect(await processCategorization()).toMatchObject({ aiCategorized: 2, reviewQueued: 8 });
-    expect(mocks.research).toHaveBeenCalledTimes(2);
-    expect(mocks.model.mock.calls.map(call => call[0].length)).toEqual([5, 2, 5]);
+    expect(await processCategorization()).toMatchObject({ aiCategorized: 5, reviewQueued: 5 });
+    expect(mocks.research).toHaveBeenCalledTimes(5);
+    expect(mocks.model.mock.calls.map(call => call[0].length)).toEqual([5, 5, 5]);
 
     mocks.research.mockClear();
     mocks.listCandidates.mockResolvedValue([{ ...candidate(), transactionType: 'Internal transfer' }]);

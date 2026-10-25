@@ -32,7 +32,8 @@ describe.skipIf(!url)('categorisation persistence in disposable PostgreSQL', () 
     await fixture.query(`SET search_path TO "${testSchema}", public`);
     await fixture.query(`
       CREATE TABLE categories (id integer PRIMARY KEY, name text NOT NULL, parent_id integer);
-      CREATE TABLE accounts (id integer PRIMARY KEY, name text NOT NULL, account_type text NOT NULL, owner_id integer);
+      CREATE TYPE account_type AS ENUM ('ASSET', 'LIABILITY', 'EQUITY', 'INCOME', 'EXPENSE');
+      CREATE TABLE accounts (id integer PRIMARY KEY, name text NOT NULL, account_type account_type NOT NULL, owner_id integer);
       CREATE TABLE journal_entries (
         id integer PRIMARY KEY, date text NOT NULL, description text NOT NULL,
         reference text, property_id integer, category_id integer REFERENCES categories(id),

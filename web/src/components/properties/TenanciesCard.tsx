@@ -24,6 +24,7 @@ import DeleteIcon from '@mui/icons-material/Delete';
 import AddIcon from '@mui/icons-material/Add';
 import UploadFileRoundedIcon from '@mui/icons-material/UploadFileRounded';
 import { formatCurrency } from '@/lib/utils/formatting';
+import { fetchJson } from '@/lib/http/client';
 import { londonTodayIso } from '@/lib/dates/today';
 import { currentTaxYear, taxYearRange } from '@/lib/tax/ukTaxYear';
 import { expandTenancies, totalScheduled } from '@/lib/properties/rent-schedule';
@@ -43,8 +44,6 @@ interface Tenancy {
   notes: string | null;
 }
 
-const fetcher = (url: string) => fetch(url).then(r => r.json());
-
 const FREQ_LABEL: Record<RentFrequency, string> = {
   monthly: '/ month',
   four_weekly: '/ 4 weeks',
@@ -60,9 +59,9 @@ function isCurrent(t: Tenancy, today: string): boolean {
 }
 
 export default function TenanciesCard({ propertyId }: { propertyId: number }) {
-  const { data: tenancies, mutate } = useSWR<Tenancy[]>(
+  const { data: tenancies, error: loadError, isLoading, mutate } = useSWR<Tenancy[]>(
     `/api/properties/${propertyId}/tenancies`,
-    fetcher,
+    fetchJson,
   );
   const [dialogOpen, setDialogOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
@@ -164,7 +163,13 @@ export default function TenanciesCard({ propertyId }: { propertyId: number }) {
           </Stack>
         </Stack>
 
-        {list.length === 0 ? (
+        {loadError ? (
+          <Alert severity="warning" action={<Button color="inherit" size="small" onClick={() => void mutate()}>Retry</Button>}>
+            Tenancies could not be loaded. Recorded rent and tenancy dates are unavailable until they load.
+          </Alert>
+        ) : isLoading ? (
+          <Typography variant="body2" color="text.secondary">Loading tenancies…</Typography>
+        ) : list.length === 0 ? (
           <Typography variant="body2" color="text.secondary">
             No tenancies recorded. Add one — the rent amount and date range you enter become the source of truth for the tax-year report.
           </Typography>

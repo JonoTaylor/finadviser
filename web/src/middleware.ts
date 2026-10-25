@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import {
   SESSION_COOKIE_NAME,
+  SESSION_REQUIRED_HEADER,
+  SESSION_REQUIRED_VALUE,
   isAuthEnabled,
   readAuthConfig,
   verifySessionCookie,
@@ -63,10 +65,11 @@ export async function middleware(req: NextRequest) {
   if (valid) return NextResponse.next();
 
   // API requests: respond 401 JSON so callers can handle it programmatically.
+  // The header lets the browser send an expired session back to sign-in.
   if (pathname.startsWith('/api/')) {
     return new NextResponse(
-      JSON.stringify({ error: 'Unauthenticated' }),
-      { status: 401, headers: { 'Content-Type': 'application/json' } },
+      JSON.stringify({ error: 'Your session has expired. Sign in again to continue.' }),
+      { status: 401, headers: { 'Content-Type': 'application/json', [SESSION_REQUIRED_HEADER]: SESSION_REQUIRED_VALUE } },
     );
   }
 

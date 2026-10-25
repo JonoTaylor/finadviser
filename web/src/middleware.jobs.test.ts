@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { NextRequest } from 'next/server';
 import { middleware } from './middleware';
+import { SESSION_REQUIRED_HEADER, SESSION_REQUIRED_VALUE } from './lib/auth/session';
 
 beforeEach(() => {
   vi.stubEnv('NODE_ENV', 'production');
@@ -16,6 +17,11 @@ describe('worker route session boundary', () => {
     for (const path of ['/api/categorization/jobs', '/api/categorization/jobs/some-id', '/api/categorization/jobs/worker/extra']) {
       expect((await middleware(new NextRequest('https://fixture.vercel.app' + path))).status).toBe(401);
     }
+  });
+  it('marks an API rejection as an expired session so the browser can return to sign-in', async () => {
+    const response = await middleware(new NextRequest('https://fixture.vercel.app/api/journal'));
+    expect(response.status).toBe(401);
+    expect(response.headers.get(SESSION_REQUIRED_HEADER)).toBe(SESSION_REQUIRED_VALUE);
   });
   it('keeps production fail-closed even for worker handoffs when application auth is not configured', async () => {
     vi.stubEnv('SESSION_SECRET', '');

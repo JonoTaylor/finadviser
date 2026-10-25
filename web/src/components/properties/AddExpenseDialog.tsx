@@ -15,11 +15,10 @@ import {
   Typography,
 } from '@mui/material';
 import { londonTodayIso } from '@/lib/dates/today';
+import { fetchJson } from '@/lib/http/client';
 
 interface Account { id: number; name: string; accountType: string }
 interface Category { id: number; name: string }
-
-const fetcher = (url: string) => fetch(url).then(r => r.json());
 
 export default function AddExpenseDialog({
   open,
@@ -56,14 +55,15 @@ export default function AddExpenseDialog({
     }
   }
 
-  const { data: assetAccounts } = useSWR<Account[]>(
+  const { data: assetAccounts, error: accountsError, mutate: reloadAccounts } = useSWR<Account[]>(
     open ? '/api/accounts?type=ASSET' : null,
-    fetcher,
+    fetchJson,
   );
-  const { data: categories } = useSWR<Category[]>(
+  const { data: categories, error: categoriesError, mutate: reloadCategories } = useSWR<Category[]>(
     open ? '/api/categories?parent=Property%20expenses' : null,
-    fetcher,
+    fetchJson,
   );
+  const optionsError = accountsError || categoriesError;
 
   // Disable submit on non-numeric or non-positive amounts so the server's
   // ClientError path doesn't have to catch obvious user-input mistakes.
@@ -106,6 +106,14 @@ export default function AddExpenseDialog({
       <DialogContent>
         <Stack spacing={2} sx={{ mt: 1 }}>
           {error && <Alert severity="error">{error}</Alert>}
+          {optionsError && (
+            <Alert
+              severity="warning"
+              action={<Button color="inherit" size="small" onClick={() => { void reloadAccounts(); void reloadCategories(); }}>Retry</Button>}
+            >
+              {accountsError ? 'Your bank accounts' : 'Expense categories'} could not be loaded, so the choices below may be incomplete.
+            </Alert>
+          )}
 
           <TextField
             label="Date paid"

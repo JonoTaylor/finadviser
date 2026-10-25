@@ -37,8 +37,15 @@ export default function MonzoScaPendingPage({ params }: { params: Promise<{ id: 
       if (cancelled) return;
       try {
         const res = await fetch(`/api/banking/connections/${id}/sca-status`);
-        const body = await res.json();
+        const body = await res.json().catch(() => ({}));
         if (cancelled) return;
+        // A missing or invalid connection will never become active, so
+        // stop instead of polling until the timeout. 5xx stays transient.
+        if (res.status === 400 || res.status === 404) {
+          setStatus('error');
+          setErrorMessage(typeof body.error === 'string' ? body.error : 'This connection could not be found. Reconnect it.');
+          return;
+        }
         if (body.status === 'active') {
           setStatus('active');
           // Brief pause so the user sees the success state before

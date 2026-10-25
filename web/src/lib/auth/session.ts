@@ -131,3 +131,10 @@ export function constantTimeEqual(a: string, b: string): boolean {
 
 export const SESSION_COOKIE_NAME = COOKIE_NAME;
 export const SESSION_MAX_AGE_SECONDS = Math.floor(MAX_AGE_MS / 1000);
+
+/**
+ * Marks a 401 as "this browser's session is missing or expired", so the
+ * client can tell it apart from other 401s such as a wrong password.
+ */
+export const SESSION_REQUIRED_HEADER = 'x-finadviser-session';
+export const SESSION_REQUIRED_VALUE = 'required';

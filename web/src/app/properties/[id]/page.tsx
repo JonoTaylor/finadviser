@@ -21,10 +21,13 @@ import ReceiptLongIcon from '@mui/icons-material/ReceiptLong';
 import InsightsOutlinedIcon from '@mui/icons-material/InsightsOutlined';
 import { currentTaxYear } from '@/lib/tax/ukTaxYear';
 import PageHeader from '@/components/ui/PageHeader';
+import SectionBoundary from '@/components/ui/SectionBoundary';
 import { fetchJson } from '@/lib/http/client';
 
 const fetcher = async (url: string) => {
   const response = await fetch(url);
+  // A missing property is a final answer, not a failure worth retrying.
+  if (response.status === 404) return null;
   if (!response.ok) throw new Error('The property record could not be loaded.');
   return response.json();
 };
@@ -39,7 +42,7 @@ export default function PropertyDetailPage({ params }: { params: Promise<{ id: s
 
   if (isLoading) return <Skeleton variant="rounded" height={400} />;
   if (error) return <Box><PageHeader title="Property details" /><Alert severity="warning" action={<Button size="small" onClick={() => void mutate()}>Retry</Button>}>The property record could not be loaded. Its details and financial figures are unavailable.</Alert></Box>;
-  if (!property) return <Typography>Property not found</Typography>;
+  if (!property) return <Box><PageHeader title="Property not found" description="This property does not exist. It may have been removed." /><Button component={Link} href="/properties" startIcon={<ArrowBackIcon />}>Back to Properties</Button></Box>;
 
   const handleAddValuation = async (data: { valuation: string; valuationDate: string; source: string }) => {
     await fetchJson(`/api/properties/${id}/valuations`, {
@@ -102,26 +105,30 @@ export default function PropertyDetailPage({ params }: { params: Promise<{ id: s
 
       <Grid container spacing={3}>
         <Grid size={{ xs: 12, md: 8 }}>
-          <BtlDecisionCard propertyId={propertyId} />
+          <SectionBoundary title="Buy-to-let profitability" gutterBottom><BtlDecisionCard propertyId={propertyId} /></SectionBoundary>
 
-          <TenanciesCard propertyId={propertyId} />
+          <SectionBoundary title="Tenancies" gutterBottom><TenanciesCard propertyId={propertyId} /></SectionBoundary>
 
-          <ExpensesCard propertyId={propertyId} />
+          <SectionBoundary title="Expenses" gutterBottom><ExpensesCard propertyId={propertyId} /></SectionBoundary>
 
           {property.mortgages?.map((m: { id: number; lender: string }) => (
-            <MortgageRateHistoryCard key={`rates-${m.id}`} mortgageId={m.id} lender={m.lender} />
+            <SectionBoundary key={`rates-${m.id}`} title={`${m.lender} rate history`} gutterBottom>
+              <MortgageRateHistoryCard mortgageId={m.id} lender={m.lender} />
+            </SectionBoundary>
           ))}
 
-          <ValuationHistory valuations={property.valuations ?? []} />
+          <SectionBoundary title="Valuation history" gutterBottom><ValuationHistory valuations={property.valuations ?? []} /></SectionBoundary>
         </Grid>
 
         <Grid size={{ xs: 12, md: 4 }}>
           {property.mortgages?.map((m: { id: number; lender: string; originalAmount: string; startDate: string; termMonths: number; interestOnly?: boolean }) => (
-            <MortgageCard key={m.id} mortgage={m} onChange={() => mutate()} />
+            <SectionBoundary key={m.id} title={`${m.lender} mortgage`} gutterBottom>
+              <MortgageCard mortgage={m} onChange={() => mutate()} />
+            </SectionBoundary>
           ))}
 
           {property.mortgages?.length > 0 && (
-            <MortgageInterestSummary propertyId={propertyId} />
+            <SectionBoundary title="Mortgage interest" gutterBottom><MortgageInterestSummary propertyId={propertyId} /></SectionBoundary>
           )}
 
           <Stack direction="row" spacing={1} sx={{ mt: 2 }} flexWrap="wrap" useFlexGap>
